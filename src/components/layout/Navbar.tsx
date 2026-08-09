@@ -11,8 +11,8 @@ const NAV = [
   { to: "/flags", label: "Flags" },
   { to: "/capitals", label: "Capitals" },
   { to: "/speed", label: "Speed" },
-  { to: "/progress", label: "Progress" },
   { to: "/challenges", label: "Challenges" },
+  { to: "/progress", label: "Progress" },
 ] as const;
 
 function OrbitalLogo() {

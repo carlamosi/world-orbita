@@ -63,10 +63,12 @@ function scorePassword(p: string): { score: number; label: string } {
 function friendlyAuthMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "Authentication failed");
   if (/invalid login credentials/i.test(message)) return "Email or password is incorrect.";
-  if (/email not confirmed/i.test(message)) return "Confirm your email before signing in.";
+  if (/email not confirmed/i.test(message)) return "__EMAIL_NOT_CONFIRMED__";
   if (/already registered|already been registered|user already/i.test(message)) return "This email already has an account. Try signing in instead.";
   if (/password/i.test(message) && /weak|pwned|compromised/i.test(message)) return "Choose a stronger password that has not appeared in a data breach.";
   if (/rate limit|too many/i.test(message)) return "Too many attempts. Wait a moment and try again.";
+  if (/provider is not enabled|unsupported provider/i.test(message)) return "Google sign-in is not configured yet. Use email and password to sign in.";
+  if (/oauth/i.test(message)) return "Google sign-in failed. Please try again or use email and password.";
   return message;
 }
 
@@ -134,7 +136,17 @@ function AuthPage() {
       if (mode === "signin") {
         authDebug("signin:start", { emailDomain: email.split("@")[1] ?? null });
         const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (error) throw error;
+        if (error) {
+          const msg = friendlyAuthMessage(error);
+          // Special case: email not confirmed — offer direct resend flow
+          if (msg === "__EMAIL_NOT_CONFIRMED__") {
+            setSubmittedEmail(email.trim());
+            setNotice({ tone: "info", message: "You need to confirm your email before signing in. Check your inbox, or resend below." });
+            setMode("check-email");
+            return;
+          }
+          throw error;
+        }
         authDebug("signin:success", { userId: data.user?.id, hasSession: !!data.session });
         if (data.user) await ensureUserProfile(data.user);
         toast.success("Welcome back");
@@ -174,9 +186,10 @@ function AuthPage() {
       }
     } catch (err) {
       const message = friendlyAuthMessage(err);
-      authDebug("submit:failed", { mode, error: message });
-      setNotice({ tone: "error", message });
-      toast.error(message);
+      const display = message === "__EMAIL_NOT_CONFIRMED__" ? "Please confirm your email before signing in." : message;
+      authDebug("submit:failed", { mode, error: display });
+      setNotice({ tone: "error", message: display });
+      toast.error(display);
     } finally {
       setBusy(false);
     }
@@ -296,29 +309,30 @@ function AuthPage() {
             email={submittedEmail || email}
             busy={busy}
             onResend={async () => {
-              if (!password || !email) {
+              const target = submittedEmail || email;
+              if (!target) {
                 setMode("signup");
                 return;
               }
               setBusy(true);
               setNotice(null);
               try {
-                authDebug("signup resend:start", { emailDomain: email.split("@")[1] ?? null });
-                const { error } = await supabase.auth.signUp({
-                  email: email.trim(),
-                  password,
-                  options: {
-                    emailRedirectTo: `${window.location.origin}/auth`,
-                    data: { display_name: name.trim() },
-                  },
+                authDebug("resend confirmation:start", { emailDomain: target.split("@")[1] ?? null });
+                // Use the dedicated resend API — does NOT create a second user row
+                const { error } = await supabase.auth.resend({
+                  type: "signup",
+                  email: target,
+                  options: { emailRedirectTo: `${window.location.origin}/auth` },
                 });
                 if (error) throw error;
+                authDebug("resend confirmation:sent");
                 setNotice({ tone: "success", message: "Confirmation email sent again. Check your inbox and spam folder." });
                 toast.success("Confirmation email sent");
               } catch (err) {
                 const message = friendlyAuthMessage(err);
-                setNotice({ tone: "error", message });
-                toast.error(message);
+                const display = message === "__EMAIL_NOT_CONFIRMED__" ? "Please confirm your email first." : message;
+                setNotice({ tone: "error", message: display });
+                toast.error(display);
               } finally {
                 setBusy(false);
               }
@@ -328,6 +342,7 @@ function AuthPage() {
               setMode("signin");
             }}
           />
+
         ) : (
           <>
         {mode !== "forgot" && (
