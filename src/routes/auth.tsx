@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Eye, EyeOff, Loader2, Mail, Lock, ArrowLeft, Check, User as UserIcon } from "lucide-react";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable";
+import { orbitaAuth } from "@/integrations/lovable";
 import { useAuth } from "@/hooks/useAuth";
 import { authDebug } from "@/lib/auth/debug";
 import { ensureUserProfile } from "@/lib/auth/profile";
@@ -185,7 +185,7 @@ function AuthPage() {
     setNotice(null);
     try {
       authDebug("oauth google:start");
-      const result = await lovable.auth.signInWithOAuth("google", {
+      const result = await orbitaAuth.auth.signInWithOAuth("google", {
         redirect_uri: window.location.origin,
         extraParams: { prompt: "select_account" },
       });
