@@ -78,10 +78,14 @@ function AccountPage() {
           Identity
         </h2>
         <div className="mt-3 text-sm text-white/85">
-          <div className="font-display text-2xl text-white tracking-tight">
-            {displayName}
+          <div className="font-display text-2xl text-white tracking-tight flex items-center gap-2">
+            {profileQ.isLoading ? (
+              <span className="inline-block h-8 w-32 animate-pulse rounded bg-white/10" />
+            ) : (
+              displayName
+            )}
           </div>
-          <div className="text-[12px] text-white/55 mt-1">{user?.email}</div>
+          <div className="text-[12px] text-white/55 mt-2">{user?.email}</div>
           <div className="text-[10px] font-mono text-white/35 mt-2">
             User ID: {user?.id}
           </div>
