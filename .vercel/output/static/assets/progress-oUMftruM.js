@@ -1,2 +1,0 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/ProgressPage-BdyjBq3b.js","assets/index-DjlOn6wK.js","assets/dexie-react-hooks-DUVTlYWj.js","assets/orbita-db-B04Z0L1O.js","assets/motion-Cd8Co-BW.js","assets/FlagImage-Xe2KqADS.js","assets/unlocks-DzplfFex.js"])))=>i.map(i=>d[i]);
-import{j as o,r as s,_ as t}from"./index-DjlOn6wK.js";const e=s.lazy(()=>t(()=>import("./ProgressPage-BdyjBq3b.js"),__vite__mapDeps([0,1,2,3,4,5,6]))),a=()=>o.jsx(s.Suspense,{fallback:null,children:o.jsx(e,{})});export{a as component};

@@ -1,1 +1,0 @@
-import{r as d}from"./index-DjlOn6wK.js";function n({answerState:o,finished:r,next:t,correctDelayMs:u=900,wrongDelayMs:i=1500,enabled:c=!0}){d.useEffect(()=>{if(!c||r||o==="idle")return;const e=o==="correct"?u:i,f=window.setTimeout(()=>t(),e);return()=>window.clearTimeout(f)},[o,r,t,u,i,c])}export{n as u};
