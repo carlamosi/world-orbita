@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Skill } from "@/lib/db/orbita-db";
@@ -189,24 +189,34 @@ function ChallengeRunner({
     return shuffle([current.country, ...others]);
   }, [current]);
 
-  // Finalize on completion
+  // Keep a live ref to `active` so the finalization effect always reads the
+  // latest snapshot without adding `active` to its dep array (which would
+  // cause recordSessionEnd to fire on every state update after finishing).
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
+  // Fire recordSessionEnd exactly once when the challenge is truly done.
+  const recorded = useRef(false);
   useEffect(() => {
-    if (!finished || active.answerState !== "idle") return;
+    if (!finished || recorded.current) return;
+    // Wait one tick so the final setActive (answerState: "idle") has flushed.
+    const a = activeRef.current;
+    if (a.answerState !== "idle") return;
+    recorded.current = true;
     const endedAt = Date.now();
     recordSessionEnd({
-      mode: active.set.kind === "daily" ? "challenge_daily" : "challenge_weekly",
+      mode: a.set.kind === "daily" ? "challenge_daily" : "challenge_weekly",
       skill: "mixed",
-      score: active.score,
-      totalQuestions: active.set.items.length,
-      correct: active.correct,
-      wrong: active.wrong,
-      bestCombo: active.bestCombo,
-      durationMs: endedAt - active.startedAt,
+      score: a.score,
+      totalQuestions: a.set.items.length,
+      correct: a.correct,
+      wrong: a.wrong,
+      bestCombo: a.bestCombo,
+      durationMs: endedAt - a.startedAt,
       createdAt: endedAt,
-      periodKey: active.set.periodKey,
+      periodKey: a.set.periodKey,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finished]);
+  }, [finished, active.answerState]);
 
   if (finished) {
     const acc =
