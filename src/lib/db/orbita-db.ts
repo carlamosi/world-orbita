@@ -241,13 +241,18 @@ export class OrbitaDB extends Dexie {
     this.version(5).stores({
       concept_progress: "conceptId, [user_id+skill], fsrs_due, dirty, updated_at",
     });
+
+    // v6: re-add standalone skill index because the game engine queries it directly
+    this.version(6).stores({
+      concept_progress: "conceptId, [user_id+skill], skill, fsrs_due, dirty, updated_at",
+    });
   }
 }
 
 export function createOrbitaDb(name: string): OrbitaDB {
   const d = new OrbitaDB(name);
   d.meta
-    .put({ id: "meta", schemaVersion: 3, lastOpenedAt: Date.now(), prefs: {} })
+    .put({ id: "meta", schemaVersion: 6, lastOpenedAt: Date.now(), prefs: {} })
     .catch(() => {});
   return d;
 }
