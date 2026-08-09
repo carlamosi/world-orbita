@@ -3,9 +3,17 @@
  * They are explicitly fire-and-forget — failures never propagate to gameplay.
  */
 import { db } from "@/lib/db/orbita-db";
+import { currentDbName } from "@/lib/db/dbProvider";
 import { syncPush, syncPull } from "./sync.functions";
 import { useSyncStore } from "./useSyncStore";
 import type { Mutation, SyncEntity } from "./types";
+
+/** Derive the Supabase user_id from the active Dexie DB name. Returns null for guest DB. */
+function activeUserId(): string | null {
+  const name = currentDbName();
+  if (name === "orbita-local") return null;
+  return name.replace(/^orbita-/, "") || null;
+}
 
 const MAX_ATTEMPTS = 10;
 const BATCH = 50;
@@ -114,6 +122,7 @@ export async function runPushOnce() {
               conceptId: String(row.conceptId),
               iso3: String(row.iso3),
               skill: String(row.skill),
+              user_id: activeUserId(),
               fsrs_state: String(row.fsrs_state) as import("@/lib/fsrs/engine").FsrsStateStr,
               fsrs_stability: row.fsrs_stability != null ? Number(row.fsrs_stability) : null,
               fsrs_difficulty: row.fsrs_difficulty != null ? Number(row.fsrs_difficulty) : null,
@@ -216,6 +225,7 @@ async function runPullOnce() {
             .catch(() => {});
         }
       } else if (entity === "concept_progress") {
+        const uid = activeUserId();
         for (const r of rows) {
           const row = r as Record<string, unknown>;
           const conceptId = String(row.conceptId);
@@ -228,6 +238,7 @@ async function runPullOnce() {
                 conceptId,
                 iso3: String(row.iso3),
                 skill: String(row.skill),
+                user_id: uid,
                 fsrs_state: String(row.fsrs_state) as import("@/lib/fsrs/engine").FsrsStateStr,
                 fsrs_stability: row.fsrs_stability != null ? Number(row.fsrs_stability) : null,
                 fsrs_difficulty: row.fsrs_difficulty != null ? Number(row.fsrs_difficulty) : null,
