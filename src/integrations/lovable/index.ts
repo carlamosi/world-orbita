@@ -1,4 +1,4 @@
-﻿/**
+/**
  * orbita-auth.ts
  *
  * Native Supabase OAuth wrapper — no Lovable dependency.
@@ -6,7 +6,7 @@
  */
 import { supabase } from "../supabase/client";
 
-type OAuthProvider = "google" | "apple" | "microsoft";
+type OAuthProvider = "google" | "apple" | "github" | "twitter";
 
 type SignInOptions = {
   redirect_uri?: string;

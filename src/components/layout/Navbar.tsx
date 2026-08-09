@@ -66,7 +66,7 @@ export function Navbar() {
             Orbita
           </span>
         </Link>
-        <div className="ml-2 hidden md:flex items-center gap-1 overflow-x-auto">
+        <div className="ml-2 flex items-center gap-1 overflow-x-auto no-scrollbar">
           {NAV.map((item) => {
             const active = pathname.startsWith(item.to);
             return (

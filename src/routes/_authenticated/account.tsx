@@ -57,7 +57,7 @@ function AccountPage() {
       const { swap } = await import("@/lib/db/dbProvider");
       await swap(null);
       toast.success("Your account has been deleted.");
-      router.navigate({ to: "/auth", replace: true });
+      router.navigate({ to: "/auth", search: {}, replace: true });
     } catch (e) {
       setDeleting(false);
       toast.error(

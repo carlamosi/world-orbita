@@ -80,6 +80,7 @@ function ResetPasswordPage() {
       >
         <Link
           to="/auth"
+          search={{}}
           className="inline-flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="size-3.5" />

@@ -11,9 +11,11 @@ import { ensureUserProfile } from "@/lib/auth/profile";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/auth")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    mode: search.mode === "signup" || search.mode === "signin" ? search.mode : undefined,
-  }),
+  validateSearch: (search: Record<string, unknown>): { mode?: "signup" | "signin" } => {
+    const mode = search.mode === "signup" || search.mode === "signin" ? search.mode : undefined;
+    if (mode) return { mode };
+    return {};
+  },
   head: () => ({
     meta: [
       { title: "Sign in · Orbita" },
@@ -186,7 +188,7 @@ function AuthPage() {
     try {
       authDebug("oauth google:start");
       const result = await orbitaAuth.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin,
+        redirect_uri: `${window.location.origin}/auth`,
         extraParams: { prompt: "select_account" },
       });
       if (result.error) {
@@ -515,7 +517,7 @@ function AuthPage() {
             )}
           </div>
 
-          {mode !== "forgot" && mode !== "check-email" && (
+          {mode !== "forgot" && (
             <>
               <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-muted-foreground/60">
                 <span className="h-px flex-1 bg-white/10" />
