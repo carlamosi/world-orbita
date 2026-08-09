@@ -397,7 +397,7 @@ begin
   cur := coalesce((_cursors->>'profiles')::timestamptz, 'epoch'::timestamptz);
   select coalesce(jsonb_agg(to_jsonb(t.*) order by t.updated_at asc), '[]'::jsonb), max(updated_at)
     into rows_json, new_cursor
-    from (select * from public.profiles where updated_at > cur order by updated_at asc limit _limit) t;
+    from (select * from public.profiles where id = uid and updated_at > cur order by updated_at asc limit _limit) t;
   result := result || jsonb_build_object('profiles', jsonb_build_object('rows', rows_json, 'cursor', coalesce(new_cursor, cur)));
 
   return result;

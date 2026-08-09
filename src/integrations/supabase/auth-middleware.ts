@@ -8,7 +8,7 @@
 //   createServerFn().middleware([requireSupabaseAuth]).handler(async ({ context }) => {
 //     context.supabase  // authenticated Supabase client (RLS-scoped to user)
 //     context.userId    // string UUID
-//     context.claims    // JWT payload
+//     context.user      // Supabase User object
 //   })
 
 import { createMiddleware } from "@tanstack/react-start";

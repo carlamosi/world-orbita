@@ -91,14 +91,15 @@ export async function runPushOnce() {
           await db().outbox.update(r.id!, { status: "pending" } as Partial<typeof r>);
         }
       }
-      // apply canonical patches (country_progress only at the moment)
+      // apply canonical patches from server (conflict resolution)
       for (const c of result.canonical) {
-        if (c.entity === "country_progress") {
-          const row = c.row as Record<string, unknown>;
-          const iso3 = String(row.country_code);
-          const skills = (row.skills ?? {}) as Record<string, unknown>;
-          const versions = (row.skill_versions ?? {}) as Record<string, number>;
-          try {
+        const row = (c as Record<string, unknown>).payload as Record<string, unknown> | undefined;
+        if (!row) continue;
+        try {
+          if (c.entity === "country_progress") {
+            const iso3 = String(row.country_code);
+            const skills = (row.skills ?? {}) as Record<string, unknown>;
+            const versions = (row.skill_versions ?? {}) as Record<string, number>;
             const existing = await db().countryProgress.get(iso3);
             await db().countryProgress.put({
               iso3,
@@ -108,9 +109,25 @@ export async function runPushOnce() {
               updated_at: Date.now(),
               dirty: 0,
             });
-          } catch {
-            // ignore
+          } else if (c.entity === "concept_progress") {
+            await db().concept_progress.put({
+              conceptId: String(row.conceptId),
+              iso3: String(row.iso3),
+              skill: String(row.skill),
+              fsrs_state: String(row.fsrs_state) as import("@/lib/fsrs/engine").FsrsStateStr,
+              fsrs_stability: row.fsrs_stability != null ? Number(row.fsrs_stability) : null,
+              fsrs_difficulty: row.fsrs_difficulty != null ? Number(row.fsrs_difficulty) : null,
+              fsrs_due: Number(row.fsrs_due),
+              fsrs_reps: Number(row.fsrs_reps ?? 0),
+              fsrs_lapses: Number(row.fsrs_lapses ?? 0),
+              fsrs_last_review: Number(row.fsrs_last_review),
+              version: Number(row.version ?? 0),
+              updated_at: Number(row.updated_at ?? Date.now()),
+              dirty: 0,
+            });
           }
+        } catch {
+          // ignore — canonical patches are best-effort
         }
       }
       useSyncStore.getState().setLastPush(Date.now());
@@ -197,6 +214,51 @@ async function runPullOnce() {
               updatedAt: Date.now(),
             })
             .catch(() => {});
+        }
+      } else if (entity === "concept_progress") {
+        for (const r of rows) {
+          const row = r as Record<string, unknown>;
+          const conceptId = String(row.conceptId);
+          // Only apply if the server version is newer than local
+          const local = await db().concept_progress.get(conceptId).catch(() => undefined);
+          const serverVersion = Number(row.version ?? 0);
+          if (!local || serverVersion > (local.version ?? 0)) {
+            await db()
+              .concept_progress.put({
+                conceptId,
+                iso3: String(row.iso3),
+                skill: String(row.skill),
+                fsrs_state: String(row.fsrs_state) as import("@/lib/fsrs/engine").FsrsStateStr,
+                fsrs_stability: row.fsrs_stability != null ? Number(row.fsrs_stability) : null,
+                fsrs_difficulty: row.fsrs_difficulty != null ? Number(row.fsrs_difficulty) : null,
+                fsrs_due: Number(row.fsrs_due),
+                fsrs_reps: Number(row.fsrs_reps ?? 0),
+                fsrs_lapses: Number(row.fsrs_lapses ?? 0),
+                fsrs_last_review: Number(row.fsrs_last_review),
+                version: serverVersion,
+                updated_at: Number(row.updated_at ?? Date.now()),
+                dirty: 0,
+              })
+              .catch(() => {});
+          }
+        }
+      } else if (entity === "daily_summary") {
+        for (const r of rows) {
+          const row = r as Record<string, unknown>;
+          const dateKey = String(row.dateKey);
+          const local = await db().daily_summary.get(dateKey).catch(() => undefined);
+          if (!local || (local.dirty !== 1)) {
+            await db()
+              .daily_summary.put({
+                dateKey,
+                reviewsCount: Number(row.reviewsCount ?? 0),
+                correctCount: Number(row.correctCount ?? 0),
+                timeSpentMs: Number(row.timeSpentMs ?? 0),
+                updated_at: Number(row.updated_at ?? Date.now()),
+                dirty: 0,
+              })
+              .catch(() => {});
+          }
         }
       }
       // sessions_log / challenge_attempts / daily_streak / profiles are append-only;

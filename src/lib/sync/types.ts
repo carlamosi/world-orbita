@@ -19,7 +19,7 @@ export interface Mutation {
 export interface PushResult {
   accepted: string[];
   rejected: { op_id: string; reason: string }[];
-  canonical: { entity: SyncEntity; row: Record<string, unknown> }[];
+  canonical: { entity: SyncEntity; op_id: string; payload: Record<string, unknown> }[];
 }
 
 export interface PullEntityResult {
