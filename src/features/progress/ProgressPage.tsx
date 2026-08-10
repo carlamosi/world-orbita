@@ -321,7 +321,7 @@ function MasteryStability({
             Mastery stability
           </h2>
           <p className="mt-1 text-[13px] text-white/55">
-            Long-term retention from SM-2 spaced repetition. Higher = items are
+            Long-term retention powered by FSRS-6 spaced repetition. Higher = items are
             sticking; due/overdue = ready for review.
           </p>
         </div>

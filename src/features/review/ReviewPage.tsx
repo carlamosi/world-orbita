@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { COUNTRIES } from "@/lib/countries";
+import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
+import type { Country } from "@/types/country";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
+import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
@@ -12,6 +14,15 @@ import { db, type ConceptProgressRow, ALL_SKILLS } from "@/lib/db/orbita-db";
 import { generateDueTodayQueue } from "@/lib/fsrs/planner";
 import { spring, fadeUp } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+
+function shuffleArray<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j]!, arr[i]!];
+  }
+  return arr;
+}
 
 /* The session store: mode = "find" is a placeholder for the mixed session.
    FSRS updates are written per-card using the actual skill from conceptQueue. */
@@ -99,6 +110,23 @@ export default function ReviewPage() {
   const skillLabel = SKILL_LABELS[skill] ?? skill;
   const skillColor = SKILL_COLORS[skill] ?? SKILL_COLORS.flag;
 
+  // Generate 4 active multiple-choice options per question
+  const options: Country[] = useMemo(() => {
+    if (!current) return [];
+    const distractors = pickRandomCountries(3, new Set([current.iso3]), current.continent);
+    return shuffleArray([current, ...distractors]);
+  }, [current]);
+
+  const hotkeyItems = useMemo(
+    () => (s.answerState === "idle" ? options.map((o: Country) => ({ id: o.iso3 })) : []),
+    [options, s.answerState],
+  );
+  const onHotkey = useCallback(
+    (id: string) => current && s.answerState === "idle" && s.submit(id === current.iso3),
+    [current, s],
+  );
+  useAnswerHotkeys(hotkeyItems, onHotkey);
+
   const question = useMemo(() => {
     if (!current) return null;
     switch (skill) {
@@ -114,8 +142,8 @@ export default function ReviewPage() {
         return {
           prompt: `What's the capital of ${current.name}?`,
           visual: (
-            <div className="flex flex-col items-center gap-3 py-8">
-              <div className="font-display text-6xl md:text-7xl font-bold text-white/90 tracking-tight text-center">
+            <div className="flex flex-col items-center gap-3 py-6">
+              <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
                 {current.name}
               </div>
               <div className="font-mono text-xs uppercase tracking-widest text-white/30">{current.continent}</div>
@@ -128,10 +156,10 @@ export default function ReviewPage() {
       case "location":
       default:
         return {
-          prompt: "Name this country",
+          prompt: "Identify this country",
           visual: (
-            <div className="flex flex-col items-center gap-3 py-8">
-              <div className="font-display text-6xl md:text-7xl font-bold text-white/90 tracking-tight text-center">
+            <div className="flex flex-col items-center gap-3 py-6">
+              <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
                 {current.name}
               </div>
               <div className="font-mono text-xs uppercase tracking-widest text-white/30">{current.continent}</div>
@@ -169,7 +197,6 @@ export default function ReviewPage() {
           animate="show"
           className="flex flex-col items-center gap-6 text-center max-w-sm"
         >
-          {/* Orbital pulse */}
           <div className="relative size-20">
             <div className="absolute inset-0 rounded-full bg-[color:var(--neon)]/20 animate-ping" style={{ animationDuration: "2.4s" }} />
             <div className="relative size-full rounded-full bg-gradient-to-br from-[color:var(--neon)]/30 to-[color:var(--cyan)]/20 flex items-center justify-center">
@@ -264,44 +291,33 @@ export default function ReviewPage() {
               {question.visual}
             </motion.div>
 
-            {/* Answer area: show the answer text after answered */}
-            {s.answerState !== "idle" && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={cn(
-                  "glass rounded-2xl px-6 py-4 text-center",
-                  s.answerState === "correct"
-                    ? "border-[color:var(--neon)]/40"
-                    : "border-rose-500/30"
-                )}
-              >
-                <div className="font-display text-2xl text-white tracking-tight">{question.answer}</div>
-                <div className="mt-1 font-mono text-xs text-white/40">{question.subtitle}</div>
-              </motion.div>
-            )}
+            {/* 4 Active Multiple-Choice Options — objective binary answer evaluation */}
+            <div className="w-full max-w-xl grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+              {options.map((opt: Country, idx: number) => {
+                const label = skill === "capital" ? (opt.capital ?? opt.name) : opt.name;
+                const isSelected = s.answerState !== "idle" && opt.iso3 === current.iso3;
+                const isWrongSelection = s.answerState === "wrong";
 
-            {/* Self-grade buttons for review cards (not a standard MC quiz) */}
-            {s.answerState === "idle" && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="w-full max-w-sm grid grid-cols-2 gap-3"
-              >
-                <button
-                  onClick={() => s.submit(false)}
-                  className="glass rounded-2xl px-4 py-3 text-sm font-medium text-rose-300 border-rose-500/20 hover:bg-rose-500/10 hover:-translate-y-0.5 transition-all"
-                >
-                  Forgot it
-                </button>
-                <button
-                  onClick={() => s.submit(true)}
-                  className="glass rounded-2xl px-4 py-3 text-sm font-medium text-[color:var(--neon)] border-[color:var(--neon)]/20 hover:bg-[color:var(--neon)]/10 hover:-translate-y-0.5 transition-all"
-                >
-                  Got it ✓
-                </button>
-              </motion.div>
-            )}
+                return (
+                  <motion.button
+                    key={opt.iso3}
+                    whileHover={s.answerState === "idle" ? { scale: 1.02 } : {}}
+                    whileTap={s.answerState === "idle" ? { scale: 0.98 } : {}}
+                    disabled={s.answerState !== "idle"}
+                    onClick={() => s.submit(opt.iso3 === current.iso3)}
+                    className={cn(
+                      "glass rounded-2xl p-4 text-left font-display font-medium text-base text-white/90 transition-all flex items-center justify-between border",
+                      s.answerState === "idle" && "hover:bg-white/10 hover:border-white/20 active:bg-white/15",
+                      isSelected && "border-[color:var(--neon)] bg-[color:var(--neon)]/15 text-white shadow-[0_0_20px_rgba(0,255,180,0.2)]",
+                      isWrongSelection && opt.iso3 === current.iso3 && "border-emerald-500 bg-emerald-500/15 text-emerald-300"
+                    )}
+                  >
+                    <span className="truncate">{label}</span>
+                    <span className="font-mono text-xs text-white/30 ml-2">[{idx + 1}]</span>
+                  </motion.button>
+                );
+              })}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -323,3 +339,4 @@ export default function ReviewPage() {
     </div>
   );
 }
+
