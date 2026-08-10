@@ -3,10 +3,11 @@ import { COUNTRIES } from "@/lib/countries";
 import type { Country } from "@/types/country";
 import { generateSessionQueue } from "@/lib/fsrs/planner";
 import { assess } from "@/lib/fsrs/assessment";
-import { updateFsrs } from "@/lib/fsrs/engine";
+import { rowToCard, cardToRowUpdates, processReview } from "@/lib/fsrs/adapter";
 import { recordConceptAttempt } from "@/lib/db/progressRepo";
 import { db, type ConceptProgressRow, type GameMode, type Skill } from "@/lib/db/orbita-db";
 import { recordSessionEnd } from "@/lib/db/repo";
+import { State } from "ts-fsrs";
 
 export type AnswerState = "idle" | "correct" | "wrong" | "revealed";
 export const QUESTIONS_PER_SESSION = 20;
@@ -104,7 +105,7 @@ export function createSessionStore({
         // Due Today / pre-built mode: skip the planner, use the caller's queue directly.
         const isoToCountry = new Map(COUNTRIES.map(c => [c.iso3, c]));
         cq = opts.conceptRows;
-        q = cq.map(c => isoToCountry.get(c.iso3)!).filter(Boolean);
+        q = cq.map(c => (c ? isoToCountry.get(c.iso3) : null)).filter((c): c is Country => c != null);
       } else if (opts?.allCountries && opts.allCountries.length > 0) {
         // Complete Continent mode: use the pre-built shuffled array directly.
         q = [...opts.allCountries];
@@ -134,7 +135,7 @@ export function createSessionStore({
                 conceptId: `${c.iso3}:${skill}`,
                 iso3: c.iso3,
                 skill,
-                fsrs_state: "new",
+                fsrs_state: State.New as any,
                 fsrs_stability: null,
                 fsrs_difficulty: null,
                 fsrs_due: 0,
@@ -198,64 +199,54 @@ export function createSessionStore({
         set({ combo: 0, wrong: s.wrong + 1, answerState: "wrong" });
       }
       
-      // Integrate FSRS Assessment and Write
-      if (targetConcept) {
-        const now = Date.now();
-        const overdueMs = Math.max(0, now - targetConcept.fsrs_due);
-        const grade = assess({
-          validationResult: { correct: isCorrect, softCorrect: false }, // we can refine softCorrect later for maps
-          responseMs,
-          attemptNumber: 1, // multiple attempts logic can be expanded later
-          hintsUsed: 0,
-          questionType: skill,
-          memoryState: null,
-          overdueMs
-        });
-        
-        const currentFsrs = {
-          state: targetConcept.fsrs_state,
-          stability: targetConcept.fsrs_stability,
-          difficulty: targetConcept.fsrs_difficulty,
-          due: targetConcept.fsrs_due,
-          lastReviewAt: targetConcept.fsrs_last_review,
-          reps: targetConcept.fsrs_reps,
-          lapses: targetConcept.fsrs_lapses,
-          learningStep: 0, // transient
-          lastGrade: null,
-        };
-        
-        const nextFsrs = updateFsrs(currentFsrs, grade, now);
-        
-        const updatedProgressRow: ConceptProgressRow = {
-          ...targetConcept,
-          fsrs_state: nextFsrs.state,
-          fsrs_stability: nextFsrs.stability,
-          fsrs_difficulty: nextFsrs.difficulty,
-          fsrs_due: nextFsrs.due,
-          fsrs_last_review: nextFsrs.lastReviewAt,
-          fsrs_reps: nextFsrs.reps,
-          fsrs_lapses: nextFsrs.lapses,
-          version: targetConcept.version + 1,
-          dirty: 1,
-          updated_at: now
-        };
-        
-        recordConceptAttempt(
-          updatedProgressRow,
-          {
-            op_id: crypto.randomUUID(),
-            conceptId: targetConcept.conceptId,
-            sessionId: "session-" + s.startedAt,
-            grade,
+      // FSRS — process via official adapter (ts-fsrs)
+        if (targetConcept) {
+          const now = Date.now();
+          // Step 1: Evaluate the answer (behavioral signals, pure)
+          const assessment = assess({
+            validationResult: { correct: isCorrect, softCorrect: false },
             responseMs,
-            correct: isCorrect,
-            answeredAt: now
-          }
-        ).catch(console.error);
-        
-        // Mutate the local queue item so any next() sees the updated state (if needed)
-        s.conceptQueue[s.index] = updatedProgressRow;
-      }
+            attemptNumber: 1,
+            hintsUsed: 0,
+            questionType: skill,
+            retrievalMode: "easy", // caller can pass this in via opts later
+            direction: `${skill}->answer`,
+          });
+
+          // Step 2: Process through official FSRS-6 (adapter → ts-fsrs.next())
+          const currentCard = rowToCard(targetConcept);
+          const { card: nextCard, log: fsrsLog } = processReview(
+            currentCard,
+            assessment.outcome,
+            now,
+          );
+
+          // Step 3: Apply card updates back to the row
+          const updatedProgressRow: ConceptProgressRow = {
+            ...targetConcept,
+            ...cardToRowUpdates(nextCard, 1, true, targetConcept.version),
+          };
+
+          // Step 4: Persist — idempotent via op_id; fsrs_log stored for audit
+          recordConceptAttempt(
+            updatedProgressRow,
+            {
+              op_id: crypto.randomUUID(),
+              conceptId: targetConcept.conceptId,
+              sessionId: "session-" + s.startedAt,
+              grade: assessment.outcome === "incorrect" ? 0 : assessment.outcome === "ambiguous" ? 1 : 2,
+              mode: assessment.retrievalMode,
+              direction: assessment.direction,
+              fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
+              responseMs,
+              correct: isCorrect,
+              answeredAt: now,
+            },
+          ).catch(console.error);
+
+          // Step 5: Optimistic local update (no network wait)
+          s.conceptQueue[s.index] = updatedProgressRow;
+        }
     },
 
     reveal() {

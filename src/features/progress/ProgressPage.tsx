@@ -10,6 +10,8 @@ import { dateKey, currentStreak, longestStreak } from "@/lib/streak";
 import { DEFINITIONS } from "@/lib/unlocks";
 import { cn } from "@/lib/utils";
 import { retention, isDue, isOverdue } from "@/lib/spacedRepetition";
+import { normalizeState } from "@/lib/fsrs/adapter";
+import { State } from "ts-fsrs";
 
 const CONTINENTS = ["Africa", "Americas", "Asia", "Europe", "Oceania"] as const;
 
@@ -30,7 +32,7 @@ export default function ProgressPage() {
     const byIso = new Map<string, number>();
     const byIsoMastered = new Map<string, number>();
     for (const p of conceptProgress) {
-      if (p.fsrs_state === "new") continue;
+      if (normalizeState(p.fsrs_state) === State.New) continue;
       byIso.set(p.iso3, (byIso.get(p.iso3) ?? 0) + 1);
       
       const elapsedDays = Math.max(0, (Date.now() - p.fsrs_last_review) / 86400000);
@@ -184,7 +186,7 @@ export default function ProgressPage() {
               const grouped = new Map<string, number[]>();
               
               for (const p of conceptProgress) {
-                if (p.fsrs_state === "new") continue;
+                if (normalizeState(p.fsrs_state) === State.New) continue;
                 const arr = grouped.get(p.iso3) || [];
                 const r = p.fsrs_stability ? retrievability(p.fsrs_stability, Math.max(0, (Date.now() - p.fsrs_last_review) / 86400000)) : 0;
                 arr.push(r);
@@ -258,7 +260,7 @@ function MasteryStability({
       });
 
     for (const row of progress) {
-      if (row.fsrs_state === "new") continue;
+      if (normalizeState(row.fsrs_state) === State.New) continue;
       
       const sk = row.skill as Skill;
       const p = perSkill.get(sk);
@@ -268,7 +270,7 @@ function MasteryStability({
       p.seen++;
       
       let r = 0;
-      if (row.fsrs_state === "review" && row.fsrs_stability) {
+      if (normalizeState(row.fsrs_state) === State.Review && row.fsrs_stability) {
         const elapsedDays = Math.max(0, (now - row.fsrs_last_review) / 86400000);
         r = retrievability(row.fsrs_stability, elapsedDays);
         
@@ -462,7 +464,7 @@ function HeroStat({
 function ConfidenceMap({ progress }: { progress: ConceptProgressRow[] }) {
   const grouped = new Map<string, number[]>();
   for (const p of progress) {
-    if (p.fsrs_state === "new") continue;
+    if (normalizeState(p.fsrs_state) === State.New) continue;
     const r = p.fsrs_stability ? retrievability(p.fsrs_stability, Math.max(0, (Date.now() - p.fsrs_last_review) / 86400000)) : 0.1;
     const arr = grouped.get(p.iso3) || [];
     arr.push(r);
@@ -473,9 +475,6 @@ function ConfidenceMap({ progress }: { progress: ConceptProgressRow[] }) {
     const rs = grouped.get(c.iso3) || [];
     const avg = rs.length > 0 ? rs.reduce((a, b) => a + b, 0) / rs.length : 0;
     return { c, avg };
-  }).sort((a, b) => {
-    if (a.c.continent !== b.c.continent) return a.c.continent.localeCompare(b.c.continent);
-    return a.c.name.localeCompare(b.c.name);
   });
 
   return (
@@ -518,7 +517,7 @@ function SkillPanel({
   progress: ConceptProgressRow[];
 }) {
   const rows = progress
-    .filter((p) => p.skill === skill && p.fsrs_state !== "new")
+    .filter((p) => p.skill === skill && normalizeState(p.fsrs_state) !== State.New)
     .map((p) => {
       const r = p.fsrs_stability ? retrievability(p.fsrs_stability, Math.max(0, (Date.now() - p.fsrs_last_review) / 86400000)) : 0.1;
       return { iso3: p.iso3, r };

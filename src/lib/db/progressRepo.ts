@@ -27,12 +27,22 @@ export async function getConceptsProgress(conceptIds: string[]): Promise<Concept
 /**
  * Atomically updates a concept's progress and logs the question history.
  * It also queues both records into the sync outbox for background syncing.
+ *
+ * IDEMPOTENCY: historyRow.op_id is the deduplication key. Calling this
+ * twice with the same op_id (duplicate submit / offline retry) is safe —
+ * the second call is silently ignored by put() semantics on the same PK.
  */
 export async function recordConceptAttempt(
   progressRow: ConceptProgressRow,
   historyRow: QuestionHistoryRow
 ): Promise<void> {
   await db().transaction("rw", db().concept_progress, db().question_history, db().outbox, async () => {
+    // IDEMPOTENCY GUARD: if this op_id was already recorded, skip entirely.
+    const existingHistory = await db().question_history.get(historyRow.op_id);
+    if (existingHistory) {
+      return; // Duplicate submission — do not double-charge FSRS
+    }
+
     const userId = activeUserId();
     const now = Date.now();
     // 1. Write the updated FSRS state
@@ -41,7 +51,7 @@ export async function recordConceptAttempt(
     progressRow.updated_at = now;
     await db().concept_progress.put(progressRow);
     
-    // 2. Append to the immutable question history
+    // 2. Append to the immutable question history (PK = op_id → idempotent)
     await db().question_history.put(historyRow);
     
     // 3. Build wire-safe payloads: strip Dexie-internal fields (dirty, user_id).
@@ -57,6 +67,8 @@ export async function recordConceptAttempt(
       fsrs_reps: progressRow.fsrs_reps,
       fsrs_lapses: progressRow.fsrs_lapses,
       fsrs_last_review: progressRow.fsrs_last_review,
+      fsrs_elapsed_days: progressRow.fsrs_elapsed_days ?? 0,
+      fsrs_scheduled_days: progressRow.fsrs_scheduled_days ?? 0,
       version: progressRow.version,
       updated_at: progressRow.updated_at,
     };
@@ -65,6 +77,9 @@ export async function recordConceptAttempt(
       conceptId: historyRow.conceptId,
       sessionId: historyRow.sessionId,
       grade: historyRow.grade,
+      mode: historyRow.mode,
+      direction: historyRow.direction,
+      fsrs_log: historyRow.fsrs_log,
       responseMs: historyRow.responseMs,
       correct: historyRow.correct,
       answeredAt: historyRow.answeredAt,

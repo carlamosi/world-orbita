@@ -4,8 +4,9 @@ import type { Skill } from "@/lib/db/orbita-db";
 import { selectMixedQuestions } from "@/lib/mastery";
 import { recordSessionEnd } from "@/lib/db/repo";
 import { assess } from "@/lib/fsrs/assessment";
-import { updateFsrs } from "@/lib/fsrs/engine";
+import { rowToCard, cardToRowUpdates, processReview } from "@/lib/fsrs/adapter";
 import { recordConceptAttempt, getConceptProgress } from "@/lib/db/progressRepo";
+import { State } from "ts-fsrs";
 
 /**
  * Speed Runtime — decoupled from the turn-based session engine.
@@ -216,53 +217,46 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
     const responseMs = Math.max(0, Date.now() - item.shownAt);
     const now = Date.now();
     
-    getConceptProgress(`${item.country.iso3}:${item.skill}`).then((targetConcept) => {
+      getConceptProgress(`${item.country.iso3}:${item.skill}`).then((targetConcept) => {
       if (!targetConcept) return;
-      const overdueMs = Math.max(0, now - targetConcept.fsrs_due);
-      const grade = assess({
+
+      // Step 1: Evaluate the answer
+      const assessment = assess({
         validationResult: { correct: isCorrect, softCorrect: false },
         responseMs,
         attemptNumber: 1,
         hintsUsed: 0,
         questionType: item.skill,
-        memoryState: null,
-        overdueMs
+        retrievalMode: "easy",
+        direction: `${item.skill}->answer`,
       });
-      
-      const currentFsrs = {
-        state: targetConcept.fsrs_state,
-        stability: targetConcept.fsrs_stability,
-        difficulty: targetConcept.fsrs_difficulty,
-        due: targetConcept.fsrs_due,
-        lastReviewAt: targetConcept.fsrs_last_review,
-        reps: targetConcept.fsrs_reps,
-        lapses: targetConcept.fsrs_lapses,
-        learningStep: 0,
-        lastGrade: null,
-      };
-      
-      const nextFsrs = updateFsrs(currentFsrs, grade, now);
-      
-      recordConceptAttempt({
+
+      // Step 2: Process through official FSRS-6 adapter
+      const currentCard = rowToCard(targetConcept);
+      const { card: nextCard, log: fsrsLog } = processReview(
+        currentCard,
+        assessment.outcome,
+        now,
+      );
+
+      // Step 3: Merge updates back to row
+      const updatedRow = {
         ...targetConcept,
-        fsrs_state: nextFsrs.state,
-        fsrs_stability: nextFsrs.stability,
-        fsrs_difficulty: nextFsrs.difficulty,
-        fsrs_due: nextFsrs.due,
-        fsrs_last_review: nextFsrs.lastReviewAt,
-        fsrs_reps: nextFsrs.reps,
-        fsrs_lapses: nextFsrs.lapses,
-        version: targetConcept.version + 1,
-        dirty: 1,
-        updated_at: now
-      }, {
+        ...cardToRowUpdates(nextCard, 1, true, targetConcept.version),
+      };
+
+      // Step 4: Persist (idempotent op_id)
+      recordConceptAttempt(updatedRow, {
         op_id: crypto.randomUUID(),
         conceptId: targetConcept.conceptId,
         sessionId: "speed-" + s.startedAt,
-        grade,
+        grade: assessment.outcome === "incorrect" ? 0 : assessment.outcome === "ambiguous" ? 1 : 2,
+        mode: assessment.retrievalMode,
+        direction: assessment.direction,
+        fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
         responseMs,
         correct: isCorrect,
-        answeredAt: now
+        answeredAt: now,
       }).catch(console.error);
     });
 

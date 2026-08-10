@@ -7,6 +7,7 @@ import { currentDbName } from "@/lib/db/dbProvider";
 import { syncPush, syncPull } from "./sync.functions";
 import { useSyncStore } from "./useSyncStore";
 import type { Mutation, SyncEntity } from "./types";
+import { normalizeState } from "@/lib/fsrs/adapter";
 
 /** Derive the Supabase user_id from the active Dexie DB name. Returns null for guest DB. */
 function activeUserId(): string | null {
@@ -123,7 +124,7 @@ export async function runPushOnce() {
               iso3: String(row.iso3),
               skill: String(row.skill),
               user_id: activeUserId(),
-              fsrs_state: String(row.fsrs_state) as import("@/lib/fsrs/engine").FsrsStateStr,
+              fsrs_state: normalizeState(row.fsrs_state),
               fsrs_stability: row.fsrs_stability != null ? Number(row.fsrs_stability) : null,
               fsrs_difficulty: row.fsrs_difficulty != null ? Number(row.fsrs_difficulty) : null,
               fsrs_due: Number(row.fsrs_due),
@@ -239,7 +240,7 @@ async function runPullOnce() {
                 iso3: String(row.iso3),
                 skill: String(row.skill),
                 user_id: uid,
-                fsrs_state: String(row.fsrs_state) as import("@/lib/fsrs/engine").FsrsStateStr,
+                fsrs_state: normalizeState(row.fsrs_state),
                 fsrs_stability: row.fsrs_stability != null ? Number(row.fsrs_stability) : null,
                 fsrs_difficulty: row.fsrs_difficulty != null ? Number(row.fsrs_difficulty) : null,
                 fsrs_due: Number(row.fsrs_due),

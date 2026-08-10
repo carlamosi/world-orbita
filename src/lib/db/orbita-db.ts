@@ -1,6 +1,7 @@
 import Dexie, { type Table } from "dexie";
 import { ensureDb, getDbSync } from "./dbProvider";
-import type { FsrsStateStr, Grade } from "../fsrs/engine";
+import { State } from "ts-fsrs";
+import type { Grade } from "../fsrs/engine"; // ORBITA legacy grade 0-3 for UI display
 
 /**
  * ORBITA local-first store (Dexie v3 with sync support).
@@ -51,13 +52,15 @@ export interface ConceptProgressRow {
   skill: string;
   /** null = guest/local; set after sign-in for cloud sync scoping */
   user_id?: string | null;
-  fsrs_state: FsrsStateStr;
+  fsrs_state: number; // State enum from ts-fsrs (0=New, 1=Learning, 2=Review, 3=Relearning)
   fsrs_stability: number | null;
   fsrs_difficulty: number | null;
   fsrs_due: number;
   fsrs_reps: number;
   fsrs_lapses: number;
   fsrs_last_review: number;
+  fsrs_elapsed_days?: number;
+  fsrs_scheduled_days?: number;
   updated_at: number;
   version: number;
   dirty: 0 | 1;
@@ -67,7 +70,10 @@ export interface QuestionHistoryRow {
   op_id: string; // PK
   conceptId: string;
   sessionId: string;
-  grade: Grade;
+  grade: Grade; // ORBITA legacy grade, can be kept for UI but we also track FSRS metadata
+  mode: string; // Easy, Hard, etc.
+  direction: string; // Country->Capital, etc.
+  fsrs_log?: any; // Raw ts-fsrs ReviewLog serialized
   responseMs: number;
   correct: boolean;
   answeredAt: number;
@@ -252,13 +258,41 @@ export class OrbitaDB extends Dexie {
     this.version(7).stores({
       hardcore_progress: "continent, updatedAt",
     });
+
+    // v8: add indexes on question_history for mode/direction analytics;
+    //     also bump meta schemaVersion and run string→numeric state migration
+    this.version(8)
+      .stores({
+        question_history: "op_id, conceptId, answeredAt, mode, direction",
+      })
+      .upgrade(async (tx) => {
+        // Migrate legacy string fsrs_state to official ts-fsrs numeric State
+        const stateMap: Record<string, number> = {
+          new: State.New,
+          learning: State.Learning,
+          review: State.Review,
+          relearning: State.Relearning,
+        };
+        const rows = await tx.table<any>("concept_progress").toArray();
+        const updates = rows
+          .filter((r: any) => typeof r.fsrs_state === "string")
+          .map((r: any) => ({
+            ...r,
+            fsrs_state: stateMap[r.fsrs_state as string] ?? State.New,
+            fsrs_elapsed_days: r.fsrs_elapsed_days ?? 0,
+            fsrs_scheduled_days: r.fsrs_scheduled_days ?? 0,
+          }));
+        if (updates.length > 0) {
+          await tx.table("concept_progress").bulkPut(updates);
+        }
+      });
   }
 }
 
 export function createOrbitaDb(name: string): OrbitaDB {
   const d = new OrbitaDB(name);
   d.meta
-    .put({ id: "meta", schemaVersion: 7, lastOpenedAt: Date.now(), prefs: {} })
+    .put({ id: "meta", schemaVersion: 8, lastOpenedAt: Date.now(), prefs: {} })
     .catch(() => {});
   return d;
 }
