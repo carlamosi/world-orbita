@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SpeedRouteImport } from './routes/speed'
+import { Route as ReviewRouteImport } from './routes/review'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ProgressRouteImport } from './routes/progress'
 import { Route as NameRouteImport } from './routes/name'
@@ -27,6 +28,11 @@ import { Route as AuthenticatedAccountSyncRouteImport } from './routes/_authenti
 const SpeedRoute = SpeedRouteImport.update({
   id: '/speed',
   path: '/speed',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewRoute = ReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -106,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/name': typeof NameRoute
   '/progress': typeof ProgressRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/review': typeof ReviewRoute
   '/speed': typeof SpeedRoute
   '/account': typeof AuthenticatedAccountRouteWithChildren
   '/account/sync': typeof AuthenticatedAccountSyncRoute
@@ -121,6 +128,7 @@ export interface FileRoutesByTo {
   '/name': typeof NameRoute
   '/progress': typeof ProgressRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/review': typeof ReviewRoute
   '/speed': typeof SpeedRoute
   '/account': typeof AuthenticatedAccountRouteWithChildren
   '/account/sync': typeof AuthenticatedAccountSyncRoute
@@ -138,6 +146,7 @@ export interface FileRoutesById {
   '/name': typeof NameRoute
   '/progress': typeof ProgressRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/review': typeof ReviewRoute
   '/speed': typeof SpeedRoute
   '/_authenticated/account': typeof AuthenticatedAccountRouteWithChildren
   '/_authenticated/account/sync': typeof AuthenticatedAccountSyncRoute
@@ -155,6 +164,7 @@ export interface FileRouteTypes {
     | '/name'
     | '/progress'
     | '/reset-password'
+    | '/review'
     | '/speed'
     | '/account'
     | '/account/sync'
@@ -170,6 +180,7 @@ export interface FileRouteTypes {
     | '/name'
     | '/progress'
     | '/reset-password'
+    | '/review'
     | '/speed'
     | '/account'
     | '/account/sync'
@@ -186,6 +197,7 @@ export interface FileRouteTypes {
     | '/name'
     | '/progress'
     | '/reset-password'
+    | '/review'
     | '/speed'
     | '/_authenticated/account'
     | '/_authenticated/account/sync'
@@ -203,6 +215,7 @@ export interface RootRouteChildren {
   NameRoute: typeof NameRoute
   ProgressRoute: typeof ProgressRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  ReviewRoute: typeof ReviewRoute
   SpeedRoute: typeof SpeedRoute
 }
 
@@ -213,6 +226,13 @@ declare module '@tanstack/react-router' {
       path: '/speed'
       fullPath: '/speed'
       preLoaderRoute: typeof SpeedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/review': {
+      id: '/review'
+      path: '/review'
+      fullPath: '/review'
+      preLoaderRoute: typeof ReviewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset-password': {
@@ -343,6 +363,7 @@ const rootRouteChildren: RootRouteChildren = {
   NameRoute: NameRoute,
   ProgressRoute: ProgressRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  ReviewRoute: ReviewRoute,
   SpeedRoute: SpeedRoute,
 }
 export const routeTree = rootRouteImport

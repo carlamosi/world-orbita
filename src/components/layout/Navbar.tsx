@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { SyncPill } from "@/features/sync/SyncPill";
 import { AccountMenu } from "@/features/sync/AccountMenu";
+import { useDueTodayCount } from "@/hooks/useDueTodayCount";
 
 const NAV = [
   { to: "/explorer", label: "Explorer" },
@@ -52,6 +53,8 @@ function OrbitalLogo() {
 
 export function Navbar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const dueCount = useDueTodayCount();
+
   return (
     <header className="fixed top-0 inset-x-0 z-50 flex justify-center px-4 pt-4">
       <motion.nav
@@ -67,6 +70,34 @@ export function Navbar() {
           </span>
         </Link>
         <div className="ml-2 flex items-center gap-1 overflow-x-auto no-scrollbar">
+          {/* Due Today — always first, prominent */}
+          <Link
+            to="/review"
+            className={cn(
+              "relative flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-full transition-colors",
+              pathname.startsWith("/review") ? "text-white" : "text-white/55 hover:text-white",
+            )}
+          >
+            Due Today
+            {dueCount > 0 && (
+              <motion.span
+                key={dueCount}
+                initial={{ scale: 0.6, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-[color:var(--cyan)] text-black text-[10px] font-bold font-mono leading-none"
+              >
+                {dueCount > 99 ? "99+" : dueCount}
+              </motion.span>
+            )}
+            {pathname.startsWith("/review") && (
+              <motion.span
+                layoutId="nav-active"
+                className="absolute inset-0 -z-10 rounded-full bg-white/8 border border-white/10 shadow-[0_0_24px_-6px_color-mix(in_oklab,var(--cyan)_60%,transparent)]"
+                transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              />
+            )}
+          </Link>
+
           {NAV.map((item) => {
             const active = pathname.startsWith(item.to);
             return (
@@ -104,3 +135,4 @@ export function Navbar() {
     </header>
   );
 }
+

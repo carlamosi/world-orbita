@@ -1,6 +1,74 @@
 import type { ConceptProgressRow } from "../db/orbita-db";
 import { retrievability } from "./engine";
 
+/**
+ * Counts concepts whose FSRS due timestamp is <= now across all provided rows.
+ * Intended for displaying a live badge (e.g. "12 due").
+ */
+export function getDueTodayCount(allConcepts: ConceptProgressRow[]): number {
+  const now = Date.now();
+  return allConcepts.filter(
+    (c) =>
+      (c.fsrs_state === "learning" ||
+        c.fsrs_state === "relearning" ||
+        c.fsrs_state === "review") &&
+      c.fsrs_due <= now
+  ).length;
+}
+
+/**
+ * Builds an ordered mixed-skill review queue containing EVERY concept that is
+ * strictly due right now (fsrs_due <= now) across all provided skills.
+ *
+ * Priority order:
+ *   1. Learning / Relearning cards (most urgent)
+ *   2. Overdue Review cards (sorted most-overdue first)
+ *   3. Weak cards (retrievability < 0.50, even if not technically due yet)
+ *
+ * No new cards are included — this is a pure review queue.
+ * Anti-repetition constraints (same-country consecutive, same-skill 3x) are applied.
+ */
+export function generateDueTodayQueue(
+  allConcepts: ConceptProgressRow[]
+): ConceptProgressRow[] {
+  const now = Date.now();
+
+  const bucketA: ConceptProgressRow[] = []; // Learning / Relearning (due)
+  const bucketB: ConceptProgressRow[] = []; // Review (due)
+  const bucketC: ConceptProgressRow[] = []; // Weak (retrievability < 0.50)
+
+  for (const concept of allConcepts) {
+    if (
+      concept.fsrs_state === "learning" ||
+      concept.fsrs_state === "relearning"
+    ) {
+      if (concept.fsrs_due <= now) bucketA.push(concept);
+    } else if (concept.fsrs_state === "review") {
+      if (concept.fsrs_due <= now) {
+        bucketB.push(concept);
+      } else {
+        const elapsedDays = Math.max(
+          0,
+          (now - concept.fsrs_last_review) / 86400000
+        );
+        const R = retrievability(concept.fsrs_stability, elapsedDays);
+        if (R < 0.5) bucketC.push(concept);
+      }
+    }
+    // "new" cards are intentionally excluded — use the per-mode planner for new cards
+  }
+
+  // Sort each bucket so the most overdue appears first
+  const byOverdue = (a: ConceptProgressRow, b: ConceptProgressRow) =>
+    a.fsrs_due - b.fsrs_due;
+  bucketA.sort(byOverdue);
+  bucketB.sort(byOverdue);
+  bucketC.sort(byOverdue);
+
+  const rawQueue = [...bucketA, ...bucketB, ...bucketC];
+  return applyAntiRepetitionConstraints(rawQueue);
+}
+
 export interface PlannerConfig {
   maxNewPerSession?: number;
   sessionSize?: number;

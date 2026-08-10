@@ -30,8 +30,14 @@ export interface SessionState {
   current(): Country | null;
   /** Start a session. Pass `allCountries` for Complete Continent mode
    * (every country played exactly once in random order). Pass `continent`
-   * for Quick Practice (20 weighted questions). */
-  start(opts?: { continent?: string; allCountries?: Country[] }): Promise<void>;
+   * for Quick Practice (20 weighted questions). Pass `conceptRows` to
+   * supply a pre-built mixed-skill FSRS queue (used by Due Today). */
+  start(opts?: {
+    continent?: string;
+    allCountries?: Country[];
+    /** Pre-built FSRS rows — bypasses the planner entirely. */
+    conceptRows?: ConceptProgressRow[];
+  }): Promise<void>;
   submit(isCorrect: boolean): void;
   reveal(): void;
   next(): void;
@@ -94,7 +100,12 @@ export function createSessionStore({
       let q: Country[] = [];
       let cq: (ConceptProgressRow | null)[] = [];
       
-      if (opts?.allCountries && opts.allCountries.length > 0) {
+      if (opts?.conceptRows && opts.conceptRows.length > 0) {
+        // Due Today / pre-built mode: skip the planner, use the caller's queue directly.
+        const isoToCountry = new Map(COUNTRIES.map(c => [c.iso3, c]));
+        cq = opts.conceptRows;
+        q = cq.map(c => isoToCountry.get(c.iso3)!).filter(Boolean);
+      } else if (opts?.allCountries && opts.allCountries.length > 0) {
         // Complete Continent mode: use the pre-built shuffled array directly.
         q = [...opts.allCountries];
         for (let i = q.length - 1; i > 0; i--) {
