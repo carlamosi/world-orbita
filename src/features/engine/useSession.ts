@@ -244,8 +244,10 @@ export function createSessionStore({
             },
           ).catch(console.error);
 
-          // Step 5: Optimistic local update (no network wait)
-          s.conceptQueue[s.index] = updatedProgressRow;
+          // Step 5: Optimistic local update (no network wait) — via set() to keep Zustand reactive
+          const newConceptQueue = [...s.conceptQueue];
+          newConceptQueue[s.index] = updatedProgressRow;
+          set({ conceptQueue: newConceptQueue });
         }
     },
 

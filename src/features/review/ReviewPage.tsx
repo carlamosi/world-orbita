@@ -46,6 +46,7 @@ export default function ReviewPage() {
   const s = useReviewSession();
   const [loadState, setLoadState] = useState<"loading" | "empty" | "ready">("loading");
   const [dueRows, setDueRows] = useState<ConceptProgressRow[]>([]);
+  const [selectedIso3, setSelectedIso3] = useState<string | null>(null);
 
   const current = s.queue[s.index] ?? null;
   const currentConcept = s.conceptQueue[s.index] ?? null;
@@ -106,6 +107,11 @@ export default function ReviewPage() {
   }, [finished, current, s]);
   useSkipHotkey(onSkip);
 
+  // Clear selected option on every new question
+  useEffect(() => {
+    setSelectedIso3(null);
+  }, [s.index]);
+
   const skill = currentConcept?.skill ?? "flag";
   const skillLabel = SKILL_LABELS[skill] ?? skill;
   const skillColor = SKILL_COLORS[skill] ?? SKILL_COLORS.flag;
@@ -122,7 +128,11 @@ export default function ReviewPage() {
     [options, s.answerState],
   );
   const onHotkey = useCallback(
-    (id: string) => current && s.answerState === "idle" && s.submit(id === current.iso3),
+    (id: string) => {
+      if (!current || s.answerState !== "idle") return;
+      setSelectedIso3(id);
+      s.submit(id === current.iso3);
+    },
     [current, s],
   );
   useAnswerHotkeys(hotkeyItems, onHotkey);
@@ -153,10 +163,23 @@ export default function ReviewPage() {
           subtitle: `Capital of ${current.name}`,
         };
       case "name":
+        return {
+          prompt: "What's the name of this country?",
+          visual: (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
+                {current.name}
+              </div>
+              <div className="font-mono text-xs uppercase tracking-widest text-white/30">{current.continent}</div>
+            </div>
+          ),
+          answer: current.name,
+          subtitle: current.continent,
+        };
       case "location":
       default:
         return {
-          prompt: "Identify this country",
+          prompt: "Which country is this on the map?",
           visual: (
             <div className="flex flex-col items-center gap-3 py-6">
               <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
@@ -295,8 +318,15 @@ export default function ReviewPage() {
             <div className="w-full max-w-xl grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
               {options.map((opt: Country, idx: number) => {
                 const label = skill === "capital" ? (opt.capital ?? opt.name) : opt.name;
-                const isSelected = s.answerState !== "idle" && opt.iso3 === current.iso3;
-                const isWrongSelection = s.answerState === "wrong";
+                const isCorrectOption = opt.iso3 === current.iso3;
+                const isChosen = selectedIso3 === opt.iso3;
+                const revealed = s.answerState !== "idle";
+
+                // Visual state after answering:
+                // - correct answer always goes green
+                // - the wrong option the user picked goes red
+                const showGreen = revealed && isCorrectOption;
+                const showRed = revealed && isChosen && !isCorrectOption;
 
                 return (
                   <motion.button
@@ -304,12 +334,17 @@ export default function ReviewPage() {
                     whileHover={s.answerState === "idle" ? { scale: 1.02 } : {}}
                     whileTap={s.answerState === "idle" ? { scale: 0.98 } : {}}
                     disabled={s.answerState !== "idle"}
-                    onClick={() => s.submit(opt.iso3 === current.iso3)}
+                    onClick={() => {
+                      if (!current || s.answerState !== "idle") return;
+                      setSelectedIso3(opt.iso3);
+                      s.submit(isCorrectOption);
+                    }}
                     className={cn(
-                      "glass rounded-2xl p-4 text-left font-display font-medium text-base text-white/90 transition-all flex items-center justify-between border",
-                      s.answerState === "idle" && "hover:bg-white/10 hover:border-white/20 active:bg-white/15",
-                      isSelected && "border-[color:var(--neon)] bg-[color:var(--neon)]/15 text-white shadow-[0_0_20px_rgba(0,255,180,0.2)]",
-                      isWrongSelection && opt.iso3 === current.iso3 && "border-emerald-500 bg-emerald-500/15 text-emerald-300"
+                      "glass rounded-2xl p-4 text-left font-display font-medium text-base transition-all flex items-center justify-between border",
+                      !revealed && "text-white/90 hover:bg-white/10 hover:border-white/20 active:bg-white/15",
+                      showGreen && "border-[color:var(--neon)] bg-[color:var(--neon)]/15 text-white shadow-[0_0_20px_rgba(0,255,180,0.2)]",
+                      showRed && "border-red-500 bg-red-500/15 text-red-300",
+                      revealed && !showGreen && !showRed && "opacity-40 text-white/50",
                     )}
                   >
                     <span className="truncate">{label}</span>
