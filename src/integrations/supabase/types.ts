@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      hardcore_exam_progress: {
+        Row: {
+          id: string
+          user_id: string | null
+          continent: string
+          current_index: number
+          total_questions: number
+          score: number
+          correct: number
+          wrong: number
+          best_combo: number
+          combo: number
+          queue: Json
+          answers: Json
+          started_at: string
+          updated_at: string
+          completed_at: string | null
+        }
+        Insert: {
+          id: string
+          user_id?: string | null
+          continent: string
+          current_index?: number
+          total_questions: number
+          score?: number
+          correct?: number
+          wrong?: number
+          best_combo?: number
+          combo?: number
+          queue: Json
+          answers?: Json
+          started_at?: string
+          updated_at?: string
+          completed_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string | null
+          continent?: string
+          current_index?: number
+          total_questions?: number
+          score?: number
+          correct?: number
+          wrong?: number
+          best_combo?: number
+          combo?: number
+          queue?: Json
+          answers?: Json
+          started_at?: string
+          updated_at?: string
+          completed_at?: string | null
+        }
+        Relationships: []
+      }
       challenge_attempts: {
         Row: {
           client_id: string | null

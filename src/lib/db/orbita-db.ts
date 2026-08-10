@@ -172,6 +172,7 @@ export class OrbitaDB extends Dexie {
   concept_progress!: Table<ConceptProgressRow, string>;
   question_history!: Table<QuestionHistoryRow, string>;
   daily_summary!: Table<DailySummaryRow, string>;
+  hardcore_progress!: Table<any, string>;
 
   constructor(name: string) {
     super(name);
@@ -246,13 +247,18 @@ export class OrbitaDB extends Dexie {
     this.version(6).stores({
       concept_progress: "conceptId, [user_id+skill], skill, fsrs_due, dirty, updated_at",
     });
+
+    // v7: add hardcore_progress table
+    this.version(7).stores({
+      hardcore_progress: "continent, updatedAt",
+    });
   }
 }
 
 export function createOrbitaDb(name: string): OrbitaDB {
   const d = new OrbitaDB(name);
   d.meta
-    .put({ id: "meta", schemaVersion: 6, lastOpenedAt: Date.now(), prefs: {} })
+    .put({ id: "meta", schemaVersion: 7, lastOpenedAt: Date.now(), prefs: {} })
     .catch(() => {});
   return d;
 }

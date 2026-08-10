@@ -14,6 +14,7 @@ import { Route as ReviewRouteImport } from './routes/review'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ProgressRouteImport } from './routes/progress'
 import { Route as NameRouteImport } from './routes/name'
+import { Route as LocateRouteImport } from './routes/locate'
 import { Route as FlagsRouteImport } from './routes/flags'
 import { Route as FindRouteImport } from './routes/find'
 import { Route as ExplorerRouteImport } from './routes/explorer'
@@ -48,6 +49,11 @@ const ProgressRoute = ProgressRouteImport.update({
 const NameRoute = NameRouteImport.update({
   id: '/name',
   path: '/name',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LocateRoute = LocateRouteImport.update({
+  id: '/locate',
+  path: '/locate',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FlagsRoute = FlagsRouteImport.update({
@@ -109,6 +115,7 @@ export interface FileRoutesByFullPath {
   '/explorer': typeof ExplorerRoute
   '/find': typeof FindRoute
   '/flags': typeof FlagsRoute
+  '/locate': typeof LocateRoute
   '/name': typeof NameRoute
   '/progress': typeof ProgressRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -125,6 +132,7 @@ export interface FileRoutesByTo {
   '/explorer': typeof ExplorerRoute
   '/find': typeof FindRoute
   '/flags': typeof FlagsRoute
+  '/locate': typeof LocateRoute
   '/name': typeof NameRoute
   '/progress': typeof ProgressRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -143,6 +151,7 @@ export interface FileRoutesById {
   '/explorer': typeof ExplorerRoute
   '/find': typeof FindRoute
   '/flags': typeof FlagsRoute
+  '/locate': typeof LocateRoute
   '/name': typeof NameRoute
   '/progress': typeof ProgressRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -161,6 +170,7 @@ export interface FileRouteTypes {
     | '/explorer'
     | '/find'
     | '/flags'
+    | '/locate'
     | '/name'
     | '/progress'
     | '/reset-password'
@@ -177,6 +187,7 @@ export interface FileRouteTypes {
     | '/explorer'
     | '/find'
     | '/flags'
+    | '/locate'
     | '/name'
     | '/progress'
     | '/reset-password'
@@ -194,6 +205,7 @@ export interface FileRouteTypes {
     | '/explorer'
     | '/find'
     | '/flags'
+    | '/locate'
     | '/name'
     | '/progress'
     | '/reset-password'
@@ -212,6 +224,7 @@ export interface RootRouteChildren {
   ExplorerRoute: typeof ExplorerRoute
   FindRoute: typeof FindRoute
   FlagsRoute: typeof FlagsRoute
+  LocateRoute: typeof LocateRoute
   NameRoute: typeof NameRoute
   ProgressRoute: typeof ProgressRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
@@ -254,6 +267,13 @@ declare module '@tanstack/react-router' {
       path: '/name'
       fullPath: '/name'
       preLoaderRoute: typeof NameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/locate': {
+      id: '/locate'
+      path: '/locate'
+      fullPath: '/locate'
+      preLoaderRoute: typeof LocateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/flags': {
@@ -360,6 +380,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExplorerRoute: ExplorerRoute,
   FindRoute: FindRoute,
   FlagsRoute: FlagsRoute,
+  LocateRoute: LocateRoute,
   NameRoute: NameRoute,
   ProgressRoute: ProgressRoute,
   ResetPasswordRoute: ResetPasswordRoute,

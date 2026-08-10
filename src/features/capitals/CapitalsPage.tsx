@@ -26,13 +26,14 @@ const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
 const useCapSession = createSessionStore({ mode: "capital", skill: "capital" });
 
-type SubMode = "countryToCap" | "capToCountry" | "locator";
+type SubMode = "countryToCap" | "capToCountry" | "locator" | "mixed";
 type Mode = "easy" | "hard";
 
 const SUB_MODE_OPTIONS = [
   { value: "countryToCap" as const, label: "Country → Cap" },
   { value: "capToCountry" as const, label: "Cap → Country" },
   { value: "locator" as const, label: "Globe Locator" },
+  { value: "mixed" as const, label: "Mixed Mode" },
 ];
 
 const MODE_OPTIONS = [
@@ -47,6 +48,18 @@ export default function CapitalsPage() {
   const [continent, setContinent] = useContinentPref();
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
+
+  // For mixed mode: pick random question type per question index in queue
+  const turnSubModes = useMemo(() => {
+    const types: ("countryToCap" | "capToCountry" | "locator")[] = [
+      "countryToCap",
+      "capToCountry",
+      "locator",
+    ];
+    return s.queue.map(() => types[Math.floor(Math.random() * types.length)]!);
+  }, [s.queue]);
+
+  const activeSub = sub === "mixed" ? (turnSubModes[s.index] ?? "countryToCap") : sub;
 
   // Persist preferences
   useEffect(() => {
@@ -86,17 +99,21 @@ export default function CapitalsPage() {
 
   const options = useMemo(() => {
     if (!current) return [];
-    const others = pickRandomCountries(3, new Set([current.iso3])).filter((c) => c.capital);
+    const others = pickRandomCountries(
+      3,
+      new Set([current.iso3]),
+      continent === "All" ? undefined : continent,
+    ).filter((c) => c.capital);
     return shuffle([current, ...others].slice(0, 4));
-  }, [current]);
+  }, [current, continent]);
 
   const pov = useMemo(() => {
-    if (sub !== "locator" || !current) return undefined;
+    if (activeSub !== "locator" || !current) return undefined;
     if (s.answerState === "idle") {
       return { lat: current.coordinates[0], lng: current.coordinates[1] };
     }
     return undefined;
-  }, [sub, s.answerState, current?.iso3, current?.coordinates]);
+  }, [activeSub, s.answerState, current?.iso3, current?.coordinates]);
 
   /** Unified Top Toolbar (Responsive Left/Right Split) */
   const Toolbar = (
@@ -104,14 +121,14 @@ export default function CapitalsPage() {
       <ContinentSelect value={continent} onChange={restartWithContinent} />
       <div className="flex items-center gap-2 flex-wrap">
         <ModeDropdown options={SUB_MODE_OPTIONS} value={sub} onChange={setSub} />
-        {sub !== "locator" && (
+        {activeSub !== "locator" && (
           <ModeDropdown options={MODE_OPTIONS} value={mode} onChange={setMode} />
         )}
       </div>
     </div>
   );
 
-  if (sub === "locator") {
+  if (activeSub === "locator") {
     return (
       <div className="relative min-h-dvh pt-20">
         <div className="absolute inset-0">
@@ -137,7 +154,7 @@ export default function CapitalsPage() {
             <div className="absolute top-20 inset-x-0 z-20 pointer-events-none flex flex-col items-center">
               {Toolbar}
               <PromptPill
-                keyId={current.iso3}
+                keyId={`${sub}-${s.index}-${current.iso3}`}
                 index={s.index}
                 total={s.queue.length}
                 title={
@@ -186,11 +203,11 @@ export default function CapitalsPage() {
 
           <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-5xl gap-6 md:gap-8">
             <PromptPill
-              keyId={`${sub}-${current.iso3}`}
+              keyId={`${sub}-${s.index}-${current.iso3}`}
               index={s.index}
               total={s.queue.length}
               title={
-                sub === "countryToCap" ? (
+                activeSub === "countryToCap" ? (
                   <>What's the capital of <span className="text-glow-cyan">{current.name}</span>?</>
                 ) : (
                   <>Which country's capital is <span className="text-glow-cyan">{current.capital}</span>?</>
@@ -202,7 +219,7 @@ export default function CapitalsPage() {
               {mode === "easy" ? (
                 <ChoiceGrid
                   options={options}
-                  sub={sub}
+                  sub={activeSub}
                   target={current}
                   disabled={s.answerState !== "idle"}
                   onPick={(iso3) => s.submit(iso3 === current.iso3)}
@@ -211,9 +228,9 @@ export default function CapitalsPage() {
                 <div className="w-full max-w-md mx-auto">
                   <HardInput
                     target={current}
-                    matchTarget={sub === "countryToCap" ? (current.capital ?? undefined) : current.name}
+                    matchTarget={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
                     onSubmit={(ok) => s.submit(ok)}
-                    placeholder={sub === "countryToCap" ? "Type the capital…" : "Type the country…"}
+                    placeholder={activeSub === "countryToCap" ? "Type the capital…" : "Type the country…"}
                   />
                 </div>
               )}

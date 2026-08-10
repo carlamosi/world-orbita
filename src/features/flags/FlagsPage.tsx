@@ -68,9 +68,13 @@ export default function FlagsPage() {
 
   const options = useMemo(() => {
     if (!current) return [];
-    const distractors = pickRandomCountries(sub === "flagToCountry" ? 3 : 5, new Set([current.iso3]));
+    const distractors = pickRandomCountries(
+      sub === "flagToCountry" ? 3 : 5,
+      new Set([current.iso3]),
+      continent === "All" ? undefined : continent,
+    );
     return shuffle([current, ...distractors]);
-  }, [current, sub]);
+  }, [current, sub, continent]);
 
   const hotkeyItems = useMemo(
     () =>

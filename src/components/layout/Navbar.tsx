@@ -6,9 +6,7 @@ import { AccountMenu } from "@/features/sync/AccountMenu";
 import { useDueTodayCount } from "@/hooks/useDueTodayCount";
 
 const NAV = [
-  { to: "/explorer", label: "Explorer" },
-  { to: "/find", label: "Find" },
-  { to: "/name", label: "Name" },
+  { to: "/locate", label: "Locate" },
   { to: "/flags", label: "Flags" },
   { to: "/capitals", label: "Capitals" },
   { to: "/speed", label: "Speed" },
@@ -127,7 +125,7 @@ export function Navbar() {
             to="/explorer"
             className="hidden sm:inline-flex items-center text-[13px] font-medium text-white rounded-full px-4 py-1.5 bg-white/10 border border-white/15 hover:bg-white/15"
           >
-            Explore
+            Explorer
           </Link>
           <AccountMenu />
         </div>

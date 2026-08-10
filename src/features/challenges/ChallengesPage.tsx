@@ -17,6 +17,15 @@ import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 
+import { HardcoreRunner } from "@/features/challenges/HardcoreRunner";
+import {
+  type HardcoreExamState,
+  generateHardcoreExam,
+  loadHardcoreProgress,
+  clearHardcoreProgress,
+} from "@/lib/hardcore";
+import { COUNTRIES } from "@/lib/countries";
+
 type Active = {
   set: ChallengeSet;
   index: number;
@@ -29,15 +38,28 @@ type Active = {
   answerState: "idle" | "correct" | "wrong";
 };
 
+const CONTINENTS = ["Africa", "Americas", "Asia", "Europe", "Oceania"] as const;
+
 export default function ChallengesPage() {
   const [daily, setDaily] = useState<ChallengeSet | null>(null);
   const [weekly, setWeekly] = useState<ChallengeSet | null>(null);
   const [active, setActive] = useState<Active | null>(null);
+  const [activeHardcore, setActiveHardcore] = useState<HardcoreExamState | null>(null);
+  const [hardcoreSaved, setHardcoreSaved] = useState<Record<string, HardcoreExamState | null>>({});
+
+  const reloadHardcoreProgress = useCallback(() => {
+    CONTINENTS.forEach((c) => {
+      loadHardcoreProgress(c).then((p) => {
+        setHardcoreSaved((prev) => ({ ...prev, [c]: p }));
+      });
+    });
+  }, []);
 
   useEffect(() => {
     generateDaily().then(setDaily);
     generateWeekly().then(setWeekly);
-  }, []);
+    reloadHardcoreProgress();
+  }, [reloadHardcoreProgress]);
 
   const todayKey = dateKey();
   const thisWeekKey = weekKey();
@@ -56,6 +78,44 @@ export default function ChallengesPage() {
         .reduce((m, s) => Math.max(m, s.score), 0),
     [sessions, thisWeekKey],
   );
+
+  const startHardcoreExam = async (continent: string) => {
+    const existing = await loadHardcoreProgress(continent);
+    if (existing && !existing.completedAt) {
+      setActiveHardcore(existing);
+      return;
+    }
+
+    const queue = generateHardcoreExam(continent);
+    const newState: HardcoreExamState = {
+      continent,
+      currentIndex: 0,
+      totalQuestions: queue.length,
+      score: 0,
+      correct: 0,
+      wrong: 0,
+      bestCombo: 0,
+      combo: 0,
+      queue,
+      answers: new Array(queue.length).fill("idle"),
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+      completedAt: null,
+    };
+    setActiveHardcore(newState);
+  };
+
+  if (activeHardcore) {
+    return (
+      <HardcoreRunner
+        initialState={activeHardcore}
+        onExit={() => {
+          setActiveHardcore(null);
+          reloadHardcoreProgress();
+        }}
+      />
+    );
+  }
 
   if (active) {
     return (
@@ -80,7 +140,7 @@ export default function ChallengesPage() {
           </p>
         </header>
 
-        <div className="grid md:grid-cols-2 gap-4">
+        <div className="grid md:grid-cols-2 gap-4 mb-16">
           <ChallengeCard
             kind="daily"
             set={daily}
@@ -118,6 +178,103 @@ export default function ChallengesPage() {
             }
           />
         </div>
+
+        {/* Hardcore Mode Section */}
+        <section className="mt-12">
+          <div className="mb-6 flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Badge tone="coral">Hardcore Mode</Badge>
+                <span className="font-mono text-xs text-white/40 uppercase tracking-widest">
+                  Exams
+                </span>
+              </div>
+              <h2 className="mt-2 font-display text-2xl text-white tracking-tight">
+                Per-Continent Master Exams
+              </h2>
+              <p className="mt-1 text-white/55 text-[14px]">
+                Full continent coverage across all Hard difficulty variants (Locate, Name, Country ↔ Capital). Resumable anytime.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {CONTINENTS.map((cont) => {
+              const contCount = COUNTRIES.filter((c) => c.continent === cont).length;
+              const saved = hardcoreSaved[cont];
+              const isCompleted = saved?.completedAt != null;
+              const inProgress = saved && !isCompleted && saved.currentIndex > 0;
+
+              return (
+                <motion.div
+                  key={cont}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={spring.soft}
+                  className="glass-strong rounded-2xl p-5 flex flex-col justify-between gap-4"
+                >
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-display text-xl text-white tracking-tight">{cont}</h3>
+                      {isCompleted ? (
+                        <Badge tone="neon">Completed</Badge>
+                      ) : inProgress ? (
+                        <Badge tone="cyan">In Progress</Badge>
+                      ) : (
+                        <Badge tone="muted">Not Started</Badge>
+                      )}
+                    </div>
+                    <p className="mt-2 font-mono text-[11px] text-white/45 uppercase tracking-wider">
+                      {contCount} Countries • {saved?.totalQuestions ?? contCount * 4} Questions
+                    </p>
+                    {inProgress && (
+                      <div className="mt-3">
+                        <div className="flex justify-between text-[11px] font-mono text-white/60 mb-1">
+                          <span>Progress</span>
+                          <span>
+                            {saved.currentIndex} / {saved.totalQuestions}
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[color:var(--cyan)] transition-all"
+                            style={{
+                              width: `${Math.round((saved.currentIndex / saved.totalQuestions) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <Button
+                      variant={inProgress ? "primary" : "secondary"}
+                      size="sm"
+                      className="w-full"
+                      onClick={() => startHardcoreExam(cont)}
+                    >
+                      {isCompleted ? "Retake Exam" : inProgress ? "Resume Exam" : "Start Exam"}
+                    </Button>
+                    {(inProgress || isCompleted) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="Reset progress"
+                        onClick={async () => {
+                          await clearHardcoreProgress(cont);
+                          reloadHardcoreProgress();
+                        }}
+                      >
+                        Reset
+                      </Button>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        </section>
       </div>
     </div>
   );
