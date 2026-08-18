@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { lazy, Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
 import type { Country } from "@/types/country";
@@ -15,6 +15,17 @@ import { generateDueTodayQueue } from "@/lib/fsrs/planner";
 import { spring, fadeUp } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
+// Lazy-load the globe — only needed when a 'location' card appears
+const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
+
+function GlobeFallback() {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center">
+      <div className="size-12 rounded-full border-2 border-white/10 border-t-[color:var(--cyan)] animate-spin" />
+    </div>
+  );
+}
+
 function shuffleArray<T>(array: T[]): T[] {
   const arr = [...array];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -24,8 +35,8 @@ function shuffleArray<T>(array: T[]): T[] {
   return arr;
 }
 
-/* The session store: mode = "find" is a placeholder for the mixed session.
-   FSRS updates are written per-card using the actual skill from conceptQueue. */
+/* The session store: mixed-skill Due Today session.
+   skill="flag" is a placeholder — FSRS updates always use targetConcept.skill. */
 const useReviewSession = createSessionStore({ mode: "find", skill: "flag", questions: 9999 });
 
 const SKILL_LABELS: Record<string, string> = {
@@ -41,6 +52,99 @@ const SKILL_COLORS: Record<string, string> = {
   location: "text-[color:var(--violet)] border-[color:var(--violet)]/30 bg-[color:var(--violet)]/8",
   name: "text-[color:var(--cyan)] border-[color:var(--cyan)]/30 bg-[color:var(--cyan)]/8",
 };
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+/**
+ * Globe-based location question — same UX as LocatePage "Find" mode.
+ * The learner must click the correct country on the 3D globe.
+ */
+function LocationQuestion({
+  current,
+  answerState,
+  onSubmit,
+}: {
+  current: Country;
+  answerState: "idle" | "correct" | "wrong" | "revealed";
+  onSubmit: (iso3: string) => void;
+}) {
+  return (
+    <div className="absolute inset-0">
+      <Suspense fallback={<GlobeFallback />}>
+        <Globe3D
+          countries={COUNTRIES}
+          highlightIso3={answerState === "correct" ? current.iso3 : null}
+          revealIso3={
+            answerState === "wrong" || answerState === "revealed" ? current.iso3 : null
+          }
+          onCountryClick={
+            answerState === "idle" ? onSubmit : undefined
+          }
+          disableHoverLabel={answerState === "idle"}
+          questionKey={current.iso3}
+          pointOfView={undefined}
+          activeContinent={null}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+/**
+ * Multiple-choice question card for flag / capital / name skills.
+ */
+function McQuestion({
+  options,
+  current,
+  skill,
+  answerState,
+  selectedIso3,
+  onSelect,
+}: {
+  options: Country[];
+  current: Country;
+  skill: string;
+  answerState: "idle" | "correct" | "wrong" | "revealed";
+  selectedIso3: string | null;
+  onSelect: (iso3: string) => void;
+}) {
+  const revealed = answerState !== "idle";
+  return (
+    <div className="w-full max-w-xl grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+      {options.map((opt: Country, idx: number) => {
+        const label = skill === "capital" ? (opt.capital ?? opt.name) : opt.name;
+        const isCorrectOption = opt.iso3 === current.iso3;
+        const isChosen = selectedIso3 === opt.iso3;
+
+        const showGreen = revealed && isCorrectOption;
+        const showRed = revealed && isChosen && !isCorrectOption;
+
+        return (
+          <motion.button
+            key={opt.iso3}
+            whileHover={!revealed ? { scale: 1.02 } : {}}
+            whileTap={!revealed ? { scale: 0.98 } : {}}
+            disabled={revealed}
+            onClick={() => onSelect(opt.iso3)}
+            className={cn(
+              "glass rounded-2xl p-4 text-left font-display font-medium text-base transition-all flex items-center justify-between border",
+              !revealed && "text-white/90 hover:bg-white/10 hover:border-white/20 active:bg-white/15",
+              showGreen &&
+                "border-[color:var(--neon)] bg-[color:var(--neon)]/15 text-white shadow-[0_0_20px_rgba(0,255,180,0.2)]",
+              showRed && "border-red-500 bg-red-500/15 text-red-300",
+              revealed && !showGreen && !showRed && "opacity-40 text-white/50",
+            )}
+          >
+            <span className="truncate">{label}</span>
+            <span className="font-mono text-xs text-white/30 ml-2">[{idx + 1}]</span>
+          </motion.button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ReviewPage() {
   const s = useReviewSession();
@@ -107,25 +211,27 @@ export default function ReviewPage() {
   }, [finished, current, s]);
   useSkipHotkey(onSkip);
 
-  // Clear selected option on every new question
+  // Clear selection on every new card
   useEffect(() => {
     setSelectedIso3(null);
   }, [s.index]);
 
-  const skill = currentConcept?.skill ?? "flag";
+  const skill = (currentConcept?.skill ?? "flag") as string;
   const skillLabel = SKILL_LABELS[skill] ?? skill;
-  const skillColor = SKILL_COLORS[skill] ?? SKILL_COLORS.flag;
+  const skillColor = SKILL_COLORS[skill] ?? SKILL_COLORS.flag!;
+  const isLocationSkill = skill === "location";
 
-  // Generate 4 active multiple-choice options per question
-  const options: Country[] = useMemo(() => {
-    if (!current) return [];
+  // Generate 4 MC options (continent-scoped) — used for flag / capital / name
+  const mcOptions: Country[] = useMemo(() => {
+    if (!current || isLocationSkill) return [];
     const distractors = pickRandomCountries(3, new Set([current.iso3]), current.continent);
     return shuffleArray([current, ...distractors]);
-  }, [current]);
+  }, [current, isLocationSkill]);
 
+  // Keyboard shortcuts for MC skills
   const hotkeyItems = useMemo(
-    () => (s.answerState === "idle" ? options.map((o: Country) => ({ id: o.iso3 })) : []),
-    [options, s.answerState],
+    () => (s.answerState === "idle" && !isLocationSkill ? mcOptions.map((o) => ({ id: o.iso3 })) : []),
+    [mcOptions, s.answerState, isLocationSkill],
   );
   const onHotkey = useCallback(
     (id: string) => {
@@ -137,15 +243,21 @@ export default function ReviewPage() {
   );
   useAnswerHotkeys(hotkeyItems, onHotkey);
 
-  const question = useMemo(() => {
+  // Prompt and supplementary info per skill
+  const questionMeta = useMemo(() => {
     if (!current) return null;
     switch (skill) {
       case "flag":
         return {
           prompt: "Which country owns this flag?",
-          visual: <FlagImage iso2={current.iso2} alt="Mystery flag" size={640}
-            className="w-full max-w-[420px] h-auto aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto" />,
-          answer: current.name,
+          visual: (
+            <FlagImage
+              iso2={current.iso2}
+              alt="Mystery flag"
+              size={640}
+              className="w-full max-w-[420px] h-auto aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto"
+            />
+          ),
           subtitle: `Capital: ${current.capital ?? "—"}`,
         };
       case "capital":
@@ -156,43 +268,45 @@ export default function ReviewPage() {
               <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
                 {current.name}
               </div>
-              <div className="font-mono text-xs uppercase tracking-widest text-white/30">{current.continent}</div>
+              <div className="font-mono text-xs uppercase tracking-widest text-white/30">
+                {current.continent}
+              </div>
             </div>
           ),
-          answer: current.capital ?? current.name,
           subtitle: `Capital of ${current.name}`,
         };
-      case "name":
+      case "location":
         return {
-          prompt: "What's the name of this country?",
-          visual: (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
-                {current.name}
-              </div>
-              <div className="font-mono text-xs uppercase tracking-widest text-white/30">{current.continent}</div>
-            </div>
-          ),
-          answer: current.name,
+          prompt: "", // rendered as PromptPill overlay on the globe
+          visual: null,
           subtitle: current.continent,
         };
-      case "location":
+      case "name":
       default:
         return {
-          prompt: "Which country is this on the map?",
+          prompt: "Which country does this flag belong to?",
           visual: (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
-                {current.name}
-              </div>
-              <div className="font-mono text-xs uppercase tracking-widest text-white/30">{current.continent}</div>
-            </div>
+            <FlagImage
+              iso2={current.iso2}
+              alt="Mystery flag"
+              size={640}
+              className="w-full max-w-[420px] h-auto aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto"
+            />
           ),
-          answer: current.name,
-          subtitle: current.continent,
+          subtitle: `Capital: ${current.capital ?? "—"}`,
         };
     }
   }, [current, skill]);
+
+  // ── Globe submit handler (location skill) ──────────────────────────────────
+  const handleGlobeClick = useCallback(
+    (iso3: string) => {
+      if (!current || s.answerState !== "idle") return;
+      setSelectedIso3(iso3);
+      s.submit(iso3 === current.iso3);
+    },
+    [current, s],
+  );
 
   /* ─── Loading ─── */
   if (loadState === "loading") {
@@ -224,8 +338,13 @@ export default function ReviewPage() {
             <div className="absolute inset-0 rounded-full bg-[color:var(--neon)]/20 animate-ping" style={{ animationDuration: "2.4s" }} />
             <div className="relative size-full rounded-full bg-gradient-to-br from-[color:var(--neon)]/30 to-[color:var(--cyan)]/20 flex items-center justify-center">
               <svg viewBox="0 0 24 24" fill="none" className="size-8 text-[color:var(--neon)]">
-                <path d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"
-                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             </div>
           </div>
@@ -270,11 +389,69 @@ export default function ReviewPage() {
     );
   }
 
-  /* ─── Active session ─── */
+  /* ─── Active session — LOCATION skill: full-screen globe (identical to LocatePage Find) ─── */
+  if (isLocationSkill && current) {
+    return (
+      <div className="relative min-h-dvh pt-20">
+        {/* Globe fills the screen */}
+        <LocationQuestion
+          current={current}
+          answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
+          onSubmit={handleGlobeClick}
+        />
+
+        {/* Skill badge */}
+        <div className="absolute top-24 left-4 md:left-6 z-20">
+          <span className={cn(
+            "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-widest border",
+            skillColor,
+          )}>
+            {skillLabel}
+          </span>
+        </div>
+
+        {/* Progress counter */}
+        <div className="absolute top-24 right-4 md:right-6 z-20">
+          <span className="glass px-3 py-1 rounded-full font-mono text-xs text-white/50">
+            {s.index + 1} / {s.queue.length}
+          </span>
+        </div>
+
+        {/* Prompt pill overlay */}
+        <div className="absolute top-36 md:top-32 inset-x-0 z-20 flex justify-center pointer-events-none">
+          <PromptPill
+            keyId={`review-loc-${s.index}-${current.iso3}`}
+            index={s.index}
+            total={s.queue.length}
+            title={
+              <>Find <span className="text-glow-cyan">{current.name}</span> on the map</>
+            }
+          />
+        </div>
+
+        {/* Feedback bar */}
+        <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
+          <div className="pointer-events-auto">
+            <FeedbackBar
+              show={s.answerState !== "idle"}
+              state={s.answerState as "correct" | "wrong" | "revealed"}
+              title={current.name}
+              subtitle={current.continent}
+              onNext={() => s.next()}
+              onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
+              hideNext
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ─── Active session — flag / capital / name: card layout with MC options ─── */
   return (
     <div className="relative min-h-dvh pt-20 flex flex-col items-center">
       <AnimatePresence mode="wait">
-        {current && question && (
+        {current && questionMeta && (
           <motion.div
             key={`${s.index}-${current.iso3}`}
             variants={fadeUp}
@@ -287,7 +464,7 @@ export default function ReviewPage() {
             <div className="w-full flex items-center justify-between">
               <span className={cn(
                 "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-widest border",
-                skillColor
+                skillColor,
               )}>
                 {skillLabel}
               </span>
@@ -300,59 +477,35 @@ export default function ReviewPage() {
               keyId={`review-${s.index}-${current.iso3}`}
               index={s.index}
               total={s.queue.length}
-              title={question.prompt}
+              title={questionMeta.prompt}
             />
 
-            {/* Visual / stimulus */}
-            <motion.div
-              key={`${s.index}-visual`}
-              initial={{ opacity: 0, scale: 0.94, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={spring.soft}
-              className="w-full flex justify-center"
-            >
-              {question.visual}
-            </motion.div>
+            {/* Visual stimulus */}
+            {questionMeta.visual && (
+              <motion.div
+                key={`${s.index}-visual`}
+                initial={{ opacity: 0, scale: 0.94, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={spring.soft}
+                className="w-full flex justify-center"
+              >
+                {questionMeta.visual}
+              </motion.div>
+            )}
 
-            {/* 4 Active Multiple-Choice Options — objective binary answer evaluation */}
-            <div className="w-full max-w-xl grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-              {options.map((opt: Country, idx: number) => {
-                const label = skill === "capital" ? (opt.capital ?? opt.name) : opt.name;
-                const isCorrectOption = opt.iso3 === current.iso3;
-                const isChosen = selectedIso3 === opt.iso3;
-                const revealed = s.answerState !== "idle";
-
-                // Visual state after answering:
-                // - correct answer always goes green
-                // - the wrong option the user picked goes red
-                const showGreen = revealed && isCorrectOption;
-                const showRed = revealed && isChosen && !isCorrectOption;
-
-                return (
-                  <motion.button
-                    key={opt.iso3}
-                    whileHover={s.answerState === "idle" ? { scale: 1.02 } : {}}
-                    whileTap={s.answerState === "idle" ? { scale: 0.98 } : {}}
-                    disabled={s.answerState !== "idle"}
-                    onClick={() => {
-                      if (!current || s.answerState !== "idle") return;
-                      setSelectedIso3(opt.iso3);
-                      s.submit(isCorrectOption);
-                    }}
-                    className={cn(
-                      "glass rounded-2xl p-4 text-left font-display font-medium text-base transition-all flex items-center justify-between border",
-                      !revealed && "text-white/90 hover:bg-white/10 hover:border-white/20 active:bg-white/15",
-                      showGreen && "border-[color:var(--neon)] bg-[color:var(--neon)]/15 text-white shadow-[0_0_20px_rgba(0,255,180,0.2)]",
-                      showRed && "border-red-500 bg-red-500/15 text-red-300",
-                      revealed && !showGreen && !showRed && "opacity-40 text-white/50",
-                    )}
-                  >
-                    <span className="truncate">{label}</span>
-                    <span className="font-mono text-xs text-white/30 ml-2">[{idx + 1}]</span>
-                  </motion.button>
-                );
-              })}
-            </div>
+            {/* 4-option multiple choice */}
+            <McQuestion
+              options={mcOptions}
+              current={current}
+              skill={skill}
+              answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
+              selectedIso3={selectedIso3}
+              onSelect={(iso3) => {
+                if (!current || s.answerState !== "idle") return;
+                setSelectedIso3(iso3);
+                s.submit(iso3 === current.iso3);
+              }}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -364,7 +517,7 @@ export default function ReviewPage() {
             show={s.answerState !== "idle"}
             state={s.answerState as "correct" | "wrong" | "revealed"}
             title={current?.name ?? ""}
-            subtitle={question?.subtitle ?? ""}
+            subtitle={questionMeta?.subtitle ?? ""}
             onNext={() => s.next()}
             onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
             hideNext
@@ -374,4 +527,3 @@ export default function ReviewPage() {
     </div>
   );
 }
-

@@ -28,6 +28,18 @@ export interface SessionState {
   /** Epoch ms when the current question became visible. */
   questionStartedAt: number;
 
+  /**
+   * conceptIds that have already been written to FSRS in this session.
+   * Prevents double-scoring re-queued retries.
+   */
+  fsrsUpdatedIds: Set<string>;
+
+  /**
+   * conceptIds that have already been re-queued once after a wrong answer.
+   * Prevents infinite re-queuing loops.
+   */
+  retriedIds: Set<string>;
+
   current(): Country | null;
   /** Start a session. Pass `allCountries` for Complete Continent mode
    * (every country played exactly once in random order). Pass `continent`
@@ -75,6 +87,8 @@ export function createSessionStore({
     endedAt: null,
     loading: false,
     questionStartedAt: 0,
+    fsrsUpdatedIds: new Set(),
+    retriedIds: new Set(),
 
     current() {
       const s = get();
@@ -96,6 +110,8 @@ export function createSessionStore({
         startedAt: 0,
         endedAt: null,
         questionStartedAt: 0,
+        fsrsUpdatedIds: new Set(),
+        retriedIds: new Set(),
       });
 
       let q: Country[] = [];
@@ -173,6 +189,8 @@ export function createSessionStore({
         endedAt: null,
         loading: false,
         questionStartedAt: now,
+        fsrsUpdatedIds: new Set(),
+        retriedIds: new Set(),
       });
     },
 
@@ -182,73 +200,102 @@ export function createSessionStore({
       const target = s.queue[s.index];
       const targetConcept = s.conceptQueue[s.index];
       if (!target) return;
+
       const responseMs = Math.max(0, Date.now() - (s.questionStartedAt || Date.now()));
+
+      // ── Accumulate all state updates into one set() call ──────────────────
+      const updates: Partial<SessionState> = {};
+
+      // 1. Score & UI state
       if (isCorrect) {
         const combo = s.combo + 1;
-        const base = 100;
-        const comboBonus = Math.min(combo - 1, 9) * 20;
-        const gained = base + comboBonus;
-        set({
-          score: s.score + gained,
-          combo,
-          bestCombo: Math.max(s.bestCombo, combo),
-          correct: s.correct + 1,
-          answerState: "correct",
-        });
+        updates.score = s.score + 100 + Math.min(s.combo, 9) * 20;
+        updates.combo = combo;
+        updates.bestCombo = Math.max(s.bestCombo, combo);
+        updates.correct = s.correct + 1;
+        updates.answerState = "correct";
       } else {
-        set({ combo: 0, wrong: s.wrong + 1, answerState: "wrong" });
+        updates.combo = 0;
+        updates.wrong = s.wrong + 1;
+        updates.answerState = "wrong";
       }
-      
-      // FSRS — process via official adapter (ts-fsrs)
-        if (targetConcept) {
-          const now = Date.now();
-          // Step 1: Evaluate the answer (behavioral signals, pure)
-          const assessment = assess({
-            validationResult: { correct: isCorrect, softCorrect: false },
-            responseMs,
-            attemptNumber: 1,
-            hintsUsed: 0,
-            questionType: skill,
-            retrievalMode: "easy", // caller can pass this in via opts later
-            direction: `${skill}->answer`,
-          });
 
-          // Step 2: Process through official FSRS-6 (adapter → ts-fsrs.next())
-          const currentCard = rowToCard(targetConcept);
-          const { card: nextCard, log: fsrsLog } = processReview(
-            currentCard,
-            assessment.outcome,
-            now,
-          );
+      // 2. Re-queue wrong answers (once per conceptId per session)
+      //    Insert the card 4 positions ahead so the learner sees other questions first.
+      //    If the concept has no conceptId (guest/dummy row), still re-queue by iso3.
+      const requeueKey = targetConcept?.conceptId ?? target.iso3;
+      if (!isCorrect && !s.retriedIds.has(requeueKey)) {
+        const insertAt = Math.min(s.index + 4, s.queue.length);
+        const newQueue = [...s.queue];
+        const newConceptQueue = [...s.conceptQueue];
+        newQueue.splice(insertAt, 0, target);
+        newConceptQueue.splice(insertAt, 0, targetConcept ? { ...targetConcept } : null);
+        updates.queue = newQueue;
+        updates.conceptQueue = newConceptQueue;
 
-          // Step 3: Apply card updates back to the row
-          const updatedProgressRow: ConceptProgressRow = {
-            ...targetConcept,
-            ...cardToRowUpdates(nextCard, 1, true, targetConcept.version),
-          };
+        const nextRetriedIds = new Set(s.retriedIds);
+        nextRetriedIds.add(requeueKey);
+        updates.retriedIds = nextRetriedIds;
+      }
 
-          // Step 4: Persist — idempotent via op_id; fsrs_log stored for audit
-          recordConceptAttempt(
-            updatedProgressRow,
-            {
-              op_id: crypto.randomUUID(),
-              conceptId: targetConcept.conceptId,
-              sessionId: "session-" + s.startedAt,
-              grade: assessment.outcome === "incorrect" ? 0 : assessment.outcome === "ambiguous" ? 1 : 2,
-              mode: assessment.retrievalMode,
-              direction: assessment.direction,
-              fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
-              responseMs,
-              correct: isCorrect,
-              answeredAt: now,
-            },
-          ).catch(console.error);
+      // 3. FSRS update — only the FIRST attempt per conceptId per session counts.
+      //    Retries are for learning; we don't want to double-schedule.
+      if (targetConcept && !s.fsrsUpdatedIds.has(targetConcept.conceptId)) {
+        const now = Date.now();
 
-          // Step 5: Optimistic local update (no network wait) — via set() to keep Zustand reactive
-          const newConceptQueue = [...s.conceptQueue];
-          newConceptQueue[s.index] = updatedProgressRow;
-          set({ conceptQueue: newConceptQueue });
-        }
+        // Use the concept's own skill (critical for Due Today mixed sessions)
+        const conceptSkill = targetConcept.skill ?? skill;
+
+        const assessment = assess({
+          validationResult: { correct: isCorrect, softCorrect: false },
+          responseMs,
+          attemptNumber: 1,
+          hintsUsed: 0,
+          questionType: conceptSkill,
+          retrievalMode: "easy",
+          direction: `${conceptSkill}->answer`,
+        });
+
+        const currentCard = rowToCard(targetConcept);
+        const { card: nextCard, log: fsrsLog } = processReview(
+          currentCard,
+          assessment.outcome,
+          now,
+        );
+
+        const updatedProgressRow: ConceptProgressRow = {
+          ...targetConcept,
+          ...cardToRowUpdates(nextCard, 1, true, targetConcept.version),
+        };
+
+        // Persist async — idempotent via op_id
+        recordConceptAttempt(updatedProgressRow, {
+          op_id: crypto.randomUUID(),
+          conceptId: targetConcept.conceptId,
+          sessionId: "session-" + s.startedAt,
+          grade: assessment.outcome === "incorrect" ? 0 : assessment.outcome === "ambiguous" ? 1 : 2,
+          mode: assessment.retrievalMode,
+          direction: assessment.direction,
+          fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
+          responseMs,
+          correct: isCorrect,
+          answeredAt: now,
+        }).catch(console.error);
+
+        // Mark this concept as FSRS-updated for this session
+        const nextFsrsUpdatedIds = new Set(s.fsrsUpdatedIds);
+        nextFsrsUpdatedIds.add(targetConcept.conceptId);
+        updates.fsrsUpdatedIds = nextFsrsUpdatedIds;
+
+        // Optimistic row update — use the already-built newConceptQueue if we re-queued,
+        // otherwise build a fresh copy. Always update index 's.index' (the original position).
+        const baseConceptQueue = updates.conceptQueue ?? [...s.conceptQueue];
+        baseConceptQueue[s.index] = updatedProgressRow;
+        updates.conceptQueue = baseConceptQueue;
+      }
+
+      // Single atomic update — prevents double-render race conditions
+      set(updates);
     },
 
     reveal() {
