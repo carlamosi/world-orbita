@@ -38,7 +38,17 @@ import type { ConceptProgressRow } from "../db/orbita-db";
 // ---------------------------------------------------------------------------
 // Singleton FSRS instance — default FSRS-6 parameters
 // ---------------------------------------------------------------------------
-let _fsrsInstance = fsrs({});
+let _fsrsInstance = fsrs({
+  // Standard 90% retention target — balances review load vs forgetting risk
+  request_retention: 0.9,
+  // Enable short-term learning steps (1m → 10m for new/wrong cards)
+  // Without this, wrong cards get scheduled days out instead of minutes
+  enable_short_term: true,
+  // Add slight fuzz to long intervals to prevent card bunching
+  enable_fuzz: true,
+  // Cap at 5 years — prevents rare edge-case stability runaway
+  maximum_interval: 36500,
+});
 
 /** Re-initialize with custom params (e.g., for testing or advanced users). */
 export function configureFsrs(params: Partial<FSRSParameters>): void {

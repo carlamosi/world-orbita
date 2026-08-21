@@ -9,8 +9,7 @@ import { spring } from "@/lib/motion";
 import { dateKey, currentStreak, longestStreak } from "@/lib/streak";
 import { DEFINITIONS } from "@/lib/unlocks";
 import { cn } from "@/lib/utils";
-import { retention, isDue, isOverdue } from "@/lib/spacedRepetition";
-import { normalizeState } from "@/lib/fsrs/adapter";
+import { normalizeState, getRetrievability } from "@/lib/fsrs/adapter";
 import { isConceptDue } from "@/lib/fsrs/planner";
 import { State } from "ts-fsrs";
 
@@ -36,8 +35,7 @@ export default function ProgressPage() {
       if (normalizeState(p.fsrs_state) === State.New) continue;
       byIso.set(p.iso3, (byIso.get(p.iso3) ?? 0) + 1);
       
-      const elapsedDays = Math.max(0, (Date.now() - p.fsrs_last_review) / 86400000);
-      const r = p.fsrs_stability ? retrievability(p.fsrs_stability, elapsedDays) : 0;
+      const r = getRetrievability(p, Date.now());
       if (r >= 0.8) {
         byIsoMastered.set(p.iso3, (byIsoMastered.get(p.iso3) ?? 0) + 1);
       }
@@ -230,7 +228,7 @@ export default function ProgressPage() {
 }
 
 import type { ConceptProgressRow } from "@/lib/db/orbita-db";
-import { retrievability } from "@/lib/fsrs/engine";
+import { getRetrievability } from "@/lib/fsrs/adapter";
 
 function MasteryStability({
   progress,
@@ -270,11 +268,10 @@ function MasteryStability({
       totalSeen++;
       p.seen++;
       
-      let r = 0;
+      // Use ts-fsrs getRetrievability — works on any state (handles nulls)
+      const r = getRetrievability(row, now);
+      
       if (normalizeState(row.fsrs_state) === State.Review && row.fsrs_stability) {
-        const elapsedDays = Math.max(0, (now - row.fsrs_last_review) / 86400000);
-        r = retrievability(row.fsrs_stability, elapsedDays);
-        
         p.intervalSum += row.fsrs_stability;
         p.intervalCount++;
         
@@ -289,7 +286,6 @@ function MasteryStability({
           }
         }
       } else {
-        r = 0.1;
         if (isConceptDue(row, now)) {
           dueToday++;
           p.due++;

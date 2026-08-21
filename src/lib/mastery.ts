@@ -4,9 +4,7 @@ import type { Skill, SkillStat } from "@/lib/db/orbita-db";
 import { getSkillStatMap } from "@/lib/db/repo";
 import { updateSrs, retention, type SrsState } from "@/lib/spacedRepetition";
 import { db } from "@/lib/db/orbita-db";
-import { retrievability } from "@/lib/fsrs/engine";
-import { normalizeState } from "@/lib/fsrs/adapter";
-import { State } from "ts-fsrs";
+import { getRetrievability, normalizeState } from "@/lib/fsrs/adapter";
 
 const DAY_MS = 86_400_000;
 
@@ -103,10 +101,7 @@ export async function selectMixedQuestions(
   
   const merged = new Map<string, { r: number; lastSeenAt: number }>();
   for (const c of concepts) {
-    let r = 0.05;
-    if (normalizeState(c.fsrs_state) !== State.New && c.fsrs_stability) {
-      r = retrievability(c.fsrs_stability, Math.max(0, (now - c.fsrs_last_review) / 86400000));
-    }
+    const r = getRetrievability(c, now);
     const cur = merged.get(c.iso3);
     if (!cur || r < cur.r) {
       merged.set(c.iso3, { r, lastSeenAt: c.fsrs_last_review || 0 });

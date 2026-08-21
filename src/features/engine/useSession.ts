@@ -220,12 +220,11 @@ export function createSessionStore({
         updates.answerState = "wrong";
       }
 
-      // 2. Re-queue wrong answers (once per conceptId per session)
-      //    Insert the card 4 positions ahead so the learner sees other questions first.
-      //    If the concept has no conceptId (guest/dummy row), still re-queue by iso3.
-      const requeueKey = targetConcept?.conceptId ?? target.iso3;
+      // 2. Re-queue wrong answers every time — unlimited retries within session.
+      //    Insert 3 positions ahead so the learner sees other questions first.
+      //    This matches the user requirement: wrong = always comes back.
       if (!isCorrect) {
-        const insertAt = Math.min(s.index + 4, s.queue.length);
+        const insertAt = Math.min(s.index + 3, s.queue.length);
         const newQueue = [...s.queue];
         const newConceptQueue = [...s.conceptQueue];
         newQueue.splice(insertAt, 0, target);
