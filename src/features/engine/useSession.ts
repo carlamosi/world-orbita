@@ -232,20 +232,9 @@ export function createSessionStore({
         updates.answerState = "wrong";
       }
 
-      // 2. Re-queue wrong answers every time — unlimited retries within session.
-      //    Insert 3 positions ahead so the learner sees other questions first.
-      //    This matches the user requirement: wrong = always comes back.
-      if (!isCorrect) {
-        const insertAt = Math.min(s.index + 3, s.queue.length);
-        const newQueue = [...s.queue];
-        const newConceptQueue = [...s.conceptQueue];
-        newQueue.splice(insertAt, 0, target);
-        newConceptQueue.splice(insertAt, 0, targetConcept ? { ...targetConcept } : null);
-        updates.queue = newQueue;
-        updates.conceptQueue = newConceptQueue;
-
-
-      }
+      // 2. FSRS handles learning steps now. We do not manually force failed cards 
+      // back into the current fixed queue. If FSRS assigns a 1m or 5m short-term 
+      // step, it will legitimately become due again when that time elapses.
 
       // 3. FSRS update — only the FIRST attempt per conceptId per session counts.
       //    Retries are for learning; we don't want to double-schedule.
