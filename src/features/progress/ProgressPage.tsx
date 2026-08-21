@@ -11,6 +11,7 @@ import { DEFINITIONS } from "@/lib/unlocks";
 import { cn } from "@/lib/utils";
 import { retention, isDue, isOverdue } from "@/lib/spacedRepetition";
 import { normalizeState } from "@/lib/fsrs/adapter";
+import { isConceptDue } from "@/lib/fsrs/planner";
 import { State } from "ts-fsrs";
 
 const CONTINENTS = ["Africa", "Americas", "Asia", "Europe", "Oceania"] as const;
@@ -279,7 +280,7 @@ function MasteryStability({
         
         if (row.fsrs_reps >= 2 && row.fsrs_due > now) active++;
         
-        if (row.fsrs_due <= now) {
+        if (isConceptDue(row, now)) {
           dueToday++;
           p.due++;
           if (now - row.fsrs_due > 86400000) {
@@ -289,7 +290,7 @@ function MasteryStability({
         }
       } else {
         r = 0.1;
-        if (row.fsrs_due <= now) {
+        if (isConceptDue(row, now)) {
           dueToday++;
           p.due++;
         }
