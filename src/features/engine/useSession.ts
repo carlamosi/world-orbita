@@ -38,7 +38,7 @@ export interface SessionState {
    * conceptIds that have already been re-queued once after a wrong answer.
    * Prevents infinite re-queuing loops.
    */
-  retriedIds: Set<string>;
+  
 
   current(): Country | null;
   /** Start a session. Pass `allCountries` for Complete Continent mode
@@ -88,7 +88,7 @@ export function createSessionStore({
     loading: false,
     questionStartedAt: 0,
     fsrsUpdatedIds: new Set(),
-    retriedIds: new Set(),
+    
 
     current() {
       const s = get();
@@ -111,7 +111,7 @@ export function createSessionStore({
         endedAt: null,
         questionStartedAt: 0,
         fsrsUpdatedIds: new Set(),
-        retriedIds: new Set(),
+        
       });
 
       let q: Country[] = [];
@@ -190,7 +190,7 @@ export function createSessionStore({
         loading: false,
         questionStartedAt: now,
         fsrsUpdatedIds: new Set(),
-        retriedIds: new Set(),
+        
       });
     },
 
@@ -224,7 +224,7 @@ export function createSessionStore({
       //    Insert the card 4 positions ahead so the learner sees other questions first.
       //    If the concept has no conceptId (guest/dummy row), still re-queue by iso3.
       const requeueKey = targetConcept?.conceptId ?? target.iso3;
-      if (!isCorrect && !s.retriedIds.has(requeueKey)) {
+      if (!isCorrect) {
         const insertAt = Math.min(s.index + 4, s.queue.length);
         const newQueue = [...s.queue];
         const newConceptQueue = [...s.conceptQueue];
@@ -233,9 +233,7 @@ export function createSessionStore({
         updates.queue = newQueue;
         updates.conceptQueue = newConceptQueue;
 
-        const nextRetriedIds = new Set(s.retriedIds);
-        nextRetriedIds.add(requeueKey);
-        updates.retriedIds = nextRetriedIds;
+
       }
 
       // 3. FSRS update — only the FIRST attempt per conceptId per session counts.
