@@ -144,6 +144,8 @@ function McQuestion({
   );
 }
 
+import { ContinentSelect, useContinentPref } from "@/features/engine/ContinentSelect";
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ReviewPage() {
@@ -151,58 +153,49 @@ export default function ReviewPage() {
   const [loadState, setLoadState] = useState<"loading" | "empty" | "ready">("loading");
   const [dueRows, setDueRows] = useState<ConceptProgressRow[]>([]);
   const [selectedIso3, setSelectedIso3] = useState<string | null>(null);
+  const [continent, setContinent] = useContinentPref();
 
   const current = s.queue[s.index] ?? null;
   const currentConcept = s.conceptQueue[s.index] ?? null;
   const finished = s.endedAt !== null;
 
-  // Load all due cards across every skill on mount
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoadState("loading");
-
-      const allRows: ConceptProgressRow[] = [];
-      for (const skill of ALL_SKILLS) {
-        const rows = await db().concept_progress.where("skill").equals(skill).toArray();
-        allRows.push(...rows);
-      }
-
-      if (cancelled) return;
-
-      const queue = generateDueTodayQueue(allRows);
-      setDueRows(queue);
-
-      if (queue.length === 0) {
-        setLoadState("empty");
-      } else {
-        setLoadState("ready");
-        await s.start({ conceptRows: queue });
-      }
-    }
-
-    void load();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const restart = useCallback(async () => {
+  const loadQueue = useCallback(async () => {
     setLoadState("loading");
     const allRows: ConceptProgressRow[] = [];
     for (const skill of ALL_SKILLS) {
       const rows = await db().concept_progress.where("skill").equals(skill).toArray();
       allRows.push(...rows);
     }
-    const queue = generateDueTodayQueue(allRows);
+
+    const filteredRows = continent === "All" 
+      ? allRows 
+      : allRows.filter((r) => {
+          const country = COUNTRIES.find((c) => c.iso3 === r.conceptId);
+          return country?.continent === continent;
+        });
+
+    const queue = generateDueTodayQueue(filteredRows);
     setDueRows(queue);
+
     if (queue.length === 0) {
       setLoadState("empty");
     } else {
       setLoadState("ready");
       await s.start({ conceptRows: queue });
     }
-  }, [s]);
+  }, [s, continent]);
+
+  // Load all due cards on mount or when continent changes
+  useEffect(() => {
+    let cancelled = false;
+    void loadQueue();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [continent]);
+
+  const restart = useCallback(async () => {
+    await loadQueue();
+  }, [loadQueue]);
 
   useAutoAdvance({ answerState: s.answerState, finished, next: s.next });
 
@@ -327,7 +320,10 @@ export default function ReviewPage() {
   /* ─── Empty state ─── */
   if (loadState === "empty") {
     return (
-      <div className="min-h-dvh flex items-center justify-center px-6">
+      <div className="relative min-h-dvh pt-24 pb-12 flex flex-col items-center justify-center px-4">
+        <div className="absolute top-24 z-20 flex justify-center w-full">
+          <ContinentSelect value={continent} onChange={setContinent} />
+        </div>
         <motion.div
           variants={fadeUp}
           initial="hidden"
@@ -410,8 +406,13 @@ export default function ReviewPage() {
           </span>
         </div>
 
+        {/* Continent Filter */}
+        <div className="absolute top-24 inset-x-0 z-20 flex justify-center pointer-events-auto">
+          <ContinentSelect value={continent} onChange={setContinent} />
+        </div>
+
         {/* Progress counter */}
-        <div className="absolute top-24 right-4 md:right-6 z-20">
+        <div className="absolute top-24 right-4 md:right-6 z-20 hidden sm:block">
           <span className="glass px-3 py-1 rounded-full font-mono text-xs text-white/50">
             {s.index + 1} / {s.queue.length}
           </span>
@@ -468,7 +469,12 @@ export default function ReviewPage() {
               )}>
                 {skillLabel}
               </span>
-              <span className="font-mono text-xs text-white/30">
+              
+              <div className="pointer-events-auto">
+                <ContinentSelect value={continent} onChange={setContinent} />
+              </div>
+
+              <span className="font-mono text-xs text-white/30 hidden sm:block">
                 {s.index + 1} / {s.queue.length}
               </span>
             </div>

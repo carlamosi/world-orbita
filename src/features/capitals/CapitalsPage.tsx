@@ -229,7 +229,7 @@ export default function CapitalsPage() {
                   <HardInput
                     target={current}
                     matchTarget={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
-                    onSubmit={(ok) => s.submit(ok)}
+                    onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
                     placeholder={activeSub === "countryToCap" ? "Type the capital…" : "Type the country…"}
                   />
                 </div>

@@ -138,7 +138,7 @@ export default function FlagsPage() {
               ) : (
                 <FlagToType
                   target={current}
-                  onSubmit={(ok) => s.submit(ok)}
+                  onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
                 />
               )}
             </div>

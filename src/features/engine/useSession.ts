@@ -45,7 +45,7 @@ export interface SessionState {
     /** Pre-built FSRS rows — bypasses the planner entirely. */
     conceptRows?: ConceptProgressRow[];
   }): Promise<void>;
-  submit(isCorrect: boolean): void;
+  submit(isCorrect: boolean, opts?: { retrievalMode?: "easy" | "hard" }): void;
   reveal(): void;
   next(): void;
 }
@@ -188,7 +188,7 @@ export function createSessionStore({
       });
     },
 
-    submit(isCorrect) {
+    submit(isCorrect, submitOpts) {
       const s = get();
       if (s.answerState !== "idle") return;
       const target = s.queue[s.index];
@@ -243,7 +243,7 @@ export function createSessionStore({
           attemptNumber: 1,
           hintsUsed: 0,
           questionType: conceptSkill,
-          retrievalMode: "easy",
+          retrievalMode: submitOpts?.retrievalMode ?? "easy",
           direction: `${conceptSkill}->answer`,
         });
 

@@ -89,11 +89,17 @@ const TIME_THRESHOLDS: Record<string, { veryFast: number; slow: number; verySlow
 function categorizeSpeed(
   responseMs: number,
   questionType: string,
+  retrievalMode?: string,
 ): AssessmentResult["speed"] {
-  const t = TIME_THRESHOLDS[questionType] ?? TIME_THRESHOLDS["_default"]!;
-  if (responseMs <= t.veryFast) return "very_fast";
-  if (responseMs >= t.verySlow) return "very_slow";
-  if (responseMs >= t.slow) return "slow";
+  const baseT = TIME_THRESHOLDS[questionType] ?? TIME_THRESHOLDS["_default"]!;
+  
+  // If typing (hard mode), the user needs significantly more time to input the answer
+  // Multiply thresholds by 2.5 to avoid penalizing recall-based typing.
+  const multiplier = retrievalMode === "hard" ? 2.5 : 1.0;
+  
+  if (responseMs <= baseT.veryFast * multiplier) return "very_fast";
+  if (responseMs >= baseT.verySlow * multiplier) return "very_slow";
+  if (responseMs >= baseT.slow * multiplier) return "slow";
   return "normal";
 }
 
@@ -113,13 +119,13 @@ function categorizeSpeed(
  * They do NOT adjust FSRS intervals.
  */
 export function assess(attempt: QuestionAttempt): AssessmentResult {
-  const { validationResult, responseMs, attemptNumber, hintsUsed, questionType } = attempt;
+  const { validationResult, responseMs, attemptNumber, hintsUsed, questionType, retrievalMode } = attempt;
 
   // ── Primary FSRS outcome ─────────────────────────────────────────────────
   let outcome: ReviewOutcome;
 
   // ── Behavioral signals for ORBITA policy (NOT for FSRS) ──────────────────
-  const speed = categorizeSpeed(responseMs, questionType);
+  const speed = categorizeSpeed(responseMs, questionType, retrievalMode);
 
   if (!validationResult.correct) {
     // Definitively wrong — unambiguous memory failure

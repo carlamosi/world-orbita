@@ -249,7 +249,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                     onPick={(iso3) => s.submit(iso3 === current.iso3)}
                   />
                 ) : (
-                  <HardInput target={current} onSubmit={(ok) => s.submit(ok)} />
+                  <HardInput target={current} onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })} />
                 )
               ) : (
                 <FeedbackBar
