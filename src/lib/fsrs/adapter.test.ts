@@ -78,17 +78,17 @@ function makeReviewRow(overrides: Partial<ConceptProgressRow> = {}): ConceptProg
 
 describe("outcomeToGrade — grade mapping", () => {
   it("correct → Rating.Good (3)", () => {
-    expect(outcomeToGrade("correct")).toBe(Rating.Good);
+    expect(outcomeToGrade("good")).toBe(Rating.Good);
     expect(Rating.Good).toBe(3);
   });
 
   it("incorrect → Rating.Again (1)", () => {
-    expect(outcomeToGrade("incorrect")).toBe(Rating.Again);
+    expect(outcomeToGrade("again")).toBe(Rating.Again);
     expect(Rating.Again).toBe(1);
   });
 
   it("ambiguous → Rating.Hard (2)", () => {
-    expect(outcomeToGrade("ambiguous")).toBe(Rating.Hard);
+    expect(outcomeToGrade("hard")).toBe(Rating.Hard);
     expect(Rating.Hard).toBe(2);
   });
 });
@@ -102,8 +102,8 @@ describe("processReview — mode does not affect FSRS grade", () => {
     const card = createNewCard();
     const now = Date.now();
 
-    const easyResult = processReview(card, "correct", now);
-    const hardResult = processReview(card, "correct", now);
+    const easyResult = processReview(card, "good", now);
+    const hardResult = processReview(card, "good", now);
 
     expect(easyResult.grade).toBe(hardResult.grade);
     expect(easyResult.grade).toBe(Rating.Good);
@@ -111,15 +111,15 @@ describe("processReview — mode does not affect FSRS grade", () => {
 
   it("incorrect in Hard mode → Rating.Again regardless of mode", () => {
     const card = createNewCard();
-    const result = processReview(card, "incorrect", Date.now());
+    const result = processReview(card, "again", Date.now());
     expect(result.grade).toBe(Rating.Again);
   });
 
   it("grade is identical for 'locate' and 'find' modes with same outcome", () => {
     const card = createNewCard();
     const now = Date.now();
-    const r1 = processReview(card, "correct", now);
-    const r2 = processReview(card, "correct", now);
+    const r1 = processReview(card, "good", now);
+    const r2 = processReview(card, "good", now);
     expect(r1.grade).toBe(r2.grade);
   });
 });
@@ -131,14 +131,14 @@ describe("processReview — mode does not affect FSRS grade", () => {
 describe("processReview — state transitions", () => {
   it("new card correct → enters Learning or Review state (not New)", () => {
     const card = createNewCard();
-    const { card: next } = processReview(card, "correct", Date.now());
+    const { card: next } = processReview(card, "good", Date.now());
     expect(next.state).not.toBe(State.New);
     expect(next.reps).toBe(1);
   });
 
   it("new card incorrect → enters Learning state (Again)", () => {
     const card = createNewCard();
-    const { card: next } = processReview(card, "incorrect", Date.now());
+    const { card: next } = processReview(card, "again", Date.now());
     expect(next.state).toBe(State.Learning);
     expect(next.lapses).toBe(0); // learning lapse ≠ review lapse
   });
@@ -146,7 +146,7 @@ describe("processReview — state transitions", () => {
   it("review card incorrect → lapses increment, enters Relearning", () => {
     const row = makeReviewRow({ fsrs_stability: 21, fsrs_reps: 5 });
     const card = rowToCard(row);
-    const { card: next } = processReview(card, "incorrect", Date.now());
+    const { card: next } = processReview(card, "again", Date.now());
     expect(next.state).toBe(State.Relearning);
     expect(next.lapses).toBeGreaterThan(card.lapses);
   });
@@ -154,7 +154,7 @@ describe("processReview — state transitions", () => {
   it("review card correct → stability increases", () => {
     const row = makeReviewRow();
     const card = rowToCard(row);
-    const { card: next } = processReview(card, "correct", Date.now());
+    const { card: next } = processReview(card, "good", Date.now());
     expect(next.stability).toBeGreaterThan(card.stability);
   });
 });
@@ -299,7 +299,7 @@ describe("getDueTodayCount vs generateDueTodayQueue — must not diverge", () =>
 // ---------------------------------------------------------------------------
 
 describe("assess — behavioral signal separation", () => {
-  it("incorrect → outcome 'incorrect' (clean)", () => {
+  it("incorrect → outcome 'again' (clean)", () => {
     const result = assess({
       validationResult: { correct: false, softCorrect: false },
       responseMs: 500,
@@ -307,32 +307,43 @@ describe("assess — behavioral signal separation", () => {
       hintsUsed: 0,
       questionType: "capital",
     });
-    expect(result.outcome).toBe("incorrect");
+    expect(result.outcome).toBe("again");
   });
 
-  it("correct → outcome 'correct'", () => {
+  it("correct (normal speed) → outcome 'good'", () => {
     const result = assess({
       validationResult: { correct: true, softCorrect: false },
-      responseMs: 2000,
+      responseMs: 10000,
       attemptNumber: 1,
       hintsUsed: 0,
       questionType: "capital",
     });
-    expect(result.outcome).toBe("correct");
+    expect(result.outcome).toBe("good");
   });
 
-  it("soft-correct → outcome 'ambiguous' (near-miss)", () => {
+  it("correct (instant speed) → outcome 'easy'", () => {
+    const result = assess({
+      validationResult: { correct: true, softCorrect: false },
+      responseMs: 2000, // 2000 is veryFast for capital
+      attemptNumber: 1,
+      hintsUsed: 0,
+      questionType: "capital",
+    });
+    expect(result.outcome).toBe("easy");
+  });
+
+  it("soft-correct → outcome 'hard' (near-miss)", () => {
     const result = assess({
       validationResult: { correct: true, softCorrect: true },
-      responseMs: 2000,
+      responseMs: 10000,
       attemptNumber: 1,
       hintsUsed: 0,
       questionType: "capital",
     });
-    expect(result.outcome).toBe("ambiguous");
+    expect(result.outcome).toBe("hard");
   });
 
-  it("slow response does NOT downgrade outcome to incorrect", () => {
+  it("slow response DOES downgrade outcome to hard", () => {
     const result = assess({
       validationResult: { correct: true, softCorrect: false },
       responseMs: 50000, // very slow
@@ -340,27 +351,26 @@ describe("assess — behavioral signal separation", () => {
       hintsUsed: 0,
       questionType: "capital",
     });
-    // Speed is behavioral signal only — correct outcome must remain
-    expect(result.outcome).toBe("correct");
+    expect(result.outcome).toBe("hard");
     expect(result.speed).toBe("very_slow");
   });
 
-  it("hints used are recorded as behavioral signal, not outcome downgrade", () => {
+  it("hints used DOES downgrade outcome to hard", () => {
     const result = assess({
       validationResult: { correct: true, softCorrect: false },
-      responseMs: 2000,
+      responseMs: 10000,
       attemptNumber: 1,
       hintsUsed: 1,
       questionType: "capital",
     });
-    expect(result.outcome).toBe("correct");
+    expect(result.outcome).toBe("hard");
     expect(result.hintsUsed).toBe(true);
   });
 
   it("Easy mode correct → same outcome as Hard mode correct", () => {
     const easy = assess({
       validationResult: { correct: true, softCorrect: false },
-      responseMs: 2000,
+      responseMs: 10000,
       attemptNumber: 1,
       hintsUsed: 0,
       questionType: "capital",
@@ -368,14 +378,14 @@ describe("assess — behavioral signal separation", () => {
     });
     const hard = assess({
       validationResult: { correct: true, softCorrect: false },
-      responseMs: 2000,
+      responseMs: 10000,
       attemptNumber: 1,
       hintsUsed: 0,
       questionType: "capital",
       retrievalMode: "hard",
     });
     expect(easy.outcome).toBe(hard.outcome);
-    expect(easy.outcome).toBe("correct");
+    expect(easy.outcome).toBe("good");
   });
 });
 
@@ -389,7 +399,7 @@ describe("skill independence — different skills are independent", () => {
     const flagCard = createNewCard();
 
     // Process capital review
-    const { card: updatedCapital } = processReview(capitalCard, "correct", Date.now());
+    const { card: updatedCapital } = processReview(capitalCard, "good", Date.now());
 
     // Flag card is untouched — ts-fsrs only mutates the card you pass it
     expect(flagCard.state).toBe(State.New);

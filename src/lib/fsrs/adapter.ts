@@ -50,7 +50,7 @@ export function configureFsrs(params: Partial<FSRSParameters>): void {
 // ---------------------------------------------------------------------------
 
 /** Strict binary outcome after answer evaluation. */
-export type ReviewOutcome = "correct" | "incorrect" | "ambiguous";
+export type ReviewOutcome = "again" | "hard" | "good" | "easy";
 
 /**
  * A normalized review event emitted by every ORBITA game mode.
@@ -211,12 +211,14 @@ export function processReview(
 /** Conservative grade mapping: correctness → FSRS rating. Mode-agnostic. */
 export function outcomeToGrade(outcome: ReviewOutcome): Grade {
   switch (outcome) {
-    case "incorrect":
+    case "again":
       return Rating.Again; // 1
-    case "ambiguous":
+    case "hard":
       return Rating.Hard;  // 2
-    case "correct":
+    case "good":
       return Rating.Good;  // 3
+    case "easy":
+      return Rating.Easy;  // 4
   }
 }
 

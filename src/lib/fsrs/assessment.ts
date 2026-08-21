@@ -118,19 +118,22 @@ export function assess(attempt: QuestionAttempt): AssessmentResult {
   // ── Primary FSRS outcome ─────────────────────────────────────────────────
   let outcome: ReviewOutcome;
 
-  if (!validationResult.correct) {
-    // Definitively wrong — unambiguous memory failure
-    outcome = "incorrect";
-  } else if (validationResult.softCorrect) {
-    // Functionally correct but not exact — partial recall
-    outcome = "ambiguous";
-  } else {
-    // Clean correct answer
-    outcome = "correct";
-  }
-
   // ── Behavioral signals for ORBITA policy (NOT for FSRS) ──────────────────
   const speed = categorizeSpeed(responseMs, questionType);
+
+  if (!validationResult.correct) {
+    // Definitively wrong — unambiguous memory failure
+    outcome = "again";
+  } else if (validationResult.softCorrect || hintsUsed > 0 || speed === "slow" || speed === "very_slow") {
+    // Functionally correct but not exact — partial recall, or hesitant, or assisted
+    outcome = "hard";
+  } else if (speed === "very_fast") {
+    // Clean correct answer, instant recall
+    outcome = "easy";
+  } else {
+    // Clean correct answer, normal recall
+    outcome = "good";
+  }
 
   return {
     outcome,

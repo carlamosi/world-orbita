@@ -250,7 +250,7 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
         op_id: crypto.randomUUID(),
         conceptId: targetConcept.conceptId,
         sessionId: "speed-" + s.startedAt,
-        grade: assessment.outcome === "incorrect" ? 0 : assessment.outcome === "ambiguous" ? 1 : 2,
+        grade: assessment.outcome === "again" ? 0 : assessment.outcome === "hard" ? 1 : assessment.outcome === "good" ? 2 : 3,
         mode: assessment.retrievalMode,
         direction: assessment.direction,
         fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
