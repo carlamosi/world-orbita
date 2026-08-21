@@ -217,7 +217,19 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
     const responseMs = Math.max(0, Date.now() - item.shownAt);
     const now = Date.now();
     
-      getConceptProgress(`${item.country.iso3}:${item.skill}`).then((targetConcept) => {
+    // Speed Mode implicit subModes mapped from the visual prompt logic in SpeedPage.tsx
+    let actualDirection = "";
+    if (item.skill === "name") actualDirection = "name";
+    else if (item.skill === "flag") actualDirection = "countryToFlag";
+    else if (item.skill === "capital") actualDirection = "countryToCap";
+    else if (item.skill === "location") actualDirection = "capToCountry";
+    
+    // FSRS expects conceptId format: iso3:skill:subMode
+    // Speed mode maps "location" visually to capToCountry (which is a capital skill)
+    const targetSkill = item.skill === "location" ? "capital" : item.skill;
+    const conceptId = `${item.country.iso3}:${targetSkill}:${actualDirection}`;
+    
+    getConceptProgress(conceptId).then((targetConcept) => {
       if (!targetConcept) return;
 
       // Step 1: Evaluate the answer
@@ -226,9 +238,9 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
         responseMs,
         attemptNumber: 1,
         hintsUsed: 0,
-        questionType: item.skill,
+        questionType: targetSkill,
         retrievalMode: "easy",
-        direction: `${item.skill}->answer`,
+        direction: actualDirection,
       });
 
       // Step 2: Process through official FSRS-6 adapter

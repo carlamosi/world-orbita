@@ -209,10 +209,20 @@ export default function ReviewPage() {
     setSelectedIso3(null);
   }, [s.index]);
 
-  const skill = (currentConcept?.skill ?? "flag") as string;
+  const rawSkill = (currentConcept?.skill ?? "flag") as string;
+  let skill = rawSkill;
+  let subMode = "";
+  if (currentConcept && currentConcept.conceptId) {
+    const parts = currentConcept.conceptId.split(":");
+    if (parts.length >= 3) {
+       skill = parts[1] as string;
+       subMode = parts[2] as string;
+    }
+  }
+
   const skillLabel = SKILL_LABELS[skill] ?? skill;
   const skillColor = SKILL_COLORS[skill] ?? SKILL_COLORS.flag!;
-  const isLocationSkill = skill === "location";
+  const isLocationSkill = skill === "location" || subMode === "find" || subMode === "locator";
 
   // Generate 4 MC options (continent-scoped) — used for flag / capital / name
   const mcOptions: Country[] = useMemo(() => {
@@ -241,6 +251,19 @@ export default function ReviewPage() {
     if (!current) return null;
     switch (skill) {
       case "flag":
+        if (subMode === "countryToFlag") {
+          return {
+            prompt: `Find the flag of ${current.name}`,
+            visual: (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
+                  {current.name}
+                </div>
+              </div>
+            ),
+            subtitle: `Capital: ${current.capital ?? "—"}`,
+          };
+        }
         return {
           prompt: "Which country owns this flag?",
           visual: (
@@ -254,6 +277,19 @@ export default function ReviewPage() {
           subtitle: `Capital: ${current.capital ?? "—"}`,
         };
       case "capital":
+        if (subMode === "capToCountry") {
+          return {
+            prompt: `Which country's capital is ${current.capital}?`,
+            visual: (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <div className="font-display text-5xl md:text-6xl font-bold text-[color:var(--cyan)] tracking-tight text-center">
+                  {current.capital}
+                </div>
+              </div>
+            ),
+            subtitle: `Capital of ${current.name}`,
+          };
+        }
         return {
           prompt: `What's the capital of ${current.name}?`,
           visual: (
@@ -289,7 +325,7 @@ export default function ReviewPage() {
           subtitle: `Capital: ${current.capital ?? "—"}`,
         };
     }
-  }, [current, skill]);
+  }, [current, skill, subMode]);
 
   // ── Globe submit handler (location skill) ──────────────────────────────────
   const handleGlobeClick = useCallback(

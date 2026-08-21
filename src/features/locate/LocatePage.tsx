@@ -80,11 +80,11 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
     (c: ContinentChoice, sMode: SubMode, findLength: SessionMode) => {
       if (sMode === "find" && findLength === "complete") {
         const all = selectAllForContinent(c === "All" ? null : c);
-        void findSession.start({ allCountries: all });
+        void findSession.start({ allCountries: all, subMode: sMode });
       } else if (sMode === "find") {
-        void findSession.start({ continent: c === "All" ? undefined : c });
+        void findSession.start({ continent: c === "All" ? undefined : c, subMode: sMode });
       } else {
-        void nameSession.start({ continent: c === "All" ? undefined : c });
+        void nameSession.start({ continent: c === "All" ? undefined : c, subMode: sMode });
       }
     },
     [findSession, nameSession],

@@ -286,13 +286,60 @@ export class OrbitaDB extends Dexie {
           await tx.table("concept_progress").bulkPut(updates);
         }
       });
+
+    // v9: Split FSRS memory traces by direction. Append default subMode to conceptId for existing data.
+    this.version(9).upgrade(async (tx) => {
+      const rows = await tx.table<ConceptProgressRow>("concept_progress").toArray();
+      const updates = [];
+      const deletes = [];
+      for (const r of rows) {
+        const parts = r.conceptId.split(":");
+        if (parts.length === 2) {
+          let newSubMode = "";
+          if (r.skill === "capital") newSubMode = "countryToCap";
+          else if (r.skill === "flag") newSubMode = "flagToCountry";
+          else if (r.skill === "name") newSubMode = "name";
+          else if (r.skill === "location") newSubMode = "find";
+          
+          if (newSubMode) {
+            updates.push({ ...r, conceptId: `${r.conceptId}:${newSubMode}` });
+            deletes.push(r.conceptId);
+          }
+        }
+      }
+      if (updates.length > 0) {
+        await tx.table("concept_progress").bulkPut(updates);
+        await tx.table("concept_progress").bulkDelete(deletes);
+      }
+      
+      const history = await tx.table<QuestionHistoryRow>("question_history").toArray();
+      const hUpdates = [];
+      for (const h of history) {
+        const parts = h.conceptId.split(":");
+        if (parts.length === 2) {
+          const skill = parts[1];
+          let newSubMode = "";
+          if (skill === "capital") newSubMode = "countryToCap";
+          else if (skill === "flag") newSubMode = "flagToCountry";
+          else if (skill === "name") newSubMode = "name";
+          else if (skill === "location") newSubMode = "find";
+          
+          if (newSubMode) {
+            hUpdates.push({ ...h, conceptId: `${h.conceptId}:${newSubMode}` });
+          }
+        }
+      }
+      if (hUpdates.length > 0) {
+        await tx.table("question_history").bulkPut(hUpdates);
+      }
+    });
   }
 }
 
 export function createOrbitaDb(name: string): OrbitaDB {
   const d = new OrbitaDB(name);
   d.meta
-    .put({ id: "meta", schemaVersion: 8, lastOpenedAt: Date.now(), prefs: {} })
+    .put({ id: "meta", schemaVersion: 9, lastOpenedAt: Date.now(), prefs: {} })
     .catch(() => {});
   return d;
 }

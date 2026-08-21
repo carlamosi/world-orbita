@@ -59,7 +59,15 @@ export default function CapitalsPage() {
     return s.queue.map(() => types[Math.floor(Math.random() * types.length)]!);
   }, [s.queue]);
 
-  const activeSub = sub === "mixed" ? (turnSubModes[s.index] ?? "countryToCap") : sub;
+  const activeSub = useMemo(() => {
+    if (sub !== "mixed") return sub;
+    const cRow = s.conceptQueue[s.index];
+    if (cRow) {
+      const parts = cRow.conceptId.split(":");
+      if (parts.length >= 3) return parts[2] as SubMode;
+    }
+    return turnSubModes[s.index] ?? "countryToCap";
+  }, [sub, s.conceptQueue, s.index, turnSubModes]);
 
   // Persist preferences
   useEffect(() => {
@@ -73,7 +81,7 @@ export default function CapitalsPage() {
 
   // Restart on format changes
   useEffect(() => {
-    void s.start({ continent: continent === "All" ? undefined : continent });
+    void s.start({ continent: continent === "All" ? undefined : continent, subMode: sub });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continent, sub, mode]);
 
@@ -189,7 +197,7 @@ export default function CapitalsPage() {
           wrong={s.wrong}
           bestCombo={s.bestCombo}
           durationMs={(s.endedAt ?? 0) - s.startedAt}
-          onReplay={() => s.start({ continent: continent === "All" ? undefined : continent })}
+          onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
         />
       </div>
     );
@@ -272,7 +280,7 @@ export default function CapitalsPage() {
         wrong={s.wrong}
         bestCombo={s.bestCombo}
         durationMs={(s.endedAt ?? 0) - s.startedAt}
-        onReplay={() => s.start({ continent: continent === "All" ? undefined : continent })}
+        onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
       />
     </div>
   );

@@ -48,7 +48,7 @@ export default function FlagsPage() {
 
   // Restart session whenever continent or sub-mode changes
   useEffect(() => {
-    void s.start({ continent: continent === "All" ? undefined : continent });
+    void s.start({ continent: continent === "All" ? undefined : continent, subMode: sub });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continent, sub]);
 
@@ -169,7 +169,7 @@ export default function FlagsPage() {
         wrong={s.wrong}
         bestCombo={s.bestCombo}
         durationMs={(s.endedAt ?? 0) - s.startedAt}
-        onReplay={() => s.start({ continent: continent === "All" ? undefined : continent })}
+        onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
       />
     </div>
   );

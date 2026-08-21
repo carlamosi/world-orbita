@@ -133,6 +133,10 @@ export function createSessionStore({
           const validIso3s = new Set(COUNTRIES.filter(c => c.continent === opts.continent).map(c => c.iso3));
           pool = allConcepts.filter(c => validIso3s.has(c.iso3));
         }
+
+        if (opts?.subMode && opts.subMode !== "mixed") {
+          pool = pool.filter(c => c.conceptId.endsWith(`:${opts.subMode}`));
+        }
         
         // If there are not enough concepts seeded yet (e.g. fresh install), create dummy ones
         if (pool.length < questions) {
@@ -141,8 +145,18 @@ export function createSessionStore({
           for (const c of candidates) {
             if (pool.length >= questions) break;
             if (!used.has(c.iso3)) {
+              // For mixed mode, default to a standard subMode if we must seed, or use provided subMode
+              let defaultSubMode = "";
+              if (skill === "capital") defaultSubMode = "countryToCap";
+              if (skill === "flag") defaultSubMode = "flagToCountry";
+              if (skill === "name") defaultSubMode = "name";
+              if (skill === "location") defaultSubMode = "find";
+              
+              const sm = (opts?.subMode && opts.subMode !== "mixed") ? opts.subMode : defaultSubMode;
+              const newConceptId = sm ? `${c.iso3}:${skill}:${sm}` : `${c.iso3}:${skill}`;
+              
               pool.push({
-                conceptId: `${c.iso3}:${skill}`,
+                conceptId: newConceptId,
                 iso3: c.iso3,
                 skill,
                 fsrs_state: State.New as any,
@@ -236,6 +250,8 @@ export function createSessionStore({
 
         // Use the concept's own skill (critical for Due Today mixed sessions)
         const conceptSkill = targetConcept.skill ?? skill;
+        const parts = targetConcept.conceptId.split(":");
+        const actualDirection = parts.length >= 3 ? parts[2] : `${conceptSkill}->answer`;
 
         const assessment = assess({
           validationResult: { correct: isCorrect, softCorrect: false },
@@ -244,7 +260,7 @@ export function createSessionStore({
           hintsUsed: 0,
           questionType: conceptSkill,
           retrievalMode: submitOpts?.retrievalMode ?? "easy",
-          direction: `${conceptSkill}->answer`,
+          direction: actualDirection,
         });
 
         const currentCard = rowToCard(targetConcept);
