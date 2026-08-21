@@ -154,7 +154,10 @@ export function createSessionStore({
               if (skill === "location") defaultSubMode = "find";
               
               const sm = (opts?.subMode && opts.subMode !== "mixed") ? opts.subMode : defaultSubMode;
-              const newConceptId = sm ? `${c.iso3}:${skill}:${sm}` : `${c.iso3}:${skill}`;
+              // Always use 3-part conceptId — a bare iso3:skill would never be matched by
+              // any directional session query and would silently accumulate as dead weight.
+              // defaultSubMode covers all known skills; unknown skills fall back to "default".
+              const newConceptId = `${c.iso3}:${skill}:${sm || "default"}`;
               
               pool.push({
                 conceptId: newConceptId,
