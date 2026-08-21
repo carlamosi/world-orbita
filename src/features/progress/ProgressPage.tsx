@@ -187,7 +187,7 @@ export default function ProgressPage() {
               for (const p of conceptProgress) {
                 if (normalizeState(p.fsrs_state) === State.New) continue;
                 const arr = grouped.get(p.iso3) || [];
-                const r = p.fsrs_stability ? retrievability(p.fsrs_stability, Math.max(0, (Date.now() - p.fsrs_last_review) / 86400000)) : 0;
+                const r = getRetrievability(p, Date.now());
                 arr.push(r);
                 grouped.set(p.iso3, arr);
               }
@@ -228,7 +228,6 @@ export default function ProgressPage() {
 }
 
 import type { ConceptProgressRow } from "@/lib/db/orbita-db";
-import { getRetrievability } from "@/lib/fsrs/adapter";
 
 function MasteryStability({
   progress,
@@ -462,7 +461,7 @@ function ConfidenceMap({ progress }: { progress: ConceptProgressRow[] }) {
   const grouped = new Map<string, number[]>();
   for (const p of progress) {
     if (normalizeState(p.fsrs_state) === State.New) continue;
-    const r = p.fsrs_stability ? retrievability(p.fsrs_stability, Math.max(0, (Date.now() - p.fsrs_last_review) / 86400000)) : 0.1;
+    const r = getRetrievability(p, Date.now());
     const arr = grouped.get(p.iso3) || [];
     arr.push(r);
     grouped.set(p.iso3, arr);
@@ -516,7 +515,7 @@ function SkillPanel({
   const rows = progress
     .filter((p) => p.skill === skill && normalizeState(p.fsrs_state) !== State.New)
     .map((p) => {
-      const r = p.fsrs_stability ? retrievability(p.fsrs_stability, Math.max(0, (Date.now() - p.fsrs_last_review) / 86400000)) : 0.1;
+      const r = getRetrievability(p, Date.now());
       return { iso3: p.iso3, r };
     });
     

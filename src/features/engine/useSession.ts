@@ -41,6 +41,7 @@ export interface SessionState {
    * supply a pre-built mixed-skill FSRS queue (used by Due Today). */
   start(opts?: {
     continent?: string;
+    subMode?: string;
     allCountries?: Country[];
     /** Pre-built FSRS rows — bypasses the planner entirely. */
     conceptRows?: ConceptProgressRow[];

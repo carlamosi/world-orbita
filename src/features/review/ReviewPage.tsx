@@ -170,7 +170,8 @@ export default function ReviewPage() {
     const filteredRows = continent === "All" 
       ? allRows 
       : allRows.filter((r) => {
-          const country = COUNTRIES.find((c) => c.iso3 === r.conceptId);
+          const iso3 = r.conceptId.split(":")[0];
+          const country = COUNTRIES.find((c) => c.iso3 === iso3);
           return country?.continent === continent;
         });
 
