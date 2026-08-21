@@ -34,12 +34,6 @@ export interface SessionState {
    */
   fsrsUpdatedIds: Set<string>;
 
-  /**
-   * conceptIds that have already been re-queued once after a wrong answer.
-   * Prevents infinite re-queuing loops.
-   */
-  
-
   current(): Country | null;
   /** Start a session. Pass `allCountries` for Complete Continent mode
    * (every country played exactly once in random order). Pass `continent`
