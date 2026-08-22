@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
+import { pickRandomCountries } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -23,12 +23,11 @@ import { getPref, setPref } from "@/lib/db/repo";
 
 const useFlagSession = createSessionStore({ mode: "flag", skill: "flag" });
 
-type SubMode = "flagToCountry" | "countryToFlag" | "flagToType";
+type SubMode = "flagToCountry" | "flagToType";
 
 const SUB_MODE_OPTIONS = [
-  { value: "flagToCountry" as const, label: "Flag → Country" },
-  { value: "countryToFlag" as const, label: "Country → Flag" },
-  { value: "flagToType" as const, label: "Flag → Type" },
+  { value: "flagToCountry" as const, label: "Easy (Flag → Country)" },
+  { value: "flagToType" as const, label: "Hard (Flag → Type)" },
 ];
 
 export default function FlagsPage() {
@@ -40,7 +39,11 @@ export default function FlagsPage() {
 
   // Persist sub-mode preference
   useEffect(() => {
-    getPref("flags.sub").then((v) => v && setSub(v as SubMode));
+    getPref("flags.sub").then((v) => {
+      if (v === "flagToCountry" || v === "flagToType") {
+        setSub(v as SubMode);
+      }
+    });
   }, []);
   useEffect(() => {
     setPref("flags.sub", sub);
@@ -67,9 +70,9 @@ export default function FlagsPage() {
   );
 
   const options = useMemo(() => {
-    if (!current) return [];
+    if (!current || sub === "flagToType") return [];
     const distractors = pickRandomCountries(
-      sub === "flagToCountry" ? 3 : 5,
+      3,
       new Set([current.iso3]),
       continent === "All" ? undefined : continent,
     );
@@ -112,8 +115,6 @@ export default function FlagsPage() {
               title={
                 sub === "flagToCountry" ? (
                   "Which country owns this flag?"
-                ) : sub === "countryToFlag" ? (
-                  <>Find the flag of <span className="text-glow-cyan">{current.name}</span></>
                 ) : (
                   "Name this flag"
                 )
@@ -123,13 +124,6 @@ export default function FlagsPage() {
             <div className="w-full flex justify-center">
               {sub === "flagToCountry" ? (
                 <FlagToCountry
-                  target={current}
-                  options={options}
-                  disabled={s.answerState !== "idle"}
-                  onPick={(iso3) => s.submit(iso3 === current.iso3)}
-                />
-              ) : sub === "countryToFlag" ? (
-                <CountryToFlag
                   target={current}
                   options={options}
                   disabled={s.answerState !== "idle"}
@@ -229,40 +223,6 @@ function FlagToCountry({
           </button>
         ))}
       </div>
-    </div>
-  );
-}
-
-function CountryToFlag({
-  target,
-  options,
-  disabled,
-  onPick,
-}: {
-  target: Country;
-  options: Country[];
-  disabled: boolean;
-  onPick: (iso3: string) => void;
-}) {
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 max-w-3xl mx-auto w-full">
-      {options.map((o) => (
-        <button
-          key={o.iso3}
-          onClick={() => onPick(o.iso3)}
-          disabled={disabled}
-          className={cn(
-            "group relative aspect-[3/2] rounded-2xl overflow-hidden transition-transform duration-200",
-            "hover:scale-[1.03] disabled:opacity-60 disabled:hover:scale-100",
-            "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
-            "shadow-[0_20px_50px_-20px_rgba(0,0,0,0.6)]",
-            o.iso3 === target.iso3 && "ring-2 ring-transparent",
-          )}
-        >
-          <FlagImage iso2={o.iso2} alt={o.name} className="absolute inset-0 rounded-2xl overflow-hidden" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-        </button>
-      ))}
     </div>
   );
 }

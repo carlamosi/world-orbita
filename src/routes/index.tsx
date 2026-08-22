@@ -46,7 +46,7 @@ const MODES = [
   {
     to: "/flags",
     title: "Flags",
-    tagline: "Flag to country, country to flag.",
+    tagline: "Flag to country in Easy or Hard mode.",
     tone: "neon" as const,
   },
   {

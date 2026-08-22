@@ -7,6 +7,7 @@ export default defineConfig({
     timeout: 5000,
   },
   fullyParallel: true,
+  workers: process.env.CI ? undefined : 1,
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',

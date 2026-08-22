@@ -253,19 +253,6 @@ export default function ReviewPage() {
     if (!current) return null;
     switch (skill) {
       case "flag":
-        if (subMode === "countryToFlag") {
-          return {
-            prompt: `Find the flag of ${current.name}`,
-            visual: (
-              <div className="flex flex-col items-center gap-3 py-6">
-                <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
-                  {current.name}
-                </div>
-              </div>
-            ),
-            subtitle: `Capital: ${current.capital ?? "—"}`,
-          };
-        }
         return {
           prompt: "Which country owns this flag?",
           visual: (

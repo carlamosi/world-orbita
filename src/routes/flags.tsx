@@ -6,7 +6,7 @@ export const Route = createFileRoute("/flags")({
   head: () => ({
     meta: [
       { title: "Flags — Orbita" },
-      { name: "description", content: "Master every flag, both directions." },
+      { name: "description", content: "Master every flag: identify countries in Easy or Hard mode." },
     ],
   }),
   component: FlagsPage,
