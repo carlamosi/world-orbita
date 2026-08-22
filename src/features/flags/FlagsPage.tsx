@@ -96,62 +96,70 @@ export default function FlagsPage() {
     <div className="relative min-h-dvh pt-20 flex flex-col items-center">
       {!finished && (current || s.loading) && (
         <>
-          {/* Minimized HUD Toolbar */}
-          <div className="w-full max-w-5xl mx-auto px-4 md:px-6 mb-4 z-20 flex items-center justify-between gap-4">
-            <ContinentSelect value={continent} onChange={restartWithContinent} />
-            <ModeDropdown
-              options={SUB_MODE_OPTIONS}
-              value={sub}
-              onChange={setSub}
-            />
-          </div>
-
-          {/* Gameplay Content Area */}
-          <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-5xl gap-6 md:gap-8">
-            <PromptPill
-              keyId={`${sub}-${current.iso3}`}
-              index={s.index}
-              total={s.queue.length}
-              title={
-                sub === "flagToCountry" ? (
-                  "Which country owns this flag?"
-                ) : (
-                  "Name this flag"
-                )
-              }
-            />
-
-            <div className="w-full flex justify-center">
-              {sub === "flagToCountry" ? (
-                <FlagToCountry
-                  target={current}
-                  options={options}
-                  disabled={s.answerState !== "idle"}
-                  onPick={(iso3) => s.submit(iso3 === current.iso3)}
-                />
-              ) : (
-                <FlagToType
-                  target={current}
-                  onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
-                />
-              )}
+          {s.loading && !current ? (
+            <div className="flex items-center justify-center min-h-[200px]">
+              <span className="text-white">Loading…</span>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Minimized HUD Toolbar */}
+              <div className="w-full max-w-5xl mx-auto px-4 md:px-6 mb-4 z-20 flex items-center justify-between gap-4">
+                <ContinentSelect value={continent} onChange={restartWithContinent} />
+                <ModeDropdown
+                  options={SUB_MODE_OPTIONS}
+                  value={sub}
+                  onChange={setSub}
+                />
+              </div>
 
-          {/* Feedback bar */}
-          <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
-            <div className="pointer-events-auto">
-              <FeedbackBar
-                show={s.answerState !== "idle"}
-                state={s.answerState as "correct" | "wrong" | "revealed"}
-                title={current.name}
-                subtitle={`Capital: ${current.capital ?? "—"}`}
-                onNext={() => s.next()}
-                onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                hideNext
-              />
-            </div>
-          </div>
+              {/* Gameplay Content Area */}
+              <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-5xl gap-6 md:gap-8">
+                <PromptPill
+                  keyId={`${sub}-${current?.iso3 ?? ''}`}
+                  index={s.index}
+                  total={s.queue.length}
+                  title={
+                    sub === "flagToCountry" ? (
+                      "Which country owns this flag?"
+                    ) : (
+                      "Name this flag"
+                    )
+                  }
+                />
+
+                <div className="w-full flex justify-center">
+                  {sub === "flagToCountry" ? (
+                    <FlagToCountry
+                      target={current}
+                      options={options}
+                      disabled={s.answerState !== "idle"}
+                      onPick={(iso3) => s.submit(iso3 === current?.iso3)}
+                    />
+                  ) : (
+                    <FlagToType
+                      target={current}
+                      onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Feedback bar */}
+              <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
+                <div className="pointer-events-auto">
+                  <FeedbackBar
+                    show={s.answerState !== "idle"}
+                    state={s.answerState as "correct" | "wrong" | "revealed"}
+                    title={current?.name ?? ""}
+                    subtitle={`Capital: ${current?.capital ?? "—"}`}
+                    onNext={() => s.next()}
+                    onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
+                    hideNext
+                  />
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
 
