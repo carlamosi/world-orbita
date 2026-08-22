@@ -10,31 +10,13 @@ import { recordSessionEnd } from "@/lib/db/repo";
 import { State, ConvertStepUnitToMinutes } from "ts-fsrs";
 
 /**
- * Estimated average response time per question (ms).
- * Used to translate FSRS relearning steps (minutes) into queue offset positions.
- * Conservative estimate — actual sessions tend to be faster, so the offset
- * errs on the side of more interleaving rather than less.
+ * Spacing by item-count: re-insert failed card after N other answered cards
+ * (default N=6, clamped to remaining queue room).
  */
-const APPROX_MS_PER_QUESTION = 15_000; // 15 s / question
+export const DEFAULT_RELEARNING_OFFSET = 6;
 
-/**
- * Given an FSRS relearning step (e.g. "1m", "10m"), return how many queue
- * positions ahead to re-insert the failed card.
- * Minimum 2 (always at least one other card in between).
- * Maximum: half of remaining queue (never dominates the session).
- */
-function stepToQueueOffset(stepUnit: string, remainingCards: number): number {
-  // ConvertStepUnitToMinutes accepts d/h/m units. Seconds ("s") are rare in
-  // FSRS defaults but guard against them by treating unknown suffixes as 1m.
-  let minutes = 1;
-  try {
-    minutes = ConvertStepUnitToMinutes(stepUnit as `${number}${"m" | "h" | "d"}`);
-  } catch {
-    // fallback: treat as 1 minute
-  }
-  const ms = minutes * 60_000;
-  const positions = Math.round(ms / APPROX_MS_PER_QUESTION);
-  return Math.max(2, Math.min(positions, Math.max(2, Math.floor(remainingCards / 2))));
+function stepToQueueOffset(_stepUnit: string, remainingCards: number, countSpacing = DEFAULT_RELEARNING_OFFSET): number {
+  return Math.max(2, Math.min(countSpacing, Math.max(2, remainingCards)));
 }
 
 export type AnswerState = "idle" | "correct" | "wrong" | "revealed";

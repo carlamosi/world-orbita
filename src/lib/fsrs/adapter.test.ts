@@ -313,7 +313,7 @@ describe("assess — behavioral signal separation", () => {
   it("correct (normal speed) → outcome 'good'", () => {
     const result = assess({
       validationResult: { correct: true, softCorrect: false },
-      responseMs: 10000,
+      responseMs: 4000,
       attemptNumber: 1,
       hintsUsed: 0,
       questionType: "capital",
@@ -370,7 +370,7 @@ describe("assess — behavioral signal separation", () => {
   it("Easy mode correct → same outcome as Hard mode correct", () => {
     const easy = assess({
       validationResult: { correct: true, softCorrect: false },
-      responseMs: 10000,
+      responseMs: 3000,
       attemptNumber: 1,
       hintsUsed: 0,
       questionType: "capital",
@@ -378,7 +378,7 @@ describe("assess — behavioral signal separation", () => {
     });
     const hard = assess({
       validationResult: { correct: true, softCorrect: false },
-      responseMs: 10000,
+      responseMs: 7000,
       attemptNumber: 1,
       hintsUsed: 0,
       questionType: "capital",

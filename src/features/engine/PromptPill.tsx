@@ -7,6 +7,7 @@ interface Props {
   index: number;
   total: number;
   title: ReactNode;
+  isRelearning?: boolean;
 }
 
 /**
@@ -14,7 +15,7 @@ interface Props {
  * Designed to sit at the top of an immersive view (globe, flag, etc.)
  * without ever covering the primary subject.
  */
-export function PromptPill({ keyId, index, total, title }: Props) {
+export function PromptPill({ keyId, index, total, title, isRelearning }: Props) {
   return (
     <motion.div
       key={keyId}
@@ -27,6 +28,11 @@ export function PromptPill({ keyId, index, total, title }: Props) {
         <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/45 whitespace-nowrap tabular-nums">
           {index + 1} / {total}
         </span>
+        {isRelearning && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-[color:var(--coral)]/15 border border-[color:var(--coral)]/30 text-[color:var(--coral)] whitespace-nowrap">
+            reviewing again shortly
+          </span>
+        )}
         <span className="h-3 w-px bg-white/15 shrink-0" />
         <span className="font-display text-sm md:text-base text-white tracking-tight truncate">
           {title}

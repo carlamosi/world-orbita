@@ -260,14 +260,35 @@ export function isDue(row: ConceptProgressRow, nowMs = Date.now()): boolean {
 /**
  * Returns the retrievability (probability of recall) for a concept.
  * This is informational only — it must NOT be used as a scheduling trigger.
+ *
+ * NOTE on learning/relearning cards:
+ * At the moment of review (`nowMs ≈ last_review`), pure mathematical retrievability
+ * is 100% because 0 days have elapsed. For cards in State.Learning or State.Relearning
+ * (freshly failed / in short-term recovery), we reflect their active failure / low stability
+ * so mastery gauges and progress bars drop immediately upon a wrong answer.
  */
 export function getRetrievability(row: ConceptProgressRow, nowMs = Date.now()): number {
+  const st = normalizeState(row.fsrs_state);
+  if (st === State.New) return 0;
+  
   const card = rowToCard(row);
+  let r = 0;
   try {
-    return _fsrsInstance.get_retrievability(card, new Date(nowMs), false) as number;
+    const rawR = _fsrsInstance.get_retrievability(card, new Date(nowMs), false) as number;
+    r = Number.isFinite(rawR) ? rawR : 0;
   } catch {
-    return 0;
+    r = 0;
   }
+
+  // If the card is in learning/relearning (failed/lapsed), cap/scale retrievability
+  // based on stability so it does not falsely display 100% immediately after failure.
+  if (st === State.Learning || st === State.Relearning) {
+    const stability = row.fsrs_stability ?? 0.2;
+    // Scale by stability (min 0.1, max 0.45)
+    return Math.max(0.1, Math.min(0.45, stability * 0.5));
+  }
+
+  return r;
 }
 
 // ---------------------------------------------------------------------------

@@ -500,12 +500,19 @@ export default function ReviewPage() {
           >
             {/* Skill badge + progress header */}
             <div className="w-full flex items-center justify-between">
-              <span className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-widest border",
-                skillColor,
-              )}>
-                {skillLabel}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-widest border",
+                  skillColor,
+                )}>
+                  {skillLabel}
+                </span>
+                {s.inSessionRetries.size > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-mono bg-[color:var(--coral)]/15 border border-[color:var(--coral)]/30 text-[color:var(--coral)]">
+                    {s.inSessionRetries.size} in relearning
+                  </span>
+                )}
+              </div>
               
               <div className="pointer-events-auto">
                 <ContinentSelect value={continent} onChange={setContinent} />
@@ -521,6 +528,7 @@ export default function ReviewPage() {
               index={s.index}
               total={s.queue.length}
               title={questionMeta.prompt}
+              isRelearning={Boolean(currentConcept && s.inSessionRetries.has(currentConcept.conceptId))}
             />
 
             {/* Visual stimulus */}
