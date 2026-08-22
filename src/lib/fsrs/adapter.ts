@@ -55,6 +55,11 @@ export function configureFsrs(params: Partial<FSRSParameters>): void {
   _fsrsInstance = fsrs(params);
 }
 
+/** Read-only access to the active FSRS parameters (used by the session engine). */
+export function getFsrsParameters(): FSRSParameters {
+  return _fsrsInstance.parameters;
+}
+
 // ---------------------------------------------------------------------------
 // Review outcome type — this is what ORBITA feeds the adapter
 // ---------------------------------------------------------------------------

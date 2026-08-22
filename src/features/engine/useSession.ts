@@ -3,11 +3,39 @@ import { COUNTRIES } from "@/lib/countries";
 import type { Country } from "@/types/country";
 import { generateSessionQueue } from "@/lib/fsrs/planner";
 import { assess } from "@/lib/fsrs/assessment";
-import { rowToCard, cardToRowUpdates, processReview } from "@/lib/fsrs/adapter";
+import { rowToCard, cardToRowUpdates, processReview, getFsrsParameters } from "@/lib/fsrs/adapter";
 import { recordConceptAttempt } from "@/lib/db/progressRepo";
 import { db, type ConceptProgressRow, type GameMode, type Skill } from "@/lib/db/orbita-db";
 import { recordSessionEnd } from "@/lib/db/repo";
-import { State } from "ts-fsrs";
+import { State, ConvertStepUnitToMinutes } from "ts-fsrs";
+
+/**
+ * Estimated average response time per question (ms).
+ * Used to translate FSRS relearning steps (minutes) into queue offset positions.
+ * Conservative estimate — actual sessions tend to be faster, so the offset
+ * errs on the side of more interleaving rather than less.
+ */
+const APPROX_MS_PER_QUESTION = 15_000; // 15 s / question
+
+/**
+ * Given an FSRS relearning step (e.g. "1m", "10m"), return how many queue
+ * positions ahead to re-insert the failed card.
+ * Minimum 2 (always at least one other card in between).
+ * Maximum: half of remaining queue (never dominates the session).
+ */
+function stepToQueueOffset(stepUnit: string, remainingCards: number): number {
+  // ConvertStepUnitToMinutes accepts d/h/m units. Seconds ("s") are rare in
+  // FSRS defaults but guard against them by treating unknown suffixes as 1m.
+  let minutes = 1;
+  try {
+    minutes = ConvertStepUnitToMinutes(stepUnit as `${number}${"m" | "h" | "d"}`);
+  } catch {
+    // fallback: treat as 1 minute
+  }
+  const ms = minutes * 60_000;
+  const positions = Math.round(ms / APPROX_MS_PER_QUESTION);
+  return Math.max(2, Math.min(positions, Math.max(2, Math.floor(remainingCards / 2))));
+}
 
 export type AnswerState = "idle" | "correct" | "wrong" | "revealed";
 export const QUESTIONS_PER_SESSION = 20;
@@ -33,6 +61,18 @@ export interface SessionState {
    * Prevents double-scoring re-queued retries.
    */
   fsrsUpdatedIds: Set<string>;
+
+  /**
+   * Tracks how many times each conceptId has been re-queued within this
+   * session after an incorrect answer.
+   * - 0 / absent → never re-queued
+   * - 1           → one requeue remaining (step 1 consumed)
+   * - 2           → two requeues used (step 2 consumed; no more requeues)
+   *
+   * We allow at most `relearning_steps.length` in-session retries so a
+   * persistently wrong card cannot loop forever.
+   */
+  inSessionRetries: Map<string, number>;
 
   current(): Country | null;
   /** Start a session. Pass `allCountries` for Complete Continent mode
@@ -83,7 +123,7 @@ export function createSessionStore({
     loading: false,
     questionStartedAt: 0,
     fsrsUpdatedIds: new Set(),
-    
+    inSessionRetries: new Map(),
 
     current() {
       const s = get();
@@ -106,7 +146,7 @@ export function createSessionStore({
         endedAt: null,
         questionStartedAt: 0,
         fsrsUpdatedIds: new Set(),
-        
+        inSessionRetries: new Map(),
       });
 
       let q: Country[] = [];
@@ -202,7 +242,7 @@ export function createSessionStore({
         loading: false,
         questionStartedAt: now,
         fsrsUpdatedIds: new Set(),
-        
+        inSessionRetries: new Map(),
       });
     },
 
@@ -232,12 +272,9 @@ export function createSessionStore({
         updates.answerState = "wrong";
       }
 
-      // 2. FSRS handles learning steps now. We do not manually force failed cards 
-      // back into the current fixed queue. If FSRS assigns a 1m or 5m short-term 
-      // step, it will legitimately become due again when that time elapses.
-
-      // 3. FSRS update — only the FIRST attempt per conceptId per session counts.
-      //    Retries are for learning; we don't want to double-schedule.
+      // 2. FSRS update — only the FIRST attempt per conceptId per session counts.
+      //    Retries are for in-session desirable-difficulty practice; FSRS state
+      //    is already committed from the first answer and must not be double-scored.
       if (targetConcept && !s.fsrsUpdatedIds.has(targetConcept.conceptId)) {
         const now = Date.now();
 
@@ -287,11 +324,59 @@ export function createSessionStore({
         nextFsrsUpdatedIds.add(targetConcept.conceptId);
         updates.fsrsUpdatedIds = nextFsrsUpdatedIds;
 
-        // Optimistic row update — use the already-built newConceptQueue if we re-queued,
-        // otherwise build a fresh copy. Always update index 's.index' (the original position).
-        const baseConceptQueue = updates.conceptQueue ?? [...s.conceptQueue];
+        // Optimistic row update at the current index position
+        const baseConceptQueue = [...s.conceptQueue];
         baseConceptQueue[s.index] = updatedProgressRow;
         updates.conceptQueue = baseConceptQueue;
+      }
+
+      // 3. Desirable-difficulty re-queue for incorrect answers.
+      //
+      //    Principle (Bjork): a short-delay retrieval attempt after failure
+      //    strengthens memory far more than immediate repetition. We re-insert
+      //    the card a few positions ahead using FSRS relearning_steps as the
+      //    guide for how far ahead ("1m" ≈ 4 cards at ~15 s/card).
+      //
+      //    Rules:
+      //    - Only re-queue on incorrect answers.
+      //    - At most relearning_steps.length re-queues per concept per session
+      //      (prevents infinite loops for persistently wrong cards).
+      //    - The re-queued slot contains the UPDATED concept row (post-FSRS),
+      //      but FSRS will NOT be called again when that slot is answered
+      //      (protected by fsrsUpdatedIds).
+      //    - If there are fewer than 3 cards left in the queue, don't re-queue
+      //      (not enough room for meaningful interleaving).
+      if (!isCorrect && targetConcept) {
+        const conceptId = targetConcept.conceptId;
+        const retries = s.inSessionRetries.get(conceptId) ?? 0;
+        const relearningSteps = getFsrsParameters().relearning_steps;
+        const maxRetries = relearningSteps.length;
+
+        const remainingAfterCurrent = s.queue.length - s.index - 1;
+
+        if (retries < maxRetries && remainingAfterCurrent >= 3) {
+          // Use the step corresponding to this retry attempt
+          const stepUnit = relearningSteps[retries] ?? relearningSteps[relearningSteps.length - 1]!;
+          const offset = stepToQueueOffset(String(stepUnit), remainingAfterCurrent);
+
+          // Clamp to the end of the queue (splice inserts before that index)
+          const insertAt = Math.min(s.index + 1 + offset, s.queue.length);
+
+          // Build new queues with the failed card re-inserted
+          const newQueue = [...(updates.queue ?? s.queue)];
+          const newConceptQueue = [...(updates.conceptQueue ?? s.conceptQueue)];
+
+          newQueue.splice(insertAt, 0, target);
+          newConceptQueue.splice(insertAt, 0, newConceptQueue[s.index] ?? null);
+
+          updates.queue = newQueue;
+          updates.conceptQueue = newConceptQueue;
+
+          // Record the retry count
+          const nextRetries = new Map(s.inSessionRetries);
+          nextRetries.set(conceptId, retries + 1);
+          updates.inSessionRetries = nextRetries;
+        }
       }
 
       // Single atomic update — prevents double-render race conditions
@@ -308,11 +393,14 @@ export function createSessionStore({
       if (nextIndex >= s.queue.length) {
         const endedAt = Date.now();
         set({ endedAt, answerState: "idle", combo: 0 });
+        // totalQuestions = unique cards graded (not raw queue length, which grows
+        // when re-queue slots are inserted for desirable-difficulty retries)
+        const uniqueGraded = s.fsrsUpdatedIds.size || s.queue.length;
         recordSessionEnd({
           mode,
           skill,
           score: s.score,
-          totalQuestions: s.queue.length,
+          totalQuestions: uniqueGraded,
           correct: s.correct,
           wrong: s.wrong,
           bestCombo: s.bestCombo,
