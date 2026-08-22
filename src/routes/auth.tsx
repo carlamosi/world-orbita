@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { orbitaAuth } from "@/integrations/lovable";
 import { useAuth } from "@/hooks/useAuth";
 import { authDebug } from "@/lib/auth/debug";
+import { cn } from "@/lib/utils";
 import { ensureUserProfile } from "@/lib/auth/profile";
 import { toast } from "sonner";
 
@@ -377,6 +378,7 @@ function AuthPage() {
                 >
                   <input
                     id="name"
+                    name="name"
                     type="text"
                     autoComplete="name"
                     placeholder="Commander / Explorer name"
@@ -404,6 +406,7 @@ function AuthPage() {
               >
                 <input
                   id="email"
+                  name="email"
                   type="email"
                   autoComplete="email"
                   inputMode="email"
@@ -463,6 +466,7 @@ function AuthPage() {
                   >
                     <input
                       id="password"
+                      name="password"
                       type={showPwd ? "text" : "password"}
                       autoComplete={mode === "signin" ? "current-password" : "new-password"}
                       placeholder={mode === "signin" ? "Enter your password" : "At least 8 characters"}
