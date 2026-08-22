@@ -94,7 +94,7 @@ export default function FlagsPage() {
 
   return (
     <div className="relative min-h-dvh pt-20 flex flex-col items-center">
-      {!finished && current && (
+      {!finished && (current || s.loading) && (
         <>
           {/* Minimized HUD Toolbar */}
           <div className="w-full max-w-5xl mx-auto px-4 md:px-6 mb-4 z-20 flex items-center justify-between gap-4">
