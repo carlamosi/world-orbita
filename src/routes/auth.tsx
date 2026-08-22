@@ -292,12 +292,12 @@ function AuthPage() {
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.25 }}
+              transition={{ duration: 0.2 }}
             >
-              <h1 className="font-display text-[28px] leading-tight font-semibold text-foreground">
+              <h1 className="font-display text-3xl font-bold tracking-tight text-white">
                 {title}
               </h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">{subtitle}</p>
+              <p className="mt-1.5 text-sm text-white/55 leading-relaxed">{subtitle}</p>
             </motion.div>
           </AnimatePresence>
         </header>
@@ -318,7 +318,6 @@ function AuthPage() {
               setNotice(null);
               try {
                 authDebug("resend confirmation:start", { emailDomain: target.split("@")[1] ?? null });
-                // Use the dedicated resend API — does NOT create a second user row
                 const { error } = await supabase.auth.resend({
                   type: "signup",
                   email: target,
@@ -342,219 +341,247 @@ function AuthPage() {
               setMode("signin");
             }}
           />
-
         ) : (
           <>
-        {mode !== "forgot" && (
-          <>
-            <button
-              type="button"
-              onClick={onGoogle}
-              disabled={googleBusy || busy}
-              className="mt-7 w-full inline-flex items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-foreground hover:bg-white/[0.08] hover:border-white/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/60"
-            >
-              {googleBusy ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden />
-              ) : (
-                <GoogleIcon />
-              )}
-              Continue with Google
-            </button>
-
-            <div className="my-5 flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">
-              <span className="h-px flex-1 bg-white/10" />
-              or with email
-              <span className="h-px flex-1 bg-white/10" />
-            </div>
-          </>
-        )}
-
-        <form onSubmit={onSubmit} className={mode === "forgot" ? "mt-7 space-y-4" : "space-y-4"} noValidate>
-          {mode === "signup" && (
-            <Field
-              id="name"
-              label="Name"
-              icon={<UserIcon className="size-4" aria-hidden />}
-              error={errors.name}
-            >
-              <input
-                id="name"
-                type="text"
-                autoComplete="name"
-                placeholder="Your name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onBlur={() => name && validate()}
-                required
-                maxLength={60}
-                className="w-full bg-transparent pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
-                aria-invalid={!!errors.name}
-                aria-describedby={errors.name ? "name-err" : undefined}
-              />
-            </Field>
-          )}
-          <Field
-            id="email"
-            label="Email"
-            icon={<Mail className="size-4" aria-hidden />}
-            error={errors.email}
-          >
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              inputMode="email"
-              placeholder="you@orbit.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onBlur={() => email && validate()}
-              required
-              className="w-full bg-transparent pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
-              aria-invalid={!!errors.email}
-              aria-describedby={errors.email ? "email-err" : undefined}
-            />
-          </Field>
-
-          {mode !== "forgot" && (
-            <Field
-              id="password"
-              label="Password"
-              icon={<Lock className="size-4" aria-hidden />}
-              error={errors.password}
-              trailing={
+            {mode !== "forgot" && (
+              <>
                 <button
                   type="button"
-                  onClick={() => setShowPwd((s) => !s)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5 transition"
-                  aria-label={showPwd ? "Hide password" : "Show password"}
-                  tabIndex={-1}
+                  onClick={onGoogle}
+                  disabled={googleBusy || busy}
+                  className="mt-6 w-full inline-flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-white hover:bg-white/[0.08] hover:border-white/20 active:scale-[0.99] transition-all disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/60"
                 >
-                  {showPwd ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  {googleBusy ? (
+                    <Loader2 className="size-4 animate-spin text-cyan" aria-hidden />
+                  ) : (
+                    <GoogleIcon />
+                  )}
+                  <span>Continue with Google</span>
                 </button>
-              }
-            >
-              <input
-                id="password"
-                type={showPwd ? "text" : "password"}
-                autoComplete={mode === "signin" ? "current-password" : "new-password"}
-                placeholder={mode === "signin" ? "Your password" : "At least 8 characters"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onBlur={() => password && validate()}
-                required
-                minLength={8}
-                maxLength={72}
-                className="w-full bg-transparent pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
-                aria-invalid={!!errors.password}
-                aria-describedby={errors.password ? "password-err" : undefined}
-              />
-            </Field>
-          )}
 
-          {mode === "signup" && password.length > 0 && (
-            <StrengthBar score={strength.score} label={strength.label} />
-          )}
-
-          {mode === "signin" && (
-            <div className="flex justify-end -mt-1">
-              <button
-                type="button"
-                onClick={() => setMode("forgot")}
-                className="text-xs text-muted-foreground hover:text-cyan transition-colors"
-              >
-                Forgot password?
-              </button>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={busy || googleBusy}
-            className="group relative w-full overflow-hidden rounded-xl px-4 py-3 text-sm font-semibold text-white disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/70"
-            style={{
-              background:
-                "linear-gradient(135deg, color-mix(in oklab, var(--violet) 90%, white 0%), color-mix(in oklab, var(--cyan) 90%, white 0%))",
-              boxShadow:
-                "0 10px 40px -10px color-mix(in oklab, var(--violet) 60%, transparent), inset 0 1px 0 rgba(255,255,255,0.18)",
-            }}
-          >
-            <span className="relative inline-flex items-center justify-center gap-2">
-              {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              {mode === "signin"
-                ? busy
-                  ? "Signing in…"
-                  : "Sign in"
-                : mode === "signup"
-                  ? busy
-                    ? "Creating account…"
-                    : "Create account"
-                  : busy
-                    ? "Sending link…"
-                    : "Send reset link"}
-            </span>
-            <span
-              aria-hidden
-              className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full"
-            />
-          </button>
-        </form>
-
-        <footer className="mt-6 space-y-4">
-          <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
-            {mode === "forgot" ? (
-              <button
-                type="button"
-                onClick={() => setMode("signin")}
-                className="hover:text-foreground transition-colors"
-              >
-                ← Back to sign in
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setErrors({});
-                  setNotice(null);
-                  setMode(mode === "signin" ? "signup" : "signin");
-                }}
-                className="hover:text-foreground transition-colors"
-              >
-                {mode === "signin" ? (
-                  <>
-                    New to Orbita? <span className="text-cyan">Create account</span>
-                  </>
-                ) : (
-                  <>
-                    Already have an account? <span className="text-cyan">Sign in</span>
-                  </>
-                )}
-              </button>
+                <div className="my-5 flex items-center gap-3 text-[10px] uppercase font-mono tracking-[0.2em] text-white/35">
+                  <span className="h-px flex-1 bg-white/10" />
+                  or with email
+                  <span className="h-px flex-1 bg-white/10" />
+                </div>
+              </>
             )}
-          </div>
 
-          {mode !== "forgot" && (
-            <>
-              <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-muted-foreground/60">
-                <span className="h-px flex-1 bg-white/10" />
-                or
-                <span className="h-px flex-1 bg-white/10" />
-              </div>
-              <Link
-                to="/"
-                className="flex w-full items-center justify-center rounded-xl border border-white/8 bg-white/[0.02] px-4 py-2.5 text-xs text-muted-foreground hover:border-white/15 hover:bg-white/[0.05] hover:text-foreground transition-all"
+            <form onSubmit={onSubmit} className={mode === "forgot" ? "mt-6 space-y-4" : "space-y-4"} noValidate>
+              {mode === "signup" && (
+                <Field
+                  id="name"
+                  label="Display Name"
+                  icon={<UserIcon className="size-4" aria-hidden />}
+                  error={errors.name}
+                >
+                  <input
+                    id="name"
+                    type="text"
+                    autoComplete="name"
+                    placeholder="Commander / Explorer name"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value);
+                      if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
+                    }}
+                    onBlur={() => name && validate()}
+                    required
+                    maxLength={60}
+                    disabled={busy || googleBusy}
+                    className="w-full bg-transparent pl-10 pr-3 py-3 text-sm text-white placeholder:text-white/30 outline-none"
+                    aria-invalid={!!errors.name}
+                    aria-describedby={errors.name ? "name-err" : undefined}
+                  />
+                </Field>
+              )}
+
+              <Field
+                id="email"
+                label="Email"
+                icon={<Mail className="size-4" aria-hidden />}
+                error={errors.email}
               >
-                Continue as guest — progress stays on this device
-              </Link>
-            </>
-          )}
-        </footer>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  placeholder="you@domain.com"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
+                  }}
+                  onBlur={() => email && validate()}
+                  required
+                  disabled={busy || googleBusy}
+                  className="w-full bg-transparent pl-10 pr-3 py-3 text-sm text-white placeholder:text-white/30 outline-none"
+                  aria-invalid={!!errors.email}
+                  aria-describedby={errors.email ? "email-err" : undefined}
+                />
+              </Field>
 
-        {mode === "signup" && (
-          <p className="mt-5 text-[11px] leading-relaxed text-muted-foreground/70">
-            By creating an account you agree to our terms and acknowledge our privacy
-            practices. We use your email only to sync your progress.
-          </p>
-        )}
+              {mode !== "forgot" && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label htmlFor="password" className="text-xs font-mono uppercase tracking-wider text-white/50">
+                      Password
+                    </label>
+                    {mode === "signin" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setErrors({});
+                          setNotice(null);
+                          setMode("forgot");
+                        }}
+                        className="text-xs text-cyan hover:text-cyan/80 transition-colors font-medium"
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
+
+                  <Field
+                    id="password"
+                    label="Password"
+                    hideLabel
+                    icon={<Lock className="size-4" aria-hidden />}
+                    error={errors.password}
+                    trailing={
+                      <button
+                        type="button"
+                        onClick={() => setShowPwd((s) => !s)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 inline-flex size-8 items-center justify-center rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition"
+                        aria-label={showPwd ? "Hide password" : "Show password"}
+                        tabIndex={-1}
+                      >
+                        {showPwd ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </button>
+                    }
+                  >
+                    <input
+                      id="password"
+                      type={showPwd ? "text" : "password"}
+                      autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                      placeholder={mode === "signin" ? "Enter your password" : "At least 8 characters"}
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+                      }}
+                      onBlur={() => password && validate()}
+                      required
+                      minLength={8}
+                      maxLength={72}
+                      disabled={busy || googleBusy}
+                      className="w-full bg-transparent pl-10 pr-11 py-3 text-sm text-white placeholder:text-white/30 outline-none"
+                      aria-invalid={!!errors.password}
+                      aria-describedby={errors.password ? "password-err" : undefined}
+                    />
+                  </Field>
+                </div>
+              )}
+
+              {mode === "signup" && password.length > 0 && (
+                <StrengthBar score={strength.score} label={strength.label} password={password} />
+              )}
+
+              <button
+                type="submit"
+                disabled={busy || googleBusy}
+                className="group relative w-full overflow-hidden rounded-2xl px-4 py-3.5 text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/70 active:scale-[0.99] transition-all shadow-[0_10px_30px_-8px_color-mix(in_oklab,var(--violet)_60%,transparent)] mt-2"
+                style={{
+                  background:
+                    "linear-gradient(135deg, color-mix(in oklab, var(--violet) 85%, white 10%), color-mix(in oklab, var(--cyan) 85%, white 10%))",
+                }}
+              >
+                <span className="relative inline-flex items-center justify-center gap-2">
+                  {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
+                  {mode === "signin"
+                    ? busy
+                      ? "Signing in…"
+                      : "Sign in"
+                    : mode === "signup"
+                      ? busy
+                        ? "Creating account…"
+                        : "Create account"
+                      : busy
+                        ? "Sending link…"
+                        : "Send reset link"}
+                </span>
+                <span
+                  aria-hidden
+                  className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full"
+                />
+              </button>
+            </form>
+
+            <footer className="mt-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-white/55">
+                {mode === "forgot" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrors({});
+                      setNotice(null);
+                      setMode("signin");
+                    }}
+                    className="inline-flex items-center gap-1.5 text-white/70 hover:text-white transition-colors"
+                  >
+                    <ArrowLeft className="size-3" /> Back to sign in
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrors({});
+                      setNotice(null);
+                      setMode(mode === "signin" ? "signup" : "signin");
+                    }}
+                    className="text-white/60 hover:text-white transition-colors"
+                  >
+                    {mode === "signin" ? (
+                      <>
+                        New to Orbita? <span className="text-cyan font-medium ml-1">Create account</span>
+                      </>
+                    ) : (
+                      <>
+                        Already have an account? <span className="text-cyan font-medium ml-1">Sign in</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {mode !== "forgot" && (
+                <>
+                  <div className="flex items-center gap-3 text-[10px] uppercase font-mono tracking-[0.2em] text-white/30">
+                    <span className="h-px flex-1 bg-white/10" />
+                    or
+                    <span className="h-px flex-1 bg-white/10" />
+                  </div>
+                  <div className="p-3 rounded-2xl border border-white/5 bg-white/[0.02] flex flex-col items-center gap-2 text-center">
+                    <Link
+                      to="/"
+                      className="w-full flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs font-medium text-white/80 hover:border-white/20 hover:bg-white/[0.08] hover:text-white transition-all active:scale-[0.99]"
+                    >
+                      Continue as guest
+                    </Link>
+                    <span className="text-[11px] text-white/40 leading-snug">
+                      Your progress stays safely on this device without creating an account.
+                    </span>
+                  </div>
+                </>
+              )}
+            </footer>
+
+            {mode === "signup" && (
+              <p className="mt-5 text-center text-[11px] leading-relaxed text-white/40">
+                By creating an account you agree to Orbita's terms. Your email is only used for syncing and account recovery.
+              </p>
+            )}
           </>
         )}
       </motion.section>
@@ -573,7 +600,7 @@ function AuthNotice({ notice }: { notice: NonNullable<Notice> }) {
     <motion.div
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`mt-5 rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${toneClass}`}
+      className={`mt-5 rounded-2xl border p-3.5 text-xs leading-relaxed ${toneClass}`}
       role={notice.tone === "error" ? "alert" : "status"}
       aria-live="polite"
     >
@@ -595,32 +622,32 @@ function CheckEmailPanel({
 }) {
   return (
     <div className="mt-7 space-y-5">
-      <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5 text-center">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-6 text-center">
         <div className="mx-auto grid size-12 place-items-center rounded-full border border-cyan/30 bg-cyan/10 text-cyan">
           <Mail className="size-5" aria-hidden />
         </div>
-        <p className="mt-4 text-sm font-medium text-foreground">Confirmation sent</p>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          We sent a confirmation link to <span className="text-foreground">{email}</span>. Check your inbox and spam folder.
+        <p className="mt-4 text-base font-display font-semibold text-white">Confirmation email sent</p>
+        <p className="mt-2 text-xs leading-relaxed text-white/60">
+          We sent a verification link to <span className="text-white font-medium">{email}</span>. Please click the link to activate Orbita cloud sync.
         </p>
       </div>
       <button
         type="button"
         onClick={() => void onResend()}
         disabled={busy}
-        className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-foreground hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-white hover:bg-white/[0.08] hover:border-white/20 active:scale-[0.99] transition-all disabled:cursor-not-allowed disabled:opacity-50"
       >
         <span className="inline-flex items-center justify-center gap-2">
-          {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
+          {busy && <Loader2 className="size-4 animate-spin text-cyan" aria-hidden />}
           Resend confirmation email
         </span>
       </button>
       <button
         type="button"
         onClick={onBack}
-        className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
+        className="w-full text-center text-xs text-white/50 hover:text-white transition-colors"
       >
-        Back to sign in
+        ← Back to sign in
       </button>
     </div>
   );
@@ -629,6 +656,7 @@ function CheckEmailPanel({
 function Field({
   id,
   label,
+  hideLabel = false,
   icon,
   error,
   trailing,
@@ -636,46 +664,51 @@ function Field({
 }: {
   id: string;
   label: string;
+  hideLabel?: boolean;
   icon: React.ReactNode;
   error?: string;
   trailing?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <label htmlFor={id} className="sr-only">
-        {label}
-      </label>
+    <div className="space-y-1">
+      {!hideLabel && (
+        <label htmlFor={id} className="block text-xs font-mono uppercase tracking-wider text-white/50">
+          {label}
+        </label>
+      )}
       <div
-        className={`relative rounded-xl border bg-white/[0.03] transition-colors focus-within:border-cyan/60 focus-within:bg-white/[0.05] ${
-          error ? "border-coral/60" : "border-white/10"
+        className={`relative rounded-2xl border bg-white/[0.03] transition-all duration-200 focus-within:border-cyan/70 focus-within:bg-white/[0.06] focus-within:shadow-[0_0_20px_-4px_color-mix(in_oklab,var(--cyan)_25%,transparent)] ${
+          error ? "border-coral/60 bg-coral/5" : "border-white/10 hover:border-white/20"
         }`}
       >
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40">
           {icon}
         </span>
         {children}
         {trailing}
       </div>
-      <AnimatePresence>
-        {error && (
-          <motion.p
-            id={`${id}-err`}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mt-1.5 text-xs text-coral"
-            role="alert"
-          >
-            {error}
-          </motion.p>
-        )}
-      </AnimatePresence>
+      <div className="min-h-[18px]">
+        <AnimatePresence>
+          {error && (
+            <motion.p
+              id={`${id}-err`}
+              initial={{ opacity: 0, y: -2 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -2 }}
+              className="text-xs text-coral font-medium"
+              role="alert"
+            >
+              {error}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
 
-function StrengthBar({ score, label }: { score: number; label: string }) {
+function StrengthBar({ score, label, password }: { score: number; label: string; password?: string }) {
   const pct = Math.min(100, (score / 5) * 100);
   const color =
     score <= 1
@@ -685,9 +718,20 @@ function StrengthBar({ score, label }: { score: number; label: string }) {
         : score <= 3
           ? "var(--cyan)"
           : "var(--neon)";
+
+  const hasLength = (password?.length ?? 0) >= 8;
+  const hasMixed = /[A-Z]/.test(password ?? "") && /[a-z]/.test(password ?? "");
+  const hasNumberOrSpecial = /[\d\W]/.test(password ?? "");
+
   return (
-    <div aria-live="polite">
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/5">
+    <div className="p-3 rounded-2xl border border-white/5 bg-white/[0.02] space-y-2" aria-live="polite">
+      <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-white/50">
+        <span>Password strength</span>
+        <span className="font-semibold" style={{ color }}>
+          {label}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
         <motion.div
           initial={false}
           animate={{ width: `${pct}%`, backgroundColor: color }}
@@ -695,11 +739,15 @@ function StrengthBar({ score, label }: { score: number; label: string }) {
           className="h-full rounded-full"
         />
       </div>
-      <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
-        <span>Password strength</span>
-        <span className="inline-flex items-center gap-1" style={{ color }}>
-          {score >= 4 && <Check className="size-3" />}
-          {label}
+      <div className="flex flex-wrap gap-2 text-[10px] text-white/45 pt-1">
+        <span className={cn("inline-flex items-center gap-1", hasLength && "text-neon")}>
+          <Check className={cn("size-2.5", hasLength ? "text-neon" : "opacity-30")} /> 8+ chars
+        </span>
+        <span className={cn("inline-flex items-center gap-1", hasMixed && "text-neon")}>
+          <Check className={cn("size-2.5", hasMixed ? "text-neon" : "opacity-30")} /> Upper & lowercase
+        </span>
+        <span className={cn("inline-flex items-center gap-1", hasNumberOrSpecial && "text-neon")}>
+          <Check className={cn("size-2.5", hasNumberOrSpecial ? "text-neon" : "opacity-30")} /> Number or symbol
         </span>
       </div>
     </div>
@@ -716,3 +764,4 @@ function GoogleIcon() {
     </svg>
   );
 }
+
