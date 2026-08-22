@@ -75,9 +75,12 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
     return COUNTRIES.filter((c) => c.continent === continent).length;
   }, [continent]);
 
+  const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
+
   // Start / restart session logic
   const startSession = useCallback(
     (c: ContinentChoice, sMode: SubMode, findLength: SessionMode) => {
+      setLastWrongIso3(null); // Reset differential feedback state
       if (sMode === "find" && findLength === "complete") {
         const all = selectAllForContinent(c === "All" ? null : c);
         void findSession.start({ allCountries: all, subMode: sMode });
@@ -154,7 +157,13 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
             }
             onCountryClick={
               sub === "find"
-                ? (iso3) => current && s.answerState === "idle" && s.submit(iso3 === current.iso3)
+                ? (iso3) => {
+                    if (current && s.answerState === "idle") {
+                      const isCorrect = iso3 === current.iso3;
+                      if (!isCorrect) setLastWrongIso3(iso3);
+                      s.submit(isCorrect);
+                    }
+                  }
                 : undefined
             }
             disableHoverLabel={sub === "find"}
@@ -266,8 +275,24 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               <FeedbackBar
                 show={s.answerState !== "idle"}
                 state={(s.answerState === "idle" ? "correct" : s.answerState) as "correct" | "wrong" | "revealed"}
-                title={current.name}
-                subtitle={`Capital: ${current.capital ?? "—"}`}
+                title={
+                  s.answerState === "wrong" && lastWrongIso3 && sub === "find" ? (
+                    <>
+                      That was <span className="text-white">{COUNTRIES.find((c) => c.iso3 === lastWrongIso3)?.name}</span>
+                    </>
+                  ) : (
+                    current.name
+                  )
+                }
+                subtitle={
+                  s.answerState === "wrong" && lastWrongIso3 && sub === "find" ? (
+                    <>
+                      Looking for <strong>{current.name}</strong> • Cap: {current.capital ?? "?"}
+                    </>
+                  ) : (
+                    `Capital: ${current.capital ?? "?"}`
+                  )
+                }
                 onNext={() => s.next()}
                 onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
                 hideNext

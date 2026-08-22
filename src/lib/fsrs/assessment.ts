@@ -79,11 +79,12 @@ export interface AssessmentResult {
 // ---------------------------------------------------------------------------
 
 const TIME_THRESHOLDS: Record<string, { veryFast: number; slow: number; verySlow: number }> = {
-  location: { veryFast: 2000,  slow: 12000, verySlow: 25000 },
-  capital:  { veryFast: 4000,  slow: 20000, verySlow: 40000 },
-  flag:     { veryFast: 1500,  slow: 8000,  verySlow: 15000 },
-  name:     { veryFast: 3000,  slow: 15000, verySlow: 30000 },
-  _default: { veryFast: 3000,  slow: 15000, verySlow: 30000 },
+  // Tightened thresholds for neurocognitive "retrieval fluency"
+  location: { veryFast: 2000,  slow: 8000,  verySlow: 15000 },
+  capital:  { veryFast: 2500,  slow: 6000,  verySlow: 12000 },
+  flag:     { veryFast: 1500,  slow: 5000,  verySlow: 10000 },
+  name:     { veryFast: 2000,  slow: 6000,  verySlow: 12000 },
+  _default: { veryFast: 2000,  slow: 7000,  verySlow: 14000 },
 };
 
 function categorizeSpeed(
