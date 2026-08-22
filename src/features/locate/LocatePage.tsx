@@ -155,6 +155,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
             revealIso3={
               s.answerState === "wrong" || s.answerState === "revealed" ? current?.iso3 : null
             }
+            wrongIso3={sub === "find" && s.answerState === "wrong" ? lastWrongIso3 : null}
             onCountryClick={
               sub === "find"
                 ? (iso3) => {
@@ -275,24 +276,8 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               <FeedbackBar
                 show={s.answerState !== "idle"}
                 state={(s.answerState === "idle" ? "correct" : s.answerState) as "correct" | "wrong" | "revealed"}
-                title={
-                  s.answerState === "wrong" && lastWrongIso3 && sub === "find" ? (
-                    <>
-                      That was <span className="text-white">{COUNTRIES.find((c) => c.iso3 === lastWrongIso3)?.name}</span>
-                    </>
-                  ) : (
-                    current.name
-                  )
-                }
-                subtitle={
-                  s.answerState === "wrong" && lastWrongIso3 && sub === "find" ? (
-                    <>
-                      Looking for <strong>{current.name}</strong> • Cap: {current.capital ?? "?"}
-                    </>
-                  ) : (
-                    `Capital: ${current.capital ?? "?"}`
-                  )
-                }
+                title={current.name}
+                subtitle={`Capital: ${current.capital ?? "—"}`}
                 onNext={() => s.next()}
                 onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
                 hideNext

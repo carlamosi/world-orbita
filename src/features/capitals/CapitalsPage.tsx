@@ -46,6 +46,7 @@ export default function CapitalsPage() {
   const [sub, setSub] = useState<SubMode>("countryToCap");
   const [mode, setMode] = useState<Mode>("easy");
   const [continent, setContinent] = useContinentPref();
+  const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
 
@@ -81,6 +82,7 @@ export default function CapitalsPage() {
 
   // Restart on format changes
   useEffect(() => {
+    setLastWrongIso3(null);
     void s.start({ continent: continent === "All" ? undefined : continent, subMode: sub });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continent, sub, mode]);
@@ -147,9 +149,14 @@ export default function CapitalsPage() {
               revealIso3={
                 s.answerState === "wrong" || s.answerState === "revealed" ? current?.iso3 : null
               }
-              onCountryClick={(iso3) =>
-                current && s.answerState === "idle" && s.submit(iso3 === current.iso3)
-              }
+              wrongIso3={s.answerState === "wrong" ? lastWrongIso3 : null}
+              onCountryClick={(iso3) => {
+                if (current && s.answerState === "idle") {
+                  const isCorrect = iso3 === current.iso3;
+                  if (!isCorrect) setLastWrongIso3(iso3);
+                  s.submit(isCorrect);
+                }
+              }}
               pointOfView={pov}
               disableHoverLabel
               questionKey={current?.iso3 ?? null}

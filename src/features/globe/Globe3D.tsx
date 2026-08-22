@@ -22,6 +22,8 @@ interface Globe3DProps {
   countries: readonly Country[];
   highlightIso3?: string | null;
   revealIso3?: string | null;
+  /** Mistakenly clicked country (for differential feedback / hypercorrection). */
+  wrongIso3?: string | null;
   /** External focus request (Explorer search, deep-link, etc.). */
   focusIso3?: string | null;
   /** Active continent selection ("Africa", "Americas", "Asia", "Europe", "Oceania") — highlights region & mutes non-active landmasses. */
@@ -45,8 +47,9 @@ interface Globe3DProps {
 // ---------------------------------------------------------------------------
 // Constants — tuned for the ORBITA dark-space aesthetic.
 
-const COLOR_HIGHLIGHT = "0, 255, 178"; // neon
-const COLOR_REVEAL = "255, 107, 107"; // coral
+const COLOR_HIGHLIGHT = "0, 255, 178"; // neon green (correct answer / active)
+const COLOR_WRONG = "255, 75, 75"; // bright coral red (mistake / prediction error)
+const COLOR_REVEAL = "0, 255, 178"; // neon green (correct target reveal)
 const COLOR_DUE = "255, 184, 77"; // amber
 const COLOR_HOVER = "0, 212, 255"; // cyan
 const COLOR_BASE = "108, 99, 255"; // violet
@@ -100,6 +103,7 @@ export default function Globe3D({
   countries,
   highlightIso3,
   revealIso3,
+  wrongIso3,
   focusIso3,
   activeContinent = null,
   dueReviewIso3,
@@ -258,19 +262,21 @@ export default function Globe3D({
   const effHoverIso3 = disableHoverFeedback ? null : hoverIso3;
 
   // Microstate marker styling — subtle glowing pinpoints for tiny territories.
+  // Microstate marker styling — subtle glowing pinpoints for tiny territories.
   // Visual radius is kept small (premium, clean look) while the interaction
   // sphere (p.radius) is generously sized for reliable clicking.
   const pointColorFn = useCallback(
     (d: object) => {
       const p = d as { iso3: string; micro: boolean };
       if (!p.micro) return "rgba(0,0,0,0)";
+      if (p.iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 1.0)`;
       if (p.iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 1.0)`;
       if (p.iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 1.0)`;
       if (p.iso3 === effHoverIso3) return `rgba(${COLOR_HOVER}, 1.0)`;
       // Default: gentle neon pinpoint — visible but not distracting
       return `rgba(${COLOR_HIGHLIGHT}, 0.6)`;
     },
-    [revealIso3, highlightIso3, effHoverIso3],
+    [wrongIso3, revealIso3, highlightIso3, effHoverIso3],
   );
 
   // Point label: show country name as a styled tooltip.
@@ -309,14 +315,15 @@ export default function Globe3D({
   // Clear stale hover when active question changes
   useEffect(() => {
     setHoverIso3(null);
-  }, [questionKey, highlightIso3, revealIso3]);
+  }, [questionKey, highlightIso3, revealIso3, wrongIso3]);
 
   // Senior UI/UX Continent Focus Polygon Cap Styling
   const polygonCapColor = useCallback(
     (d: object) => {
       const f = d as CountryFeature;
       const iso3 = f.properties.iso3;
-      if (iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 0.35)`;
+      if (iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 0.45)`;
+      if (iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 0.38)`;
       if (iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 0.28)`;
       if (iso3 === effHoverIso3) {
         const cont = continentByIso3.get(iso3);
@@ -346,7 +353,7 @@ export default function Globe3D({
       // rgba(108,99,255,0.08) gives the original deep-space landmass glow.
       return `rgba(${COLOR_BASE}, 0.08)`;
     },
-    [revealIso3, highlightIso3, effHoverIso3, dueSet, pulse, continentByIso3, activeContinent],
+    [wrongIso3, revealIso3, highlightIso3, effHoverIso3, dueSet, pulse, continentByIso3, activeContinent],
   );
 
   const polygonSideColor = useCallback(
@@ -358,6 +365,7 @@ export default function Globe3D({
     (d: object) => {
       const f = d as CountryFeature;
       const iso3 = f.properties.iso3;
+      if (iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 0.95)`;
       if (iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 0.95)`;
       if (iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 0.9)`;
       if (iso3 === effHoverIso3) {
@@ -375,7 +383,7 @@ export default function Globe3D({
       }
       return `rgba(255, 255, 255, ${strokeOpacity})`;
     },
-    [revealIso3, highlightIso3, effHoverIso3, strokeOpacity, continentByIso3, activeContinent],
+    [wrongIso3, revealIso3, highlightIso3, effHoverIso3, strokeOpacity, continentByIso3, activeContinent],
   );
 
   const polygonAltitude = useCallback(
@@ -384,11 +392,11 @@ export default function Globe3D({
       const iso3 = f.properties.iso3;
       const inActive = !activeContinent || activeContinent === "All" || continentByIso3.get(iso3) === activeContinent;
       if (!inActive) return 0.002;
-      if (iso3 === revealIso3 || iso3 === highlightIso3) return 0.02;
+      if (iso3 === wrongIso3 || iso3 === revealIso3 || iso3 === highlightIso3) return 0.02;
       if (iso3 === effHoverIso3) return 0.012;
       return 0.004;
     },
-    [revealIso3, highlightIso3, effHoverIso3, activeContinent, continentByIso3],
+    [wrongIso3, revealIso3, highlightIso3, effHoverIso3, activeContinent, continentByIso3],
   );
 
   const polygonLabel = useCallback(
@@ -680,25 +688,143 @@ export default function Globe3D({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveQuality]);
 
-  // ---- Ring pulse (highlight / reveal) --------------------------------
+  // ---- Dual Ring Shockwave (Error / Success) ---------------------------
   const rings = useMemo(() => {
     if (effectiveQuality === "static") return [];
+    const res = [];
+    if (wrongIso3) {
+      const c = countryByIso3.get(wrongIso3);
+      if (c) {
+        res.push({
+          lat: c.coordinates[0],
+          lng: c.coordinates[1],
+          maxR: 8,
+          propagationSpeed: 4,
+          repeatPeriod: 900,
+          color: COLOR_WRONG,
+        });
+      }
+    }
     const target = revealIso3 ?? highlightIso3;
-    if (!target) return [];
-    const c = countryByIso3.get(target);
-    if (!c) return [];
-    const isReveal = target === revealIso3;
-    return [
-      {
-        lat: c.coordinates[0],
-        lng: c.coordinates[1],
-        maxR: isReveal ? 8 : 6,
-        propagationSpeed: isReveal ? 4 : 3,
-        repeatPeriod: isReveal ? 900 : 1200,
-        color: isReveal ? COLOR_REVEAL : COLOR_HIGHLIGHT,
-      },
-    ];
-  }, [revealIso3, highlightIso3, countryByIso3, effectiveQuality]);
+    if (target) {
+      const c = countryByIso3.get(target);
+      if (c) {
+        const isReveal = target === revealIso3;
+        res.push({
+          lat: c.coordinates[0],
+          lng: c.coordinates[1],
+          maxR: isReveal ? 8 : 6,
+          propagationSpeed: isReveal ? 4 : 3,
+          repeatPeriod: isReveal ? 900 : 1200,
+          color: COLOR_HIGHLIGHT,
+        });
+      }
+    }
+    return res;
+  }, [wrongIso3, revealIso3, highlightIso3, countryByIso3, effectiveQuality]);
+
+  // ---- Spatial Country Name Badges (3D In-Situ Feedback) ---------------
+  // Rather than forcing the user to glance away to the bottom HUD,
+  // we render floating cyber-badges anchored directly on the countries in 3D:
+  // - Mistaken click: Red/Coral glass badge [✕ Mali]
+  // - Correct/Revealed target: Neon/Green glass badge [✓ Senegal]
+  interface SpatialPill {
+    id: string;
+    iso3: string;
+    name: string;
+    lat: number;
+    lng: number;
+    kind: "wrong" | "correct";
+  }
+
+  const spatialPills = useMemo<SpatialPill[]>(() => {
+    const pills: SpatialPill[] = [];
+
+    if (wrongIso3) {
+      const f = featureByIso3.get(wrongIso3);
+      const c = countryByIso3.get(wrongIso3);
+      const name = f?.properties.name ?? c?.name ?? wrongIso3;
+      const lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
+      const lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+      pills.push({ id: `wrong-${wrongIso3}`, iso3: wrongIso3, name, lat, lng, kind: "wrong" });
+    }
+
+    if (revealIso3) {
+      const f = featureByIso3.get(revealIso3);
+      const c = countryByIso3.get(revealIso3);
+      const name = f?.properties.name ?? c?.name ?? revealIso3;
+      const lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
+      const lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+      pills.push({ id: `reveal-${revealIso3}`, iso3: revealIso3, name, lat, lng, kind: "correct" });
+    } else if (highlightIso3 && highlightIso3 !== wrongIso3) {
+      const f = featureByIso3.get(highlightIso3);
+      const c = countryByIso3.get(highlightIso3);
+      const name = f?.properties.name ?? c?.name ?? highlightIso3;
+      const lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
+      const lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+      pills.push({ id: `highlight-${highlightIso3}`, iso3: highlightIso3, name, lat, lng, kind: "correct" });
+    }
+
+    return pills;
+  }, [wrongIso3, revealIso3, highlightIso3, featureByIso3, countryByIso3]);
+
+  const htmlElementFn = useCallback((d: object) => {
+    const p = d as SpatialPill;
+    const el = document.createElement("div");
+    el.style.pointerEvents = "none";
+    el.style.userSelect = "none";
+    el.style.transform = "translate(-50%, -100%)";
+    el.style.transition = "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease";
+
+    if (p.kind === "wrong") {
+      el.innerHTML = `
+        <div style="
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 12px;
+          background: rgba(26, 6, 12, 0.94);
+          border: 1.5px solid rgba(255, 75, 75, 0.9);
+          box-shadow: 0 0 24px rgba(255, 75, 75, 0.65), 0 4px 12px rgba(0,0,0,0.6);
+          border-radius: 9999px;
+          color: #ff8585;
+          font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          backdrop-filter: blur(12px);
+          white-space: nowrap;
+        ">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:rgba(255,75,75,0.3);border-radius:50%;color:#ff4b4b;font-size:10px;font-weight:900;">✕</span>
+          <span>${p.name}</span>
+        </div>
+      `;
+    } else {
+      el.innerHTML = `
+        <div style="
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 12px;
+          background: rgba(3, 26, 18, 0.94);
+          border: 1.5px solid rgba(0, 255, 178, 0.9);
+          box-shadow: 0 0 24px rgba(0, 255, 178, 0.65), 0 4px 12px rgba(0,0,0,0.6);
+          border-radius: 9999px;
+          color: #00ffb2;
+          font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          backdrop-filter: blur(12px);
+          white-space: nowrap;
+        ">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:rgba(0,255,178,0.3);border-radius:50%;color:#00ffb2;font-size:10px;font-weight:900;">✓</span>
+          <span>${p.name}</span>
+        </div>
+      `;
+    }
+    return el;
+  }, []);
 
   // ---- Zoom control handlers ------------------------------------------
   const zoomBy = useCallback(
@@ -800,6 +926,12 @@ export default function Globe3D({
         pointsMerge={false}
         onPointClick={handleHitboxClick}
         onPointHover={handleHitboxHover}
+        htmlElementsData={spatialPills}
+        htmlLat={(d: object) => (d as { lat: number }).lat}
+        htmlLng={(d: object) => (d as { lng: number }).lng}
+        htmlAltitude={0.035}
+        htmlElement={htmlElementFn}
+        htmlTransitionDuration={250}
         ringsData={rings}
         ringColor={(d: object) => (t: number) =>
           `rgba(${(d as { color: string }).color}, ${1 - t})`
