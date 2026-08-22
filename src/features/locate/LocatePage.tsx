@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useCallback, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
+import { COUNTRIES, COUNTRY_BY_ISO3, pickRandomCountries } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -277,7 +277,11 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                 show={s.answerState !== "idle"}
                 state={(s.answerState === "idle" ? "correct" : s.answerState) as "correct" | "wrong" | "revealed"}
                 title={current.name}
-                subtitle={`Capital: ${current.capital ?? "—"}`}
+                subtitle={
+                  s.answerState === "wrong" && lastWrongIso3 && COUNTRY_BY_ISO3.get(lastWrongIso3)
+                    ? `You clicked ${COUNTRY_BY_ISO3.get(lastWrongIso3)!.name}, correct was ${current.name}`
+                    : `Capital: ${current.capital ?? "—"}`
+                }
                 onNext={() => s.next()}
                 onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
                 hideNext

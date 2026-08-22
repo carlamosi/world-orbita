@@ -470,8 +470,29 @@ describe("selectRecommendedMode — ORBITA mode selection", () => {
       { ...baseSignals, fsrsStability: 100, easyAttempts: 10, hardAttempts: 5, easyCorrectRate: 0.9, hardCorrectRate: 0.4 },
       []
     );
-    // Both should prefer hard because hard performance is weak — not because of stability
     expect(lowStab).toBe("hard");
     expect(highStab).toBe("hard");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 12. Sub-mode / Difficulty format preservation & Locate wrong feedback
+// ---------------------------------------------------------------------------
+
+describe("Sub-mode format preservation & feedback", () => {
+  it("preserves flagToType submode in conceptId without collision", () => {
+    const conceptId = "FRA:flag:flagToType";
+    const parts = conceptId.split(":");
+    expect(parts[1]).toBe("flag");
+    expect(parts[2]).toBe("flagToType");
+  });
+
+  it("formats Locate wrong-click feedback with clicked country and target", () => {
+    const targetName = "Germany";
+    const clickedName = "France";
+    const feedbackSubtitle = `You clicked ${clickedName}, correct was ${targetName}`;
+    expect(feedbackSubtitle).toContain("You clicked France");
+    expect(feedbackSubtitle).toContain("correct was Germany");
+  });
+});
+

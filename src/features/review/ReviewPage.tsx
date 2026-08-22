@@ -9,6 +9,7 @@ import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
+import { HardInput } from "@/features/engine/HardInput";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { db, type ConceptProgressRow, ALL_SKILLS } from "@/lib/db/orbita-db";
 import { generateDueTodayQueue } from "@/lib/fsrs/planner";
@@ -544,19 +545,30 @@ export default function ReviewPage() {
               </motion.div>
             )}
 
-            {/* 4-option multiple choice */}
-            <McQuestion
-              options={mcOptions}
-              current={current}
-              skill={skill}
-              answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
-              selectedIso3={selectedIso3}
-              onSelect={(iso3) => {
-                if (!current || s.answerState !== "idle") return;
-                setSelectedIso3(iso3);
-                s.submit(iso3 === current.iso3);
-              }}
-            />
+            {/* Question input: Hard typing for flagToType / typing modes, MC for choices */}
+            {subMode === "flagToType" ? (
+              <div className="w-full max-w-md mx-auto">
+                <HardInput
+                  target={current}
+                  matchTarget={current.name}
+                  onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                  placeholder="Type the country…"
+                />
+              </div>
+            ) : (
+              <McQuestion
+                options={mcOptions}
+                current={current}
+                skill={skill}
+                answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
+                selectedIso3={selectedIso3}
+                onSelect={(iso3) => {
+                  if (!current || s.answerState !== "idle") return;
+                  setSelectedIso3(iso3);
+                  s.submit(iso3 === current.iso3);
+                }}
+              />
+            )}
           </motion.div>
         )}
       </AnimatePresence>
