@@ -47,9 +47,9 @@ interface Globe3DProps {
 // ---------------------------------------------------------------------------
 // Constants — tuned for the ORBITA dark-space aesthetic.
 
-const COLOR_HIGHLIGHT = "0, 255, 178"; // neon green (correct answer / active)
-const COLOR_WRONG = "255, 75, 75"; // bright coral red (mistake / prediction error)
-const COLOR_REVEAL = "0, 255, 178"; // neon green (correct target reveal)
+const COLOR_HIGHLIGHT = "16, 185, 129"; // emerald / neon green (correct answer / active)
+const COLOR_WRONG = "244, 63, 94"; // elegant rose-coral (mistake / prediction error)
+const COLOR_REVEAL = "16, 185, 129"; // emerald green (correct target reveal)
 const COLOR_DUE = "255, 184, 77"; // amber
 const COLOR_HOVER = "0, 212, 255"; // cyan
 const COLOR_BASE = "108, 99, 255"; // violet
@@ -64,13 +64,13 @@ const CONTINENT_TINT: Record<string, string> = {
   Antarctic: "203, 213, 225",
 };
 
-const CONTINENT_CENTERS: Record<string, { lat: number; lng: number }> = {
-  Africa: { lat: 8, lng: 20 },
-  Americas: { lat: 15, lng: -85 },
-  Asia: { lat: 35, lng: 95 },
-  Europe: { lat: 50, lng: 15 },
-  Oceania: { lat: -22, lng: 135 },
-  Antarctic: { lat: -80, lng: 0 },
+const CONTINENT_CENTERS: Record<string, { lat: number; lng: number; altitude: number }> = {
+  Africa: { lat: 8, lng: 20, altitude: 1.7 },
+  Americas: { lat: 15, lng: -85, altitude: 1.9 },
+  Asia: { lat: 35, lng: 95, altitude: 1.8 },
+  Europe: { lat: 52, lng: 18, altitude: 1.3 },
+  Oceania: { lat: -22, lng: 135, altitude: 1.6 },
+  Antarctic: { lat: -80, lng: 0, altitude: 2.0 },
 };
 
 function angularDistanceDeg(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -322,9 +322,9 @@ export default function Globe3D({
     (d: object) => {
       const f = d as CountryFeature;
       const iso3 = f.properties.iso3;
-      if (iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 0.45)`;
-      if (iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 0.38)`;
-      if (iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 0.28)`;
+      if (iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 0.22)`;
+      if (iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 0.22)`;
+      if (iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 0.22)`;
       if (iso3 === effHoverIso3) {
         const cont = continentByIso3.get(iso3);
         if (activeContinent && activeContinent !== "All" && cont !== activeContinent) {
@@ -365,9 +365,9 @@ export default function Globe3D({
     (d: object) => {
       const f = d as CountryFeature;
       const iso3 = f.properties.iso3;
-      if (iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 0.95)`;
-      if (iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 0.95)`;
-      if (iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 0.9)`;
+      if (iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 0.85)`;
+      if (iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 0.85)`;
+      if (iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 0.85)`;
       if (iso3 === effHoverIso3) {
         const cont = continentByIso3.get(iso3);
         if (activeContinent && activeContinent !== "All" && cont !== activeContinent) {
@@ -435,13 +435,13 @@ export default function Globe3D({
         // enough to see the country, preserve their zoom. Otherwise zoom out
         // just enough. Never zoom in closer than frameAlt.
         const altitude = Math.max(frameAlt, Math.min(liveAlt * 1.25, 1.8));
-        return { lat: clat, lng: clng, altitude, key: `reveal:${revealIso3}`, duration: 1100 };
+        return { lat: clat, lng: clng, altitude, key: `reveal:${revealIso3}`, duration: 1600 };
       }
       const c = countryByIso3.get(revealIso3);
       if (c) {
         const liveAlt = ref.current ? ref.current.pointOfView().altitude : 1.4;
         const altitude = Math.min(Math.max(liveAlt, 1.0), 1.6);
-        return { lat: c.coordinates[0], lng: c.coordinates[1], altitude, key: `reveal:${revealIso3}`, duration: 1100 };
+        return { lat: c.coordinates[0], lng: c.coordinates[1], altitude, key: `reveal:${revealIso3}`, duration: 1600 };
       }
     }
     if (focusIso3) {
@@ -488,6 +488,35 @@ export default function Globe3D({
       effectiveQuality === "static" ? 0 : activeCameraTarget.duration,
     );
   }, [activeCameraTarget, effectiveQuality]);
+
+  // ---- Smooth Camera Rotation on Continent Selection -----------------
+  const lastActiveContinent = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    if (lastActiveContinent.current === undefined) {
+      lastActiveContinent.current = activeContinent;
+      if (activeContinent && CONTINENT_CENTERS[activeContinent]) {
+        const center = CONTINENT_CENTERS[activeContinent];
+        ref.current.pointOfView({ lat: center.lat, lng: center.lng, altitude: center.altitude }, 0);
+      }
+      return;
+    }
+
+    if (lastActiveContinent.current === activeContinent) return;
+    lastActiveContinent.current = activeContinent;
+
+    const g = ref.current;
+    if (!activeContinent || activeContinent === "All") {
+      g.pointOfView({ lat: 20, lng: 0, altitude: 2.3 }, effectiveQuality === "static" ? 0 : 1200);
+    } else if (CONTINENT_CENTERS[activeContinent]) {
+      const center = CONTINENT_CENTERS[activeContinent];
+      g.pointOfView(
+        { lat: center.lat, lng: center.lng, altitude: center.altitude },
+        effectiveQuality === "static" ? 0 : 1400,
+      );
+    }
+  }, [activeContinent, effectiveQuality]);
 
   // ---- Explore-oriented camera logic for new questions ----------------
   // When a new question loads (driven by questionKey changes), we avoid centering
@@ -774,7 +803,7 @@ export default function Globe3D({
     el.style.pointerEvents = "none";
     el.style.userSelect = "none";
     el.style.transform = "translate(-50%, -100%)";
-    el.style.transition = "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease";
+    el.style.transition = "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease";
 
     if (p.kind === "wrong") {
       el.innerHTML = `
@@ -782,46 +811,30 @@ export default function Globe3D({
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 5px 12px;
-          background: rgba(26, 6, 12, 0.94);
-          border: 1.5px solid rgba(255, 75, 75, 0.9);
-          box-shadow: 0 0 24px rgba(255, 75, 75, 0.65), 0 4px 12px rgba(0,0,0,0.6);
+          padding: 5px 13px;
+          background: rgba(22, 10, 15, 0.85);
+          border: 1px solid rgba(244, 63, 94, 0.75);
+          box-shadow: 0 0 8px rgba(244, 63, 94, 0.6), 0 2px 6px rgba(0,0,0,0.4);
           border-radius: 9999px;
-          color: #ff8585;
+          color: #fda4af;
           font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 13px;
-          font-weight: 700;
+          font-size: 12px;
+          font-weight: 600;
           letter-spacing: 0.02em;
-          backdrop-filter: blur(12px);
+          backdrop-filter: blur(8px);
           white-space: nowrap;
+          animation: pulse 1.5s ease-out infinite;
         ">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:rgba(255,75,75,0.3);border-radius:50%;color:#ff4b4b;font-size:10px;font-weight:900;">✕</span>
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;background:rgba(244,63,94,0.2);border-radius:50%;color:#fb7185;font-size:10px;font-weight:800;">
+            ✕
+          </span>
           <span>${p.name}</span>
         </div>
+        <style>@keyframes pulse {0% {transform: scale(0.95); opacity:0.9;} 50% {transform: scale(1.05); opacity:1;} 100% {transform: scale(0.95); opacity:0.9;}}</style>
       `;
     } else {
-      el.innerHTML = `
-        <div style="
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 5px 12px;
-          background: rgba(3, 26, 18, 0.94);
-          border: 1.5px solid rgba(0, 255, 178, 0.9);
-          box-shadow: 0 0 24px rgba(0, 255, 178, 0.65), 0 4px 12px rgba(0,0,0,0.6);
-          border-radius: 9999px;
-          color: #00ffb2;
-          font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 13px;
-          font-weight: 700;
-          letter-spacing: 0.02em;
-          backdrop-filter: blur(12px);
-          white-space: nowrap;
-        ">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:rgba(0,255,178,0.3);border-radius:50%;color:#00ffb2;font-size:10px;font-weight:900;">✓</span>
-          <span>${p.name}</span>
-        </div>
-      `;
+      // No badge for correct answers – render an empty invisible element.
+      el.style.display = "none";
     }
     return el;
   }, []);

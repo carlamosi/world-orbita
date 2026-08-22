@@ -35,10 +35,12 @@ export function FeedbackBar({
           className="px-4 w-full max-w-md mx-auto"
         >
           <div
-            className={`glass-strong rounded-2xl px-6 py-5 flex items-center justify-between gap-4 ${
+            className={`glass-strong rounded-2xl px-6 py-4 flex items-center justify-between gap-4 border transition-all duration-300 ${
               state === "correct"
-                ? "shadow-[0_0_60px_-10px_color-mix(in_oklab,var(--neon)_60%,transparent)]"
-                : "shadow-[0_0_60px_-10px_color-mix(in_oklab,var(--coral)_50%,transparent)]"
+                ? "border-emerald-500/30 shadow-[0_8px_32px_-4px_rgba(16,185,129,0.18)]"
+                : state === "wrong"
+                ? "border-rose-500/30 shadow-[0_8px_32px_-4px_rgba(244,63,94,0.18)]"
+                : "border-white/10 shadow-[0_8px_32px_-4px_rgba(0,0,0,0.36)]"
             }`}
           >
             <div className="text-left min-w-0 flex-1">

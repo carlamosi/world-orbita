@@ -24,8 +24,8 @@ export function useAutoAdvance({
   answerState,
   finished,
   next,
-  correctDelayMs = 900,
-  wrongDelayMs = 1500,
+  correctDelayMs = 1200,
+  wrongDelayMs = 2800,
   enabled = true,
 }: Opts) {
   useEffect(() => {
