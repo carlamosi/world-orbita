@@ -29,20 +29,40 @@ export default function ProgressPage() {
   const minutes = Math.round(sessions.reduce((a, s) => a + s.durationMs, 0) / 60_000);
 
   const mastered = useMemo(() => {
-    const byIso = new Map<string, number>();
-    const byIsoMastered = new Map<string, number>();
+    // Group by iso3 -> skill -> retrievability scores
+    const byIsoSkill = new Map<string, Map<string, number[]>>();
+    
     for (const p of conceptProgress) {
       if (normalizeState(p.fsrs_state) === State.New) continue;
-      byIso.set(p.iso3, (byIso.get(p.iso3) ?? 0) + 1);
+      
+      let skillMap = byIsoSkill.get(p.iso3);
+      if (!skillMap) {
+        skillMap = new Map<string, number[]>();
+        byIsoSkill.set(p.iso3, skillMap);
+      }
       
       const r = getRetrievability(p, Date.now());
-      if (r >= 0.8) {
-        byIsoMastered.set(p.iso3, (byIsoMastered.get(p.iso3) ?? 0) + 1);
-      }
+      const arr = skillMap.get(p.skill) || [];
+      arr.push(r);
+      skillMap.set(p.skill, arr);
     }
+    
     let count = 0;
-    for (const [iso, total] of byIso.entries()) {
-      if (total >= 3 && byIsoMastered.get(iso) === total) count++;
+    for (const skillMap of byIsoSkill.values()) {
+      if (skillMap.size < 3) continue; // Must have learned at least 3 distinct skills
+      
+      let allSkillsMastered = true;
+      for (const rs of skillMap.values()) {
+        const avg = rs.reduce((a, b) => a + b, 0) / rs.length;
+        if (avg < 0.8) {
+          allSkillsMastered = false;
+          break;
+        }
+      }
+      
+      if (allSkillsMastered) {
+        count++;
+      }
     }
     return count;
   }, [conceptProgress]);
@@ -179,47 +199,63 @@ export default function ProgressPage() {
         <section className="mt-10">
           <SectionTitle>By continent</SectionTitle>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-            {CONTINENTS.map((cont) => {
-              const list = COUNTRIES.filter((c) => c.continent === cont);
-              const byIsoMastered = new Map<string, boolean>();
-              const grouped = new Map<string, number[]>();
-              
+            {(() => {
+              // Build the grouping map once for all continents
+              const byIsoSkill = new Map<string, Map<string, number[]>>();
               for (const p of conceptProgress) {
                 if (normalizeState(p.fsrs_state) === State.New) continue;
-                const arr = grouped.get(p.iso3) || [];
-                const r = getRetrievability(p, Date.now());
-                arr.push(r);
-                grouped.set(p.iso3, arr);
-              }
-              
-              let masteredCount = 0;
-              for (const c of list) {
-                const rs = grouped.get(c.iso3) || [];
-                if (rs.length >= 3 && rs.every(r => r >= 0.8)) {
-                  masteredCount++;
+                let skillMap = byIsoSkill.get(p.iso3);
+                if (!skillMap) {
+                  skillMap = new Map<string, number[]>();
+                  byIsoSkill.set(p.iso3, skillMap);
                 }
+                const r = getRetrievability(p, Date.now());
+                const arr = skillMap.get(p.skill) || [];
+                arr.push(r);
+                skillMap.set(p.skill, arr);
               }
-              
-              const pct = list.length > 0 ? masteredCount / list.length : 0;
-              return (
-                <div key={cont} className="glass rounded-2xl p-4">
-                  <div className="font-display text-white">{cont}</div>
-                  <div className="font-mono text-[11px] text-white/45 mt-1">
-                    {masteredCount}/{list.length}
+
+              return CONTINENTS.map((cont) => {
+                const list = COUNTRIES.filter((c) => c.continent === cont);
+                let masteredCount = 0;
+                
+                for (const c of list) {
+                  const skillMap = byIsoSkill.get(c.iso3);
+                  if (!skillMap || skillMap.size < 3) continue;
+                  
+                  let allSkillsMastered = true;
+                  for (const rs of skillMap.values()) {
+                    const avg = rs.reduce((acc, val) => acc + val, 0) / rs.length;
+                    if (avg < 0.8) {
+                      allSkillsMastered = false;
+                      break;
+                    }
+                  }
+                  if (allSkillsMastered) masteredCount++;
+                }
+
+                const pct = list.length > 0 ? masteredCount / list.length : 0;
+                
+                return (
+                  <div key={cont} className="glass rounded-2xl p-4">
+                    <div className="font-display text-white">{cont}</div>
+                    <div className="font-mono text-[11px] text-white/45 mt-1">
+                      {masteredCount}/{list.length}
+                    </div>
+                    <div className="mt-2 h-1.5 rounded-full bg-white/8 overflow-hidden">
+                      <div
+                        className="h-full"
+                        style={{
+                          width: `${Math.max(2, pct * 100)}%`,
+                          background:
+                            pct >= 0.8 ? "var(--neon)" : pct >= 0.4 ? "var(--cyan)" : "var(--violet)",
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-white/8 overflow-hidden">
-                    <div
-                      className="h-full"
-                      style={{
-                        width: `${Math.max(2, pct * 100)}%`,
-                        background:
-                          pct >= 0.8 ? "var(--neon)" : pct >= 0.4 ? "var(--cyan)" : "var(--violet)",
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         </section>
       </div>
@@ -512,13 +548,21 @@ function SkillPanel({
   skill: Skill;
   progress: ConceptProgressRow[];
 }) {
-  const rows = progress
-    .filter((p) => p.skill === skill && normalizeState(p.fsrs_state) !== State.New)
-    .map((p) => {
+  const byIso = new Map<string, number[]>();
+  for (const p of progress) {
+    if (p.skill === skill && normalizeState(p.fsrs_state) !== State.New) {
       const r = getRetrievability(p, Date.now());
-      return { iso3: p.iso3, r };
-    });
-    
+      const arr = byIso.get(p.iso3) || [];
+      arr.push(r);
+      byIso.set(p.iso3, arr);
+    }
+  }
+
+  const rows = Array.from(byIso.entries()).map(([iso3, rs]) => ({
+    iso3,
+    r: rs.reduce((a, b) => a + b, 0) / rs.length,
+  }));
+
   const sorted = rows.slice().sort((a, b) => a.r - b.r);
   const weakest = sorted.slice(0, 5);
   const strongest = sorted.slice(-5).reverse();

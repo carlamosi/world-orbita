@@ -205,7 +205,7 @@ export async function getUnlocks(): Promise<UnlockRow[]> {
 export async function reEvaluateUnlocks(): Promise<UnlockRow[]> {
   if (!isBrowser()) return [];
   const [progress, sessions, current] = await Promise.all([
-    getAllProgress(),
+    db().concept_progress.toArray().catch(() => []),
     getAllSessions(),
     getUnlocks(),
   ]);
