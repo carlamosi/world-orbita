@@ -169,9 +169,10 @@ export default function FlagsPage() {
         correct={s.correct}
         total={s.queue.length}
         wrong={s.wrong}
-        bestCombo={s.bestCombo}
-        durationMs={(s.endedAt ?? 0) - s.startedAt}
-        onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
+        masteredCount={s.masteredCount}
+        missedItems={s.missedItems}
+        hasNextBlock={true}
+        onNextBlock={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
       />
     </div>
   );

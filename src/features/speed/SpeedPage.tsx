@@ -11,6 +11,7 @@ import {
 } from "@/features/engine/ContinentSelect";
 import { cn } from "@/lib/utils";
 import { spring } from "@/lib/motion";
+import { SessionEnd } from "@/features/engine/SessionEnd";
 import type { Country } from "@/types/country";
 import { Zap, Timer, Skull, Flag, MapPin, Type, Globe } from "lucide-react";
 
@@ -487,59 +488,25 @@ function useFlash(_key: string) {
 
 function PostGame() {
   const s = useSpeedRuntime();
-  const accuracy =
-    s.correct + s.wrong > 0
-      ? Math.round((s.correct / (s.correct + s.wrong)) * 100)
-      : 0;
-  return (
-    <div className="min-h-dvh pt-28 px-6 pb-16 flex items-center justify-center">
-      <AnimatePresence>
-        <motion.div
-          initial={{ opacity: 0, y: 24, scale: 0.96 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={spring.soft}
-          className="glass-strong rounded-3xl p-10 max-w-md w-full text-center"
-        >
-          <Badge tone="cyan">Run complete</Badge>
-          <div className="mt-4 font-display text-6xl text-white tracking-tight text-glow-violet">
-            {s.score}
-            <span className="text-[color:var(--muted)] text-xl font-mono ml-1">pts</span>
-          </div>
-          <div className="mt-2 text-white/55 text-sm">
-            {s.correct} right · {s.wrong} wrong · {accuracy}% accuracy
-          </div>
-          <div className="mt-8 grid grid-cols-3 gap-3 font-mono text-[11px] uppercase tracking-wider text-white/55">
-            <Stat label="Best ×" value={`×${s.bestCombo}`} />
-            <Stat
-              label="QPM"
-              value={String(
-                Math.round(((s.correct + s.wrong) / Math.max(1, (s.endedAt ?? 0) - s.startedAt)) * 60_000),
-              )}
-            />
-            <Stat
-              label="Time"
-              value={`${Math.round(((s.endedAt ?? 0) - s.startedAt) / 100) / 10}s`}
-            />
-          </div>
-          <div className="mt-8 flex gap-3 justify-center">
-            <Button onClick={() => s.start(s.config.mode)}>Run again</Button>
-            <Button variant="secondary" onClick={() => s.reset()}>
-              Change mode
-            </Button>
-          </div>
-        </motion.div>
-      </AnimatePresence>
-    </div>
-  );
-}
+  const durationMs = Math.max(1000, (s.endedAt ?? Date.now()) - s.startedAt);
+  const qpm = Math.round(((s.correct + s.wrong) / durationMs) * 60_000);
 
-function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="glass rounded-xl py-3">
-      <div className="font-display text-base text-white normal-case tracking-tight">
-        {value}
-      </div>
-      <div className="mt-1 text-[10px]">{label}</div>
+    <div className="min-h-dvh pt-20 flex flex-col items-center justify-center">
+      <SessionEnd
+        show
+        score={s.score}
+        correct={s.correct}
+        total={s.correct + s.wrong}
+        wrong={s.wrong}
+        masteredCount={s.correct}
+        missedItems={s.missedItems}
+        durationMs={durationMs}
+        isSpeedMode={true}
+        qpm={qpm}
+        hasNextBlock={true}
+        onNextBlock={() => s.start(s.config.mode)}
+      />
     </div>
   );
 }

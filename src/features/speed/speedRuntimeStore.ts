@@ -7,6 +7,7 @@ import { assess } from "@/lib/fsrs/assessment";
 import { rowToCard, cardToRowUpdates, processReview } from "@/lib/fsrs/adapter";
 import { recordConceptAttempt, getConceptProgress } from "@/lib/db/progressRepo";
 import { State } from "ts-fsrs";
+import type { MissedItem } from "@/features/engine/useSession";
 
 /**
  * Speed Runtime — decoupled from the turn-based session engine.
@@ -45,6 +46,7 @@ export interface SpeedState {
   lives: number;
   correct: number;
   wrong: number;
+  missedItems: MissedItem[];
 
   startedAt: number;
   endedAt: number | null;
@@ -117,6 +119,7 @@ const INITIAL_STATE = {
   lives: Infinity as number,
   correct: 0,
   wrong: 0,
+  missedItems: [] as MissedItem[],
   startedAt: 0,
   endedAt: null as number | null,
 };
@@ -144,7 +147,7 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
     // Invalidate before clearing timers, then capture our own fresh token.
     invalidateStart();
     clearAllTimers();
-    const token = currentStartToken;  // our generation — valid until next invalidateStart()
+    const token = currentStartToken; // our generation — valid until next invalidateStart()
 
     const config = modeOverride
       ? { ...get().config, mode: modeOverride }
@@ -185,6 +188,7 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
       lives: startingLives(config.mode),
       correct: 0,
       wrong: 0,
+      missedItems: [],
       startedAt: now,
       endedAt: null,
     });
@@ -285,9 +289,35 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
       });
     } else {
       const lives = Number.isFinite(s.lives) ? s.lives - 1 : Infinity;
+
+      let prompt = item.country.name;
+      let answer = item.country.name;
+      if (item.skill === "capital") {
+        prompt = item.country.name;
+        answer = item.country.capital ?? "—";
+      } else if (item.skill === "location") {
+        prompt = item.country.capital ?? item.country.name;
+        answer = item.country.name;
+      }
+
+      const missedKey = `${item.country.iso3}:${item.skill}`;
+      const missedItems = s.missedItems.some((m) => m.id === missedKey)
+        ? s.missedItems
+        : [
+            ...s.missedItems,
+            {
+              id: missedKey,
+              prompt,
+              answer,
+              flagIso2: item.country.iso2,
+              subMode: item.skill,
+            },
+          ];
+
       set({
         combo: 0,
         wrong: s.wrong + 1,
+        missedItems,
         lives,
         index: s.index + 1,
       });

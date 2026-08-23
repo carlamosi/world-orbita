@@ -149,10 +149,13 @@ import { ContinentSelect, useContinentPref } from "@/features/engine/ContinentSe
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+const BLOCK_SIZE = 10;
+
 export default function ReviewPage() {
   const s = useReviewSession();
   const [loadState, setLoadState] = useState<"loading" | "empty" | "ready">("loading");
   const [dueRows, setDueRows] = useState<ConceptProgressRow[]>([]);
+  const [blockOffset, setBlockOffset] = useState<number>(0);
   const [selectedIso3, setSelectedIso3] = useState<string | null>(null);
   const [continent, setContinent] = useContinentPref();
 
@@ -178,14 +181,29 @@ export default function ReviewPage() {
 
     const queue = generateDueTodayQueue(filteredRows);
     setDueRows(queue);
+    setBlockOffset(0);
 
     if (queue.length === 0) {
       setLoadState("empty");
     } else {
       setLoadState("ready");
-      await s.start({ conceptRows: queue });
+      const currentBatch = queue.slice(0, BLOCK_SIZE);
+      await s.start({ conceptRows: currentBatch });
     }
   }, [s, continent]);
+
+  const loadNextBatch = useCallback(async () => {
+    const nextOffset = blockOffset + BLOCK_SIZE;
+    setBlockOffset(nextOffset);
+    const nextBatch = dueRows.slice(nextOffset, nextOffset + BLOCK_SIZE);
+    if (nextBatch.length > 0) {
+      await s.start({ conceptRows: nextBatch });
+    } else {
+      await loadQueue();
+    }
+  }, [blockOffset, dueRows, loadQueue, s]);
+
+  const hasNextBlock = blockOffset + BLOCK_SIZE < dueRows.length;
 
   // Load all due cards on mount or when continent changes
   useEffect(() => {
@@ -400,11 +418,12 @@ export default function ReviewPage() {
           show
           score={s.score}
           correct={s.correct}
-          total={dueRows.length}
+          total={s.queue.length}
           wrong={s.wrong}
-          bestCombo={s.bestCombo}
-          durationMs={(s.endedAt ?? 0) - s.startedAt}
-          onReplay={restart}
+          masteredCount={s.masteredCount}
+          missedItems={s.missedItems}
+          hasNextBlock={hasNextBlock}
+          onNextBlock={loadNextBatch}
         />
       </div>
     );

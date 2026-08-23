@@ -20,7 +20,15 @@ function stepToQueueOffset(_stepUnit: string, remainingCards: number, countSpaci
 }
 
 export type AnswerState = "idle" | "correct" | "wrong" | "revealed";
-export const QUESTIONS_PER_SESSION = 20;
+export const QUESTIONS_PER_SESSION = 10;
+
+export interface MissedItem {
+  id: string;
+  prompt: string;
+  answer: string;
+  flagIso2?: string;
+  subMode?: string;
+}
 
 export interface SessionState {
   queue: Country[];
@@ -31,6 +39,8 @@ export interface SessionState {
   bestCombo: number;
   correct: number;
   wrong: number;
+  masteredCount: number;
+  missedItems: MissedItem[];
   answerState: AnswerState;
   startedAt: number;
   endedAt: number | null;
@@ -99,6 +109,8 @@ export function createSessionStore({
     bestCombo: 0,
     correct: 0,
     wrong: 0,
+    masteredCount: 0,
+    missedItems: [],
     answerState: "idle",
     startedAt: 0,
     endedAt: null,
@@ -123,6 +135,8 @@ export function createSessionStore({
         bestCombo: 0,
         correct: 0,
         wrong: 0,
+        masteredCount: 0,
+        missedItems: [],
         answerState: "idle",
         startedAt: 0,
         endedAt: null,
@@ -248,10 +262,55 @@ export function createSessionStore({
         updates.bestCombo = Math.max(s.bestCombo, combo);
         updates.correct = s.correct + 1;
         updates.answerState = "correct";
+        // If it's the first time seeing this item or FSRS not yet updated, count towards mastered/progressed
+        if (!targetConcept || !s.fsrsUpdatedIds.has(targetConcept.conceptId)) {
+          updates.masteredCount = (s.masteredCount ?? 0) + 1;
+        }
       } else {
         updates.combo = 0;
         updates.wrong = s.wrong + 1;
         updates.answerState = "wrong";
+
+        // Track missed item details for end session review
+        const conceptSkill = targetConcept?.skill ?? skill;
+        const parts = targetConcept?.conceptId.split(":") ?? [];
+        const dir = parts.length >= 3 ? parts[2] : `${conceptSkill}->answer`;
+
+        let prompt = target.name;
+        let answer = target.name;
+
+        if (conceptSkill === "capital") {
+          if (dir === "capToCountry") {
+            prompt = target.capital ?? target.name;
+            answer = target.name;
+          } else {
+            prompt = target.name;
+            answer = target.capital ?? "—";
+          }
+        } else if (conceptSkill === "flag") {
+          prompt = target.name;
+          answer = target.name;
+        } else if (conceptSkill === "location") {
+          prompt = target.name;
+          answer = target.capital ? `${target.name} (${target.capital})` : target.name;
+        } else if (conceptSkill === "name") {
+          prompt = target.name;
+          answer = target.name;
+        }
+
+        const missedKey = `${target.iso3}:${conceptSkill}:${dir}`;
+        if (!s.missedItems.some((m) => m.id === missedKey)) {
+          updates.missedItems = [
+            ...s.missedItems,
+            {
+              id: missedKey,
+              prompt,
+              answer,
+              flagIso2: target.iso2,
+              subMode: dir,
+            },
+          ];
+        }
       }
 
       // 2. FSRS update — only the FIRST attempt per conceptId per session counts.
@@ -366,6 +425,10 @@ export function createSessionStore({
     },
 
     reveal() {
+      const s = get();
+      if (s.answerState === "idle") {
+        s.submit(false);
+      }
       set({ answerState: "revealed" });
     },
 

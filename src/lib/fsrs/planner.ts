@@ -132,8 +132,8 @@ export function generateSessionQueue(
   config: PlannerConfig = {},
   nowMs = Date.now(),
 ): ConceptProgressRow[] {
-  const sessionSize = config.sessionSize ?? 20;
-  const maxNew = config.maxNewPerSession ?? 5;
+  const sessionSize = config.sessionSize ?? 10;
+  const maxNew = config.maxNewPerSession ?? 10;
 
   const bucketRelearning: ConceptProgressRow[] = [];
   const bucketLearning: ConceptProgressRow[] = [];

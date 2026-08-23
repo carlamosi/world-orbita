@@ -116,6 +116,19 @@ export function HardcoreRunner({
     return COUNTRIES.find((c) => c.iso3 === current.iso3) ?? null;
   }, [current]);
 
+  const missedItems = useMemo(() => {
+    return state.queue
+      .map((item, idx) => ({ item, ans: state.answers[idx] }))
+      .filter(({ ans }) => ans === "wrong")
+      .map(({ item }) => ({
+        id: item.id,
+        prompt: item.countryName,
+        answer: item.type === "countryToCap" ? (item.capital ?? "—") : item.countryName,
+        flagIso2: COUNTRIES.find((c) => c.iso3 === item.iso3)?.iso2,
+        subMode: item.type,
+      }));
+  }, [state.queue, state.answers]);
+
   if (finished) {
     return (
       <div className="relative min-h-dvh pt-20 flex flex-col items-center justify-center">
@@ -125,8 +138,9 @@ export function HardcoreRunner({
           correct={state.correct}
           total={state.queue.length}
           wrong={state.wrong}
-          bestCombo={state.bestCombo}
-          durationMs={Date.now() - state.startedAt}
+          masteredCount={state.correct}
+          missedItems={missedItems}
+          hasNextBlock={false}
           onReplay={() => {
             void clearHardcoreProgress(state.continent);
             onExit();

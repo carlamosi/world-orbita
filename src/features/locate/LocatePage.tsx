@@ -198,7 +198,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                         : "text-white/55 hover:text-white",
                     )}
                   >
-                    20 Q
+                    10 Q
                   </button>
                   <button
                     type="button"
@@ -297,9 +297,10 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
         correct={s.correct}
         total={s.queue.length}
         wrong={s.wrong}
-        bestCombo={s.bestCombo}
-        durationMs={(s.endedAt ?? 0) - s.startedAt}
-        onReplay={() => startSession(continent, sub, sessionMode)}
+        masteredCount={s.masteredCount}
+        missedItems={s.missedItems}
+        hasNextBlock={sessionMode === "quick"}
+        onNextBlock={() => startSession(continent, sub, sessionMode)}
       />
     </div>
   );

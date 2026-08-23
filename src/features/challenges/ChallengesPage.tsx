@@ -17,6 +17,8 @@ import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 
+import { SessionEnd } from "@/features/engine/SessionEnd";
+import type { MissedItem } from "@/features/engine/useSession";
 import { HardcoreRunner } from "@/features/challenges/HardcoreRunner";
 import {
   type HardcoreExamState,
@@ -36,6 +38,7 @@ type Active = {
   combo: number;
   startedAt: number;
   answerState: "idle" | "correct" | "wrong";
+  missedItems: MissedItem[];
 };
 
 const CONTINENTS = ["Africa", "Americas", "Asia", "Europe", "Oceania"] as const;
@@ -156,6 +159,7 @@ export default function ChallengesPage() {
                 bestCombo: 0,
                 startedAt: Date.now(),
                 answerState: "idle",
+                missedItems: [],
               })
             }
           />
@@ -174,6 +178,7 @@ export default function ChallengesPage() {
                 bestCombo: 0,
                 startedAt: Date.now(),
                 answerState: "idle",
+                missedItems: [],
               })
             }
           />
@@ -376,29 +381,19 @@ function ChallengeRunner({
   }, [finished, active.answerState]);
 
   if (finished) {
-    const acc =
-      active.set.items.length > 0
-        ? Math.round((active.correct / active.set.items.length) * 100)
-        : 0;
     return (
-      <div className="min-h-dvh pt-28 px-6 pb-16 flex items-center justify-center">
-        <motion.div
-          initial={{ opacity: 0, y: 16, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={spring.soft}
-          className="glass-strong rounded-3xl p-10 max-w-md w-full text-center"
-        >
-          <Badge tone="neon">Challenge complete</Badge>
-          <div className="mt-4 font-display text-5xl text-white tracking-tight text-glow-violet">
-            {active.score}
-          </div>
-          <div className="mt-2 text-white/60 text-sm">
-            {active.correct}/{active.set.items.length} · {acc}% accuracy
-          </div>
-          <div className="mt-8 flex gap-3 justify-center">
-            <Button onClick={onExit}>Back</Button>
-          </div>
-        </motion.div>
+      <div className="relative min-h-dvh pt-20 flex flex-col items-center justify-center">
+        <SessionEnd
+          show
+          score={active.score}
+          correct={active.correct}
+          total={active.set.items.length}
+          wrong={active.wrong}
+          masteredCount={active.correct}
+          missedItems={active.missedItems}
+          hasNextBlock={false}
+          onReplay={onExit}
+        />
       </div>
     );
   }
@@ -412,6 +407,27 @@ function ChallengeRunner({
       );
       const combo = correctPick ? active.combo + 1 : 0;
       const gained = correctPick ? 100 + Math.min(combo - 1, 9) * 20 : 0;
+
+      let nextMissed = active.missedItems;
+      if (!correctPick) {
+        const missedKey = `${current.country.iso3}:${current.skill}`;
+        if (!active.missedItems.some((m) => m.id === missedKey)) {
+          nextMissed = [
+            ...active.missedItems,
+            {
+              id: missedKey,
+              prompt: current.skill === "flag" ? "Flag" : current.country.name,
+              answer:
+                current.skill === "capital"
+                  ? current.country.capital ?? "—"
+                  : current.country.name,
+              flagIso2: current.country.iso2,
+              subMode: current.skill,
+            },
+          ];
+        }
+      }
+
       setActive({
         ...active,
         answerState: correctPick ? "correct" : "wrong",
@@ -420,6 +436,7 @@ function ChallengeRunner({
         bestCombo: Math.max(active.bestCombo, combo),
         correct: active.correct + (correctPick ? 1 : 0),
         wrong: active.wrong + (correctPick ? 0 : 1),
+        missedItems: nextMissed,
       });
     },
     [active, current, setActive],
