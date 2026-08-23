@@ -252,7 +252,8 @@ export default function SpainPage() {
   }, [finished, current, s]);
   useSkipHotkey(onSkip);
 
-  const SPAIN_POV = useMemo(() => ({ lat: 39.8, lng: -3.7, altitude: 0.32 }), []);
+  // Rock-solid Spain POV — slightly lower center and slightly closer zoom (alt: 0.28, lat: 39.2)
+  const SPAIN_POV = useMemo(() => ({ lat: 39.2, lng: -3.7, altitude: 0.28 }), []);
 
   const capColor = useMemo(
     () => makeCapColor(current?.id, lastWrongId, hoveredRegionId, s.answerState, skill),
@@ -296,18 +297,7 @@ export default function SpainPage() {
   const promptTitle = useMemo(() => {
     if (!current) return null;
     if (skill === "locate") {
-      return (
-        <>
-          Find <span className="text-glow-cyan">{current.name}</span>
-          {currentFlagSrc && (
-            <img
-              src={currentFlagSrc}
-              alt={`${current.name} flag`}
-              className="inline-block ml-2 w-7 h-5 rounded-sm align-middle shadow-md object-cover"
-            />
-          )}
-        </>
-      );
+      return <>Find <span className="text-glow-cyan">{current.name}</span></>;
     }
     if (skill === "name") {
       return <>Name this {level === "ccaa" ? "autonomous community" : "province"}</>;
@@ -320,12 +310,14 @@ export default function SpainPage() {
         What is the capital of <span className="text-glow-cyan">{current.name}</span>?
       </>
     );
-  }, [current, skill, level, currentFlagSrc]);
+  }, [current, skill, level]);
+
+  const showGlobe = skill === "locate" || skill === "name";
 
   return (
     <div className="relative min-h-dvh pt-20 flex flex-col items-center">
-      {/* 3D Globe: hidden in Flags mode */}
-      {skill !== "flags" && (
+      {/* 3D Globe: rendered ONLY for Locate and Name modes */}
+      {showGlobe && (
         <div className="absolute inset-0">
           <Suspense fallback={<GlobeFallback />}>
             <Globe3D
@@ -367,18 +359,18 @@ export default function SpainPage() {
         </div>
       )}
 
-      {/* Ambient glow background for Flags mode */}
-      {skill === "flags" && (
+      {/* Ambient glow background for Non-Globe modes (Flags, Capitals) */}
+      {!showGlobe && (
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_20%,rgba(108,99,255,0.12)_0%,transparent_70%)] pointer-events-none" />
       )}
 
       {!finished && current && (
         <>
-          {/* Top HUD */}
+          {/* Top HUD with high z-index (z-40) so dropdowns are never overlapped */}
           <div
             className={cn(
-              "z-20 px-4 md:px-6 flex items-center justify-between flex-wrap gap-2 pointer-events-auto",
-              skill === "flags"
+              "z-40 px-4 md:px-6 flex items-center justify-between flex-wrap gap-2 pointer-events-auto",
+              !showGlobe
                 ? "w-full max-w-5xl mx-auto mb-4"
                 : "absolute top-24 inset-x-0 max-w-5xl mx-auto",
             )}
@@ -410,7 +402,7 @@ export default function SpainPage() {
           </div>
 
           {/* ================================================================
-              FLAGS MODE: 2-column card layout, no globe
+              FLAGS MODE: 2-column card layout, no globe, no flags on choices
           ================================================================ */}
           {skill === "flags" && (
             <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-5xl gap-6 z-20">
@@ -433,7 +425,7 @@ export default function SpainPage() {
                     <div className="relative overflow-hidden rounded-2xl glass shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] border border-white/20 w-full max-w-[480px] aspect-[3/2]">
                       <img
                         src={currentFlagSrc}
-                        alt={`${current.name} flag`}
+                        alt="Mystery flag"
                         className="w-full h-full object-cover"
                       />
                     </div>
@@ -451,6 +443,8 @@ export default function SpainPage() {
                         options={easyOptions}
                         targetId={current.id}
                         labelKey="name"
+                        showFlags={false}
+                        disabled={s.answerState !== "idle"}
                         onPick={(id) => s.submit(id === current.id)}
                       />
                     ) : (
@@ -480,9 +474,61 @@ export default function SpainPage() {
           )}
 
           {/* ================================================================
-              MAP MODES: Locate / Name / Capitals
+              CAPITALS MODE: Clean card layout, no globe
           ================================================================ */}
-          {skill !== "flags" && (
+          {skill === "capitals" && (
+            <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-3xl gap-6 z-20">
+              <PromptPill
+                keyId={`spain-capitals-${level}-${current.id}`}
+                index={s.index}
+                total={s.queue.length}
+                title={promptTitle ?? ""}
+              />
+
+              <div className="w-full flex flex-col items-center mt-6">
+                {s.answerState === "idle" ? (
+                  difficulty === "easy" ? (
+                    <div className="w-full">
+                      <EasyOptions
+                        options={easyOptions}
+                        targetId={current.id}
+                        labelKey="capital"
+                        showFlags={false}
+                        disabled={s.answerState !== "idle"}
+                        onPick={(id) => s.submit(id === current.id)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full max-w-lg">
+                      <HardInput
+                        target={current}
+                        matchTarget={current.capital ?? ""}
+                        placeholder="Type the capital city…"
+                        onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                      />
+                    </div>
+                  )
+                ) : (
+                  <div className="w-full max-w-2xl">
+                    <FeedbackBar
+                      show
+                      state={s.answerState as "correct" | "wrong" | "revealed"}
+                      title={current.name}
+                      subtitle={`Capital: ${current.capital ?? "—"}`}
+                      onNext={() => s.next()}
+                      onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
+                      hideNext
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ================================================================
+              MAP MODES: Locate / Name
+          ================================================================ */}
+          {showGlobe && (
             <>
               <div className="absolute top-40 md:top-36 inset-x-0 z-20 flex flex-col items-center pointer-events-none">
                 <PromptPill
@@ -513,18 +559,16 @@ export default function SpainPage() {
                     <EasyOptions
                       options={easyOptions}
                       targetId={current.id}
-                      labelKey={skill === "capitals" ? "capital" : "name"}
+                      labelKey="name"
+                      showFlags={false}
+                      disabled={s.answerState !== "idle"}
                       onPick={(id) => s.submit(id === current.id)}
                     />
                   ) : (
                     <HardInput
                       target={current}
-                      matchTarget={skill === "capitals" ? current.capital : current.name}
-                      placeholder={
-                        skill === "capitals"
-                          ? "Type the capital city…"
-                          : "Type the region name…"
-                      }
+                      matchTarget={current.name}
+                      placeholder="Type the region name…"
                       onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
                     />
                   )
@@ -533,13 +577,7 @@ export default function SpainPage() {
                     show
                     state={s.answerState as "correct" | "wrong" | "revealed"}
                     title={current.name}
-                    subtitle={
-                      skill === "capitals"
-                        ? `Capital: ${current.capital ?? "—"}`
-                        : current.capital
-                          ? `Capital: ${current.capital}`
-                          : undefined
-                    }
+                    subtitle={current.capital ? `Capital: ${current.capital}` : undefined}
                     onNext={() => s.next()}
                     onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
                     hideNext
@@ -574,11 +612,15 @@ function EasyOptions({
   options,
   targetId,
   labelKey,
+  showFlags = false,
+  disabled = false,
   onPick,
 }: {
   options: SpainEntity[];
   targetId: string;
   labelKey: "name" | "capital";
+  showFlags?: boolean;
+  disabled?: boolean;
   onPick: (id: string) => void;
 }) {
   const hotkeyItems = useMemo(
@@ -596,15 +638,18 @@ function EasyOptions({
     >
       {options.map((o, i) => {
         const text = (labelKey === "capital" ? o.capital : o.name) ?? o.name;
-        const flagSrc = getSpainFlagUrl(o.flagCode);
+        const flagSrc = showFlags ? getSpainFlagUrl(o.flagCode) : undefined;
         return (
           <button
             key={o.id}
+            type="button"
+            disabled={disabled}
             onClick={() => onPick(o.id)}
             className={cn(
-              "glass rounded-2xl px-5 py-4 text-left transition-all duration-200",
+              "glass rounded-2xl px-5 py-4 text-left transition-all duration-200 cursor-pointer select-none",
               "hover:bg-white/[0.08] hover:border-white/25 hover:-translate-y-0.5 hover:shadow-lg",
               "active:scale-[0.98]",
+              "disabled:pointer-events-none disabled:opacity-75",
               "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
             )}
           >
