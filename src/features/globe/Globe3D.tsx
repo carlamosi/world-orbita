@@ -52,6 +52,24 @@ interface Globe3DProps {
   disableHoverFeedback?: boolean;
   /** Changes whenever the active question changes — clears stale hover state on transition. */
   questionKey?: string | null;
+  /**
+   * Optional secondary polygon overlay (e.g. Spain CCAA / province features).
+   * Rendered as react-globe.gl `customPolygonsData` — completely independent
+   * of the world-country polygon layer.  Pass raw GeoJSON Feature objects.
+   */
+  overlayPolygons?: object[];
+  /** Cap colour callback for overlayPolygons. Defaults to semi-transparent violet. */
+  overlayCapColor?: (d: object) => string;
+  /** Side colour callback for overlayPolygons. */
+  overlaySideColor?: (d: object) => string;
+  /** Stroke colour callback for overlayPolygons. */
+  overlayStrokeColor?: (d: object) => string;
+  /** Altitude for overlayPolygons (default 0.004). */
+  overlayAltitude?: number | ((d: object) => number);
+  /** Label accessor for overlayPolygons. */
+  overlayLabel?: (d: object) => string;
+  /** Click handler for overlayPolygons. Receives the feature object. */
+  onOverlayClick?: (d: object) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +148,13 @@ export default function Globe3D({
   disableHoverLabel = false,
   disableHoverFeedback = false,
   questionKey = null,
+  overlayPolygons,
+  overlayCapColor,
+  overlaySideColor,
+  overlayStrokeColor,
+  overlayAltitude = 0.004,
+  overlayLabel,
+  onOverlayClick,
 }: Globe3DProps) {
   const effHighlight = highlightId ?? highlightIso3 ?? null;
   const effReveal = revealId ?? revealIso3 ?? null;
@@ -329,8 +354,21 @@ export default function Globe3D({
   // Senior UI/UX Continent Focus Polygon Cap Styling
   const polygonCapColor = useCallback(
     (d: object) => {
-      const f = d as CountryFeature;
-      const iso3 = f.properties.iso3;
+      const f = d as CountryFeature & { properties: { id?: string } };
+      // Overlay features (Spain CCAA/provinces) use properties.id; world features use properties.iso3
+      const fid: string = f.properties.id ?? f.properties.iso3 ?? "";
+      const isOverlay = !f.properties.iso3;
+
+      if (isOverlay) {
+        // Overlay polygon: apply overlay-specific colour from prop, or fallback to session state
+        if (overlayCapColor) return overlayCapColor(d);
+        if (fid === effWrong) return `rgba(${COLOR_WRONG}, 0.75)`;
+        if (fid === effReveal) return `rgba(${COLOR_REVEAL}, 0.70)`;
+        if (fid === effHighlight) return `rgba(${COLOR_HIGHLIGHT}, 0.70)`;
+        return "rgba(108,99,255,0.12)";
+      }
+
+      const iso3 = fid;
       if (iso3 === effWrong) return `rgba(${COLOR_WRONG}, 0.22)`;
       if (iso3 === effReveal) return `rgba(${COLOR_REVEAL}, 0.22)`;
       if (iso3 === effHighlight) return `rgba(${COLOR_HIGHLIGHT}, 0.22)`;
@@ -348,21 +386,14 @@ export default function Globe3D({
       const cont = continentByIso3.get(iso3);
       const inActive = !activeContinent || activeContinent === "All" || cont === activeContinent;
       if (!inActive) {
-        // Softly mute out-of-region countries: dark steel-blue, NOT pitch-black.
-        // This preserves the planet's depth and cohesion while creating
-        // clear visual hierarchy with the active continent.
         return "rgba(18, 20, 42, 0.62)";
       }
-      // Active continent or All mode: apply continent tint only when a specific
-      // continent is selected. In All mode restore the premium violet base fill.
       if (activeContinent && cont && CONTINENT_TINT[cont]) {
         return `rgba(${CONTINENT_TINT[cont]}, 0.16)`;
       }
-      // Premium default (All mode): rich violet tint matching the globe material.
-      // rgba(108,99,255,0.08) gives the original deep-space landmass glow.
       return `rgba(${COLOR_BASE}, 0.08)`;
     },
-    [effWrong, effReveal, effHighlight, effHoverIso3, dueSet, pulse, continentByIso3, activeContinent],
+    [effWrong, effReveal, effHighlight, effHoverIso3, dueSet, pulse, continentByIso3, activeContinent, overlayCapColor],
   );
 
   const polygonSideColor = useCallback(
@@ -372,8 +403,16 @@ export default function Globe3D({
 
   const polygonStrokeColor = useCallback(
     (d: object) => {
-      const f = d as CountryFeature;
-      const iso3 = f.properties.iso3;
+      const f = d as CountryFeature & { properties: { id?: string } };
+      const isOverlay = !f.properties.iso3;
+      const fid: string = f.properties.id ?? f.properties.iso3 ?? "";
+
+      if (isOverlay) {
+        if (overlaySideColor) return overlaySideColor(d);
+        return "rgba(255,255,255,0.22)";
+      }
+
+      const iso3 = fid;
       if (iso3 === effWrong) return `rgba(${COLOR_WRONG}, 0.85)`;
       if (iso3 === effReveal) return `rgba(${COLOR_REVEAL}, 0.85)`;
       if (iso3 === effHighlight) return `rgba(${COLOR_HIGHLIGHT}, 0.85)`;
@@ -387,31 +426,47 @@ export default function Globe3D({
       const cont = continentByIso3.get(iso3);
       const inActive = !activeContinent || activeContinent === "All" || cont === activeContinent;
       if (!inActive) {
-        // Muted borders: visible enough to read the shape of the world
         return `rgba(255, 255, 255, ${Math.max(0.025, strokeOpacity * 0.2)})`;
       }
       return `rgba(255, 255, 255, ${strokeOpacity})`;
     },
-    [effWrong, effReveal, effHighlight, effHoverIso3, strokeOpacity, continentByIso3, activeContinent],
+    [effWrong, effReveal, effHighlight, effHoverIso3, strokeOpacity, continentByIso3, activeContinent, overlaySideColor],
   );
 
   const polygonAltitude = useCallback(
     (d: object) => {
-      const f = d as CountryFeature;
-      const iso3 = f.properties.iso3;
+      const f = d as CountryFeature & { properties: { id?: string } };
+      const isOverlay = !f.properties.iso3;
+      const fid: string = f.properties.id ?? f.properties.iso3 ?? "";
+
+      if (isOverlay) {
+        if (fid === effWrong || fid === effReveal || fid === effHighlight) return 0.012;
+        return overlayAltitude as number;
+      }
+
+      const iso3 = fid;
       const inActive = !activeContinent || activeContinent === "All" || continentByIso3.get(iso3) === activeContinent;
       if (!inActive) return 0.002;
       if (iso3 === effWrong || iso3 === effReveal || iso3 === effHighlight) return 0.02;
       if (iso3 === effHoverIso3) return 0.012;
       return 0.004;
     },
-    [effWrong, effReveal, effHighlight, effHoverIso3, activeContinent, continentByIso3],
+    [effWrong, effReveal, effHighlight, effHoverIso3, activeContinent, continentByIso3, overlayAltitude],
   );
 
   const polygonLabel = useCallback(
     (d: object) => {
       if (disableHoverFeedback || disableHoverLabel) return "";
-      const f = d as CountryFeature;
+      const f = d as CountryFeature & { properties: { id?: string } };
+      const isOverlay = !f.properties.iso3;
+
+      if (isOverlay) {
+        if (overlayLabel) return overlayLabel(d);
+        return f.properties.name
+          ? `<div style="font-family:'Inter',sans-serif;padding:6px 10px;background:rgba(5,5,8,0.85);border:1px solid rgba(255,255,255,0.12);border-radius:9999px;color:#fff;font-size:12px;backdrop-filter:blur(8px)">${f.properties.name}</div>`
+          : "";
+      }
+
       const iso3 = f.properties.iso3;
       if (activeContinent && activeContinent !== "All") {
         const cont = continentByIso3.get(iso3);
@@ -419,7 +474,7 @@ export default function Globe3D({
       }
       return `<div style="font-family:'Inter',sans-serif;padding:6px 10px;background:rgba(5,5,8,0.85);border:1px solid rgba(255,255,255,0.12);border-radius:9999px;color:#fff;font-size:12px;backdrop-filter:blur(8px)">${f.properties.name}</div>`;
     },
-    [disableHoverFeedback, disableHoverLabel, activeContinent, continentByIso3],
+    [disableHoverFeedback, disableHoverLabel, activeContinent, continentByIso3, overlayLabel],
   );
 
   // ---- Unified camera targeting pass ----------------------------------
@@ -577,7 +632,18 @@ export default function Globe3D({
   // ---- Click / hover handlers (active continent aware) ----------------
   const handlePolygonClick = useCallback(
     (d: object) => {
-      const f = d as CountryFeature;
+      const f = d as CountryFeature & { properties: { id?: string } };
+      const isOverlay = !f.properties.iso3;
+      if (isOverlay) {
+        if (onOverlayClick) {
+          onOverlayClick(d);
+        } else {
+          const fid = f.properties.id ?? "";
+          handleFeatureClick?.(fid);
+        }
+        return;
+      }
+
       const iso3 = f.properties.iso3;
       if (activeContinent && activeContinent !== "All") {
         const cont = continentByIso3.get(iso3);
@@ -585,7 +651,7 @@ export default function Globe3D({
       }
       handleFeatureClick?.(iso3);
     },
-    [handleFeatureClick, activeContinent, continentByIso3],
+    [handleFeatureClick, onOverlayClick, activeContinent, continentByIso3],
   );
 
   const handlePolygonHover = useCallback(
@@ -594,7 +660,13 @@ export default function Globe3D({
         setHoverIso3(null);
         return;
       }
-      const f = d as CountryFeature;
+      const f = d as CountryFeature & { properties: { id?: string } };
+      const isOverlay = !f.properties.iso3;
+      if (isOverlay) {
+        setHoverIso3(f.properties.id ?? null);
+        return;
+      }
+
       const iso3 = f.properties.iso3;
       if (activeContinent && activeContinent !== "All") {
         const cont = continentByIso3.get(iso3);
@@ -916,7 +988,7 @@ export default function Globe3D({
           antialias: effectiveQuality !== "static",
           alpha: true,
         }}
-        polygonsData={features ?? []}
+        polygonsData={[...(overlayPolygons ?? []), ...(features ?? [])]}
         polygonGeoJsonGeometry={
           ((d: object) => (d as CountryFeature).geometry) as unknown as undefined
         }
