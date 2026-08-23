@@ -124,8 +124,8 @@ const SKILL_OPTIONS = [
 
 type AdminLevel = "ccaa" | "provinces";
 const LEVEL_OPTIONS = [
-  { value: "ccaa" as const, label: "Comunidades (19)" },
-  { value: "provinces" as const, label: "Provincias (50)" },
+  { value: "ccaa" as const, label: "Autonomous Communities (19)" },
+  { value: "provinces" as const, label: "Provinces (50)" },
 ];
 
 type Difficulty = "easy" | "hard";
@@ -349,6 +349,8 @@ export default function SpainPage() {
         <Suspense fallback={<GlobeFallback />}>
           <Globe3D
             countries={COUNTRIES}
+            disableWorldPolygons
+            autoRotate={false}
             highlightId={
               s.answerState === "correct"
                 ? (current?.id ?? null)
@@ -386,7 +388,7 @@ export default function SpainPage() {
           <div className="absolute top-24 inset-x-0 z-20 px-4 md:px-6 flex items-center justify-between pointer-events-auto max-w-5xl mx-auto flex-wrap gap-2">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="glass px-3 py-1.5 rounded-full font-mono text-[11px] uppercase tracking-widest text-white/80 flex items-center gap-1.5">
-                <span>🇪🇸</span> España
+                <span>🇪🇸</span> Spain
               </span>
               <ModeDropdown options={SKILL_OPTIONS} value={skill} onChange={setSkill} />
               {skill !== "flags" && (
@@ -396,7 +398,7 @@ export default function SpainPage() {
                 value={sessionMode}
                 onChange={setSessionMode}
                 continentCount={activeDataset.length}
-                continent="España"
+                continent="Spain"
               />
             </div>
 

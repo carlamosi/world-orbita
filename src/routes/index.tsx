@@ -63,8 +63,8 @@ const MODES = [
   },
   {
     to: "/spain",
-    title: "España 🇪🇸",
-    tagline: "17 CCAA, 50 provincias y capitales en el globo 3D.",
+    title: "Spain 🇪🇸",
+    tagline: "19 autonomous communities, 50 provinces, flags, and capitals on the 3D globe.",
     tone: "neon" as const,
   },
   {

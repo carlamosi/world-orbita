@@ -52,6 +52,10 @@ interface Globe3DProps {
   disableHoverFeedback?: boolean;
   /** Changes whenever the active question changes — clears stale hover state on transition. */
   questionKey?: string | null;
+  /** Disable loading and rendering the 195 world country base polygons (huge speedup for regional modes like Spain). */
+  disableWorldPolygons?: boolean;
+  /** Control auto-rotation of the globe (set false for regional focus). */
+  autoRotate?: boolean;
   /**
    * Optional secondary polygon overlay (e.g. Spain CCAA / province features).
    * Rendered as react-globe.gl `customPolygonsData` — completely independent
@@ -148,6 +152,8 @@ export default function Globe3D({
   disableHoverLabel = false,
   disableHoverFeedback = false,
   questionKey = null,
+  disableWorldPolygons = false,
+  autoRotate,
   overlayPolygons,
   overlayCapColor,
   overlaySideColor,
@@ -168,8 +174,16 @@ export default function Globe3D({
   const [hoverIso3, setHoverIso3] = useState<string | null>(null);
   const [altBand, setAltBand] = useState(4);
   const [features, setFeatures] = useState<CountryFeature[] | null>(() =>
-    loadCountryFeatures("110m"),
+    disableWorldPolygons ? [] : loadCountryFeatures("110m"),
   );
+
+  // Sync autoRotate control
+  useEffect(() => {
+    if (!ref.current) return;
+    if (autoRotate !== undefined) {
+      ref.current.controls().autoRotate = autoRotate;
+    }
+  }, [autoRotate]);
 
   // ---- Environment / quality resolution --------------------------------
   const effectiveQuality: GlobeQuality = useMemo(() => {

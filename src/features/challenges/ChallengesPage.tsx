@@ -290,12 +290,12 @@ export default function ChallengesPage() {
               <div>
                 <div className="flex items-center justify-between">
                   <h3 className="font-display text-xl text-white tracking-tight flex items-center gap-2">
-                    <span>🇪🇸</span> España
+                    <span>🇪🇸</span> Spain
                   </h3>
                   <Badge tone="neon">Regional</Badge>
                 </div>
                 <p className="mt-2 font-mono text-[11px] text-white/45 uppercase tracking-wider">
-                  19 CCAA • 50 Provincias • Banderas • Capitales
+                  19 CCAA • 50 Provinces • Flags • Capitals
                 </p>
                 <p className="mt-2 text-[13px] text-white/65">
                   Complete mastery over Spain's administrative geography: locate, identify, flags, and seats of power.
@@ -305,7 +305,7 @@ export default function ChallengesPage() {
               <div className="pt-2">
                 <Link to="/spain" className="block w-full">
                   <Button variant="primary" size="sm" className="w-full">
-                    Aprender España →
+                    Learn Spain →
                   </Button>
                 </Link>
               </div>

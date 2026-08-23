@@ -185,9 +185,9 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               <Link
                 to="/spain"
                 className="glass rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1 shrink-0"
-                title="Aprender geografía de España (CCAA y provincias)"
+                title="Master Spain's geography (autonomous communities and provinces)"
               >
-                <span>🇪🇸</span> España
+                <span>🇪🇸</span> Spain
               </Link>
               {sub === "find" && (
                 <div

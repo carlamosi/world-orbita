@@ -4,11 +4,11 @@ import SpainPage from "@/features/spain/SpainPage";
 export const Route = createFileRoute("/spain")({
   head: () => ({
     meta: [
-      { title: "España — Orbita" },
+      { title: "Spain — Orbita" },
       {
         name: "description",
         content:
-          "Aprende la geografía de España: comunidades autónomas y provincias en el globo 3D.",
+          "Master Spain's geography: 19 autonomous communities, 50 provinces, flags, and capitals on the 3D globe.",
       },
     ],
   }),
