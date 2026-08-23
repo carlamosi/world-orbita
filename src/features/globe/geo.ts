@@ -26,7 +26,16 @@ import m49Map from "@/assets/geo/m49-to-iso3.json";
 
 export type CountryGeometry = Polygon | MultiPolygon;
 
-export interface CountryProps {
+export interface GeoFeatureProps {
+  id?: string;
+  name: string;
+  centroid?: [number, number];
+  angularSpan?: number;
+  area?: number;
+  [key: string]: unknown;
+}
+
+export interface CountryProps extends GeoFeatureProps {
   iso3: string;
   name: string;
   /** Approximate spherical area in steradians (0–4π). Computed lazily. */
@@ -38,6 +47,7 @@ export interface CountryProps {
 }
 
 export type CountryFeature = Feature<CountryGeometry, CountryProps>;
+export type GeoFeature<G extends CountryGeometry = CountryGeometry, P extends GeoFeatureProps = GeoFeatureProps> = Feature<G, P>;
 
 export type GeoResolution = "110m" | "50m";
 

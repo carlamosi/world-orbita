@@ -8,6 +8,7 @@ import { recordConceptAttempt } from "@/lib/db/progressRepo";
 import { db, type ConceptProgressRow, type GameMode, type Skill } from "@/lib/db/orbita-db";
 import { recordSessionEnd } from "@/lib/db/repo";
 import { State, ConvertStepUnitToMinutes } from "ts-fsrs";
+import { formatConceptId, parseConceptId } from "@/lib/fsrs/concept";
 
 /**
  * Spacing by item-count: re-insert failed card after N other answered cards
@@ -30,8 +31,20 @@ export interface MissedItem {
   subMode?: string;
 }
 
-export interface SessionState {
-  queue: Country[];
+export interface SessionItemLike {
+  id?: string;
+  iso3?: string;
+  iso2?: string;
+  flagCode?: string;
+  name: string;
+  capital?: string | null;
+  coordinates?: [number, number];
+  capitalCoords?: [number, number];
+  continent?: string;
+}
+
+export interface SessionState<TItem = Country> {
+  queue: TItem[];
   conceptQueue: (ConceptProgressRow | null)[];
   index: number;
   score: number;
@@ -66,15 +79,16 @@ export interface SessionState {
    */
   inSessionRetries: Map<string, number>;
 
-  current(): Country | null;
-  /** Start a session. Pass `allCountries` for Complete Continent mode
-   * (every country played exactly once in random order). Pass `continent`
+  current(): TItem | null;
+  /** Start a session. Pass `allCountries` or `items` for Complete Continent/Region mode
+   * (every item played exactly once in random order). Pass `continent`
    * for Quick Practice (20 weighted questions). Pass `conceptRows` to
    * supply a pre-built mixed-skill FSRS queue (used by Due Today). */
   start(opts?: {
     continent?: string;
     subMode?: string;
-    allCountries?: Country[];
+    allCountries?: TItem[];
+    items?: TItem[];
     /** Pre-built FSRS rows — bypasses the planner entirely. */
     conceptRows?: ConceptProgressRow[];
   }): Promise<void>;
@@ -83,10 +97,13 @@ export interface SessionState {
   next(): void;
 }
 
-interface CreateOpts {
+export interface CreateOpts<TItem = Country> {
   mode: GameMode;
   skill: Skill;
   questions?: number;
+  domain?: string;
+  dataset?: readonly TItem[];
+  getId?: (item: TItem) => string;
 }
 
 /**
@@ -95,12 +112,21 @@ interface CreateOpts {
  * runtime store (see `src/features/speed/speedRuntimeStore.ts`) because
  * timer ticks and combo decay have very different re-render constraints.
  */
-export function createSessionStore({
+export function createSessionStore<TItem = Country>({
   mode,
   skill,
   questions = QUESTIONS_PER_SESSION,
-}: CreateOpts): UseBoundStore<StoreApi<SessionState>> {
-  return create<SessionState>((set, get) => ({
+  domain = "world",
+  dataset,
+  getId,
+}: CreateOpts<TItem>): UseBoundStore<StoreApi<SessionState<TItem>>> {
+  const activeDataset = (dataset ?? COUNTRIES) as unknown as readonly TItem[];
+  const resolveId = getId ?? ((item: TItem) => {
+    const raw = item as unknown as SessionItemLike;
+    return raw.id ?? raw.iso3 ?? raw.name;
+  });
+
+  return create<SessionState<TItem>>((set, get) => ({
     queue: [],
     conceptQueue: [],
     index: 0,
@@ -145,17 +171,32 @@ export function createSessionStore({
         inSessionRetries: new Map(),
       });
 
-      let q: Country[] = [];
+      let q: TItem[] = [];
       let cq: (ConceptProgressRow | null)[] = [];
-      
+
+      const itemMap = new Map<string, TItem>();
+      for (const item of activeDataset) {
+        const raw = item as unknown as SessionItemLike;
+        const id = resolveId(item);
+        itemMap.set(id, item);
+        if (raw.iso3) itemMap.set(raw.iso3, item);
+      }
+
       if (opts?.conceptRows && opts.conceptRows.length > 0) {
         // Due Today / pre-built mode: skip the planner, use the caller's queue directly.
-        const isoToCountry = new Map(COUNTRIES.map(c => [c.iso3, c]));
         cq = opts.conceptRows;
-        q = cq.map(c => (c ? isoToCountry.get(c.iso3) : null)).filter((c): c is Country => c != null);
-      } else if (opts?.allCountries && opts.allCountries.length > 0) {
-        // Complete Continent mode: use the pre-built shuffled array directly.
-        q = [...opts.allCountries];
+        const rows: TItem[] = [];
+        for (const c of opts.conceptRows) {
+          if (!c) continue;
+          const parsed = parseConceptId(c.conceptId);
+          const found = itemMap.get(parsed.entityId) ?? itemMap.get(c.iso3);
+          if (found) rows.push(found);
+        }
+        q = rows;
+      } else if ((opts?.items && opts.items.length > 0) || (opts?.allCountries && opts.allCountries.length > 0)) {
+        // Complete mode: use the pre-built shuffled array directly.
+        const source = (opts.items ?? opts.allCountries)!;
+        q = [...source];
         for (let i = q.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [q[i], q[j]] = [q[j]!, q[i]!];
@@ -165,10 +206,25 @@ export function createSessionStore({
         // FSRS session planner
         const allConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
         let pool = allConcepts;
+
+        // Filter pool by domain if specified
+        if (domain && domain !== "world") {
+          pool = pool.filter(c => c.conceptId.startsWith(`${domain}:`));
+        } else if (domain === "world") {
+          // World domain: either legacy (no domain prefix) or explicitly world:
+          pool = pool.filter(c => !c.conceptId.includes(":") || !c.conceptId.startsWith("spain:"));
+        }
         
         if (opts?.continent && opts.continent !== "All") {
-          const validIso3s = new Set(COUNTRIES.filter(c => c.continent === opts.continent).map(c => c.iso3));
-          pool = allConcepts.filter(c => validIso3s.has(c.iso3));
+          const validIds = new Set(
+            activeDataset
+              .filter(c => (c as unknown as SessionItemLike).continent === opts.continent)
+              .map(c => resolveId(c))
+          );
+          pool = allConcepts.filter(c => {
+            const parsed = parseConceptId(c.conceptId);
+            return validIds.has(parsed.entityId) || validIds.has(c.iso3);
+          });
         }
 
         if (opts?.subMode && opts.subMode !== "mixed") {
@@ -177,11 +233,16 @@ export function createSessionStore({
         
         // If there are not enough concepts seeded yet (e.g. fresh install), create dummy ones
         if (pool.length < questions) {
-          const used = new Set(pool.map(c => c.iso3));
-          const candidates = COUNTRIES.filter(c => !opts?.continent || opts.continent === "All" || c.continent === opts.continent);
+          const used = new Set(pool.map(c => parseConceptId(c.conceptId).entityId));
+          const candidates = activeDataset.filter(c => {
+            const raw = c as unknown as SessionItemLike;
+            return !opts?.continent || opts.continent === "All" || raw.continent === opts.continent;
+          });
           for (const c of candidates) {
             if (pool.length >= questions) break;
-            if (!used.has(c.iso3)) {
+            const entityId = resolveId(c);
+            const raw = c as unknown as SessionItemLike;
+            if (!used.has(entityId)) {
               // For mixed mode, default to a standard subMode if we must seed, or use provided subMode
               let defaultSubMode = "";
               if (skill === "capital") defaultSubMode = "countryToCap";
@@ -190,14 +251,16 @@ export function createSessionStore({
               if (skill === "location") defaultSubMode = "find";
               
               const sm = (opts?.subMode && opts.subMode !== "mixed") ? opts.subMode : defaultSubMode;
-              // Always use 3-part conceptId — a bare iso3:skill would never be matched by
-              // any directional session query and would silently accumulate as dead weight.
-              // defaultSubMode covers all known skills; unknown skills fall back to "default".
-              const newConceptId = `${c.iso3}:${skill}:${sm || "default"}`;
+              const newConceptId = formatConceptId({
+                domain: domain as any,
+                entityId,
+                skill,
+                subMode: sm || "default",
+              });
               
               pool.push({
                 conceptId: newConceptId,
-                iso3: c.iso3,
+                iso3: raw.iso3 ?? entityId,
                 skill,
                 fsrs_state: State.New as any,
                 fsrs_stability: null,
@@ -210,15 +273,19 @@ export function createSessionStore({
                 version: 1,
                 dirty: 0
               });
-              used.add(c.iso3);
+              used.add(entityId);
             }
           }
         }
         
         const plannedConcepts = generateSessionQueue(pool, undefined, { sessionSize: questions });
-        
-        const isoToCountry = new Map(COUNTRIES.map(c => [c.iso3, c]));
-        q = plannedConcepts.map(c => isoToCountry.get(c.iso3)!).filter(Boolean);
+        const plannedItems: TItem[] = [];
+        for (const c of plannedConcepts) {
+          const parsed = parseConceptId(c.conceptId);
+          const found = itemMap.get(parsed.entityId) ?? itemMap.get(c.iso3);
+          if (found) plannedItems.push(found);
+        }
+        q = plannedItems;
         cq = plannedConcepts;
       }
 
@@ -252,7 +319,7 @@ export function createSessionStore({
       const responseMs = Math.max(0, Date.now() - (s.questionStartedAt || Date.now()));
 
       // ── Accumulate all state updates into one set() call ──────────────────
-      const updates: Partial<SessionState> = {};
+      const updates: Partial<SessionState<TItem>> = {};
 
       // 1. Score & UI state
       if (isCorrect) {
@@ -274,31 +341,40 @@ export function createSessionStore({
         // Track missed item details for end session review
         const conceptSkill = targetConcept?.skill ?? skill;
         const parts = targetConcept?.conceptId.split(":") ?? [];
-        const dir = parts.length >= 3 ? parts[2] : `${conceptSkill}->answer`;
+        const dir = parts.length >= 3 ? parts[parts.length - 1]! : `${conceptSkill}->answer`;
 
-        let prompt = target.name;
-        let answer = target.name;
+        const rawTarget = target as unknown as SessionItemLike;
+        let prompt = rawTarget.name;
+        let answer = rawTarget.name;
 
         if (conceptSkill === "capital") {
           if (dir === "capToCountry") {
-            prompt = target.capital ?? target.name;
-            answer = target.name;
+            prompt = rawTarget.capital ?? rawTarget.name;
+            answer = rawTarget.name;
           } else {
-            prompt = target.name;
-            answer = target.capital ?? "—";
+            prompt = rawTarget.name;
+            answer = rawTarget.capital ?? "—";
           }
         } else if (conceptSkill === "flag") {
-          prompt = target.name;
-          answer = target.name;
+          prompt = rawTarget.name;
+          answer = rawTarget.name;
         } else if (conceptSkill === "location") {
-          prompt = target.name;
-          answer = target.capital ? `${target.name} (${target.capital})` : target.name;
+          prompt = rawTarget.name;
+          answer = rawTarget.capital ? `${rawTarget.name} (${rawTarget.capital})` : rawTarget.name;
         } else if (conceptSkill === "name") {
-          prompt = target.name;
-          answer = target.name;
+          prompt = rawTarget.name;
+          answer = rawTarget.name;
         }
 
-        const missedKey = `${target.iso3}:${conceptSkill}:${dir}`;
+        const targetId = resolveId(target);
+        const flagCode = rawTarget.flagCode ?? rawTarget.iso2;
+        const missedKey = targetConcept?.conceptId ?? formatConceptId({
+          domain: domain as any,
+          entityId: targetId,
+          skill: conceptSkill,
+          subMode: dir,
+        });
+
         if (!s.missedItems.some((m) => m.id === missedKey)) {
           updates.missedItems = [
             ...s.missedItems,
@@ -306,7 +382,7 @@ export function createSessionStore({
               id: missedKey,
               prompt,
               answer,
-              flagIso2: target.iso2,
+              flagIso2: flagCode,
               subMode: dir,
             },
           ];
@@ -322,7 +398,7 @@ export function createSessionStore({
         // Use the concept's own skill (critical for Due Today mixed sessions)
         const conceptSkill = targetConcept.skill ?? skill;
         const parts = targetConcept.conceptId.split(":");
-        const actualDirection = parts.length >= 3 ? parts[2] : `${conceptSkill}->answer`;
+        const actualDirection = parts.length >= 3 ? parts[parts.length - 1]! : `${conceptSkill}->answer`;
 
         const assessment = assess({
           validationResult: { correct: isCorrect, softCorrect: false },

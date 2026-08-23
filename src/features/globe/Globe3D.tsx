@@ -26,6 +26,14 @@ interface Globe3DProps {
   wrongIso3?: string | null;
   /** External focus request (Explorer search, deep-link, etc.). */
   focusIso3?: string | null;
+  /** Generic feature highlight ID (alias for highlightIso3) */
+  highlightId?: string | null;
+  /** Generic feature reveal ID (alias for revealIso3) */
+  revealId?: string | null;
+  /** Generic feature wrong ID (alias for wrongIso3) */
+  wrongId?: string | null;
+  /** Generic feature focus ID (alias for focusIso3) */
+  focusId?: string | null;
   /** Active continent selection ("Africa", "Americas", "Asia", "Europe", "Oceania") — highlights region & mutes non-active landmasses. */
   activeContinent?: string | null;
   /** Optional list of due-for-review countries — receives a slow amber pulse. */
@@ -33,6 +41,8 @@ interface Globe3DProps {
   /** Optional miss-rate per ISO3 (0–1) — boosts adaptive hitbox size. */
   missRates?: Readonly<Record<string, number>>;
   onCountryClick?: (iso3: string) => void;
+  /** Generic feature click handler (alias for onCountryClick) */
+  onFeatureClick?: (id: string) => void;
   pointOfView?: { lat: number; lng: number; altitude?: number };
   size?: number;
   quality?: GlobeQuality;
@@ -105,10 +115,15 @@ export default function Globe3D({
   revealIso3,
   wrongIso3,
   focusIso3,
+  highlightId,
+  revealId,
+  wrongId,
+  focusId,
   activeContinent = null,
   dueReviewIso3,
   missRates,
   onCountryClick,
+  onFeatureClick,
   pointOfView,
   size,
   quality = "high",
@@ -116,6 +131,12 @@ export default function Globe3D({
   disableHoverFeedback = false,
   questionKey = null,
 }: Globe3DProps) {
+  const effHighlight = highlightId ?? highlightIso3 ?? null;
+  const effReveal = revealId ?? revealIso3 ?? null;
+  const effWrong = wrongId ?? wrongIso3 ?? null;
+  const effFocus = focusId ?? focusIso3 ?? null;
+  const handleFeatureClick = onFeatureClick ?? onCountryClick;
+
   const ref = useRef<GlobeMethods | undefined>(undefined);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [dim, setDim] = useState({ w: 600, h: 600 });
@@ -261,27 +282,27 @@ export default function Globe3D({
 
   const effHoverIso3 = disableHoverFeedback ? null : hoverIso3;
 
+  // Clear stale hover when active question changes
+  useEffect(() => {
+    setHoverIso3(null);
+  }, [questionKey, effHighlight, effReveal, effWrong]);
+
   // Microstate marker styling — subtle glowing pinpoints for tiny territories.
-  // Microstate marker styling — subtle glowing pinpoints for tiny territories.
-  // Visual radius is kept small (premium, clean look) while the interaction
-  // sphere (p.radius) is generously sized for reliable clicking.
   const pointColorFn = useCallback(
     (d: object) => {
       const p = d as { iso3: string; micro: boolean };
       if (!p.micro) return "rgba(0,0,0,0)";
-      if (p.iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 1.0)`;
-      if (p.iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 1.0)`;
-      if (p.iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 1.0)`;
+      if (p.iso3 === effWrong) return `rgba(${COLOR_WRONG}, 1.0)`;
+      if (p.iso3 === effReveal) return `rgba(${COLOR_REVEAL}, 1.0)`;
+      if (p.iso3 === effHighlight) return `rgba(${COLOR_HIGHLIGHT}, 1.0)`;
       if (p.iso3 === effHoverIso3) return `rgba(${COLOR_HOVER}, 1.0)`;
       // Default: gentle neon pinpoint — visible but not distracting
       return `rgba(${COLOR_HIGHLIGHT}, 0.6)`;
     },
-    [wrongIso3, revealIso3, highlightIso3, effHoverIso3],
+    [effWrong, effReveal, effHighlight, effHoverIso3],
   );
 
   // Point label: show country name as a styled tooltip.
-  // In Find mode (disableHoverLabel) we show the label ONLY when the country
-  // is the current question's answer or already revealed — never reveals the answer.
   const pointLabelFn = useCallback(
     (d: object) => {
       const p = d as { iso3: string; name: string; micro: boolean };
@@ -296,35 +317,23 @@ export default function Globe3D({
   const pointRadiusFn = useCallback((d: object) => {
     const p = d as { radius: number; micro: boolean };
     if (!p.micro) return 0;
-    // Visual dot size: small enough to look elegant, never distracting.
-    // Interaction radius (p.radius) is much larger for easy clicking.
-    // At altBand 4–5 (far): ~0.42 visual units. At altBand 0 (close): ~0.30.
     const base = altBand >= 3 ? 0.42 : altBand >= 1 ? 0.36 : 0.30;
     return base;
   }, [altBand]);
 
   const pointAltitudeFn = useCallback((d: object) => {
     const p = d as { micro: boolean };
-    // Render well above polygon surfaces (0.04) — this is critical:
-    // react-globe.gl raycasts layers in render order (points before polygons)
-    // only when points are at higher altitude than polygons (0.004–0.025).
-    // Setting 0.04 ensures the point sphere is always tested first.
     return p.micro ? 0.04 : 0;
   }, []);
-
-  // Clear stale hover when active question changes
-  useEffect(() => {
-    setHoverIso3(null);
-  }, [questionKey, highlightIso3, revealIso3, wrongIso3]);
 
   // Senior UI/UX Continent Focus Polygon Cap Styling
   const polygonCapColor = useCallback(
     (d: object) => {
       const f = d as CountryFeature;
       const iso3 = f.properties.iso3;
-      if (iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 0.22)`;
-      if (iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 0.22)`;
-      if (iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 0.22)`;
+      if (iso3 === effWrong) return `rgba(${COLOR_WRONG}, 0.22)`;
+      if (iso3 === effReveal) return `rgba(${COLOR_REVEAL}, 0.22)`;
+      if (iso3 === effHighlight) return `rgba(${COLOR_HIGHLIGHT}, 0.22)`;
       if (iso3 === effHoverIso3) {
         const cont = continentByIso3.get(iso3);
         if (activeContinent && activeContinent !== "All" && cont !== activeContinent) {
@@ -353,7 +362,7 @@ export default function Globe3D({
       // rgba(108,99,255,0.08) gives the original deep-space landmass glow.
       return `rgba(${COLOR_BASE}, 0.08)`;
     },
-    [wrongIso3, revealIso3, highlightIso3, effHoverIso3, dueSet, pulse, continentByIso3, activeContinent],
+    [effWrong, effReveal, effHighlight, effHoverIso3, dueSet, pulse, continentByIso3, activeContinent],
   );
 
   const polygonSideColor = useCallback(
@@ -365,9 +374,9 @@ export default function Globe3D({
     (d: object) => {
       const f = d as CountryFeature;
       const iso3 = f.properties.iso3;
-      if (iso3 === wrongIso3) return `rgba(${COLOR_WRONG}, 0.85)`;
-      if (iso3 === revealIso3) return `rgba(${COLOR_REVEAL}, 0.85)`;
-      if (iso3 === highlightIso3) return `rgba(${COLOR_HIGHLIGHT}, 0.85)`;
+      if (iso3 === effWrong) return `rgba(${COLOR_WRONG}, 0.85)`;
+      if (iso3 === effReveal) return `rgba(${COLOR_REVEAL}, 0.85)`;
+      if (iso3 === effHighlight) return `rgba(${COLOR_HIGHLIGHT}, 0.85)`;
       if (iso3 === effHoverIso3) {
         const cont = continentByIso3.get(iso3);
         if (activeContinent && activeContinent !== "All" && cont !== activeContinent) {
@@ -383,7 +392,7 @@ export default function Globe3D({
       }
       return `rgba(255, 255, 255, ${strokeOpacity})`;
     },
-    [wrongIso3, revealIso3, highlightIso3, effHoverIso3, strokeOpacity, continentByIso3, activeContinent],
+    [effWrong, effReveal, effHighlight, effHoverIso3, strokeOpacity, continentByIso3, activeContinent],
   );
 
   const polygonAltitude = useCallback(
@@ -392,11 +401,11 @@ export default function Globe3D({
       const iso3 = f.properties.iso3;
       const inActive = !activeContinent || activeContinent === "All" || continentByIso3.get(iso3) === activeContinent;
       if (!inActive) return 0.002;
-      if (iso3 === wrongIso3 || iso3 === revealIso3 || iso3 === highlightIso3) return 0.02;
+      if (iso3 === effWrong || iso3 === effReveal || iso3 === effHighlight) return 0.02;
       if (iso3 === effHoverIso3) return 0.012;
       return 0.004;
     },
-    [wrongIso3, revealIso3, highlightIso3, effHoverIso3, activeContinent, continentByIso3],
+    [effWrong, effReveal, effHighlight, effHoverIso3, activeContinent, continentByIso3],
   );
 
   const polygonLabel = useCallback(
@@ -414,15 +423,9 @@ export default function Globe3D({
   );
 
   // ---- Unified camera targeting pass ----------------------------------
-  // For reveal (wrong answer) and focus (search): compute a context-preserving
-  // altitude that shows the country without yanking the camera too far.
-  // We read the *live* camera altitude at trigger time and only zoom out
-  // enough to frame the country — never more than 1.5× the current altitude
-  // and never more than 1.8 total. This prevents the jarring zoom-out when
-  // the player is already focused on a region.
   const activeCameraTarget = useMemo(() => {
-    if (revealIso3) {
-      const f = featureByIso3.get(revealIso3);
+    if (effReveal) {
+      const f = featureByIso3.get(effReveal);
       if (f) {
         const [clng, clat] = f.properties.centroid;
         const span = f.properties.angularSpan ?? 5;
@@ -435,26 +438,26 @@ export default function Globe3D({
         // enough to see the country, preserve their zoom. Otherwise zoom out
         // just enough. Never zoom in closer than frameAlt.
         const altitude = Math.max(frameAlt, Math.min(liveAlt * 1.25, 1.8));
-        return { lat: clat, lng: clng, altitude, key: `reveal:${revealIso3}`, duration: 1600 };
+        return { lat: clat, lng: clng, altitude, key: `reveal:${effReveal}`, duration: 1600 };
       }
-      const c = countryByIso3.get(revealIso3);
+      const c = countryByIso3.get(effReveal);
       if (c) {
         const liveAlt = ref.current ? ref.current.pointOfView().altitude : 1.4;
         const altitude = Math.min(Math.max(liveAlt, 1.0), 1.6);
-        return { lat: c.coordinates[0], lng: c.coordinates[1], altitude, key: `reveal:${revealIso3}`, duration: 1600 };
+        return { lat: c.coordinates[0], lng: c.coordinates[1], altitude, key: `reveal:${effReveal}`, duration: 1600 };
       }
     }
-    if (focusIso3) {
-      const f = featureByIso3.get(focusIso3);
+    if (effFocus) {
+      const f = featureByIso3.get(effFocus);
       if (f) {
         const [clng, clat] = f.properties.centroid;
         const span = f.properties.angularSpan ?? 5;
         const altitude = Math.max(0.22, Math.min(2.0, Math.max(span, 1.5) / 28));
-        return { lat: clat, lng: clng, altitude, key: `focus:${focusIso3}`, duration: 1200 };
+        return { lat: clat, lng: clng, altitude, key: `focus:${effFocus}`, duration: 1200 };
       }
-      const c = countryByIso3.get(focusIso3);
+      const c = countryByIso3.get(effFocus);
       if (c) {
-        return { lat: c.coordinates[0], lng: c.coordinates[1], altitude: 1.4, key: `focus:${focusIso3}`, duration: 1200 };
+        return { lat: c.coordinates[0], lng: c.coordinates[1], altitude: 1.4, key: `focus:${effFocus}`, duration: 1200 };
       }
     }
     if (pointOfView) {
@@ -473,7 +476,7 @@ export default function Globe3D({
       };
     }
     return null;
-  }, [revealIso3, focusIso3, pointOfView, featureByIso3, countryByIso3]);
+  }, [effReveal, effFocus, pointOfView, featureByIso3, countryByIso3]);
 
   const lastCameraTargetKey = useRef<string | null>(null);
 
@@ -580,9 +583,9 @@ export default function Globe3D({
         const cont = continentByIso3.get(iso3);
         if (cont !== activeContinent) return; // Suppress click outside active region
       }
-      onCountryClick?.(iso3);
+      handleFeatureClick?.(iso3);
     },
-    [onCountryClick, activeContinent, continentByIso3],
+    [handleFeatureClick, activeContinent, continentByIso3],
   );
 
   const handlePolygonHover = useCallback(
@@ -612,9 +615,9 @@ export default function Globe3D({
         const cont = continentByIso3.get(p.iso3);
         if (cont !== activeContinent) return;
       }
-      onCountryClick?.(p.iso3);
+      handleFeatureClick?.(p.iso3);
     },
-    [onCountryClick, activeContinent, continentByIso3],
+    [handleFeatureClick, activeContinent, continentByIso3],
   );
 
   const handleHitboxHover = useCallback(
@@ -721,8 +724,8 @@ export default function Globe3D({
   const rings = useMemo(() => {
     if (effectiveQuality === "static") return [];
     const res = [];
-    if (wrongIso3) {
-      const c = countryByIso3.get(wrongIso3);
+    if (effWrong) {
+      const c = countryByIso3.get(effWrong);
       if (c) {
         res.push({
           lat: c.coordinates[0],
@@ -734,11 +737,11 @@ export default function Globe3D({
         });
       }
     }
-    const target = revealIso3 ?? highlightIso3;
+    const target = effReveal ?? effHighlight;
     if (target) {
       const c = countryByIso3.get(target);
       if (c) {
-        const isReveal = target === revealIso3;
+        const isReveal = target === effReveal;
         res.push({
           lat: c.coordinates[0],
           lng: c.coordinates[1],
@@ -750,13 +753,9 @@ export default function Globe3D({
       }
     }
     return res;
-  }, [wrongIso3, revealIso3, highlightIso3, countryByIso3, effectiveQuality]);
+  }, [effWrong, effReveal, effHighlight, countryByIso3, effectiveQuality]);
 
   // ---- Spatial Country Name Badges (3D In-Situ Feedback) ---------------
-  // Rather than forcing the user to glance away to the bottom HUD,
-  // we render floating cyber-badges anchored directly on the countries in 3D:
-  // - Mistaken click: Red/Coral glass badge [✕ Mali]
-  // - Correct/Revealed target: Neon/Green glass badge [✓ Senegal]
   interface SpatialPill {
     id: string;
     iso3: string;
@@ -769,33 +768,33 @@ export default function Globe3D({
   const spatialPills = useMemo<SpatialPill[]>(() => {
     const pills: SpatialPill[] = [];
 
-    if (wrongIso3) {
-      const f = featureByIso3.get(wrongIso3);
-      const c = countryByIso3.get(wrongIso3);
-      const name = f?.properties.name ?? c?.name ?? wrongIso3;
+    if (effWrong) {
+      const f = featureByIso3.get(effWrong);
+      const c = countryByIso3.get(effWrong);
+      const name = f?.properties.name ?? c?.name ?? effWrong;
       const lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
       const lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
-      pills.push({ id: `wrong-${wrongIso3}`, iso3: wrongIso3, name, lat, lng, kind: "wrong" });
+      pills.push({ id: `wrong-${effWrong}`, iso3: effWrong, name, lat, lng, kind: "wrong" });
     }
 
-    if (revealIso3) {
-      const f = featureByIso3.get(revealIso3);
-      const c = countryByIso3.get(revealIso3);
-      const name = f?.properties.name ?? c?.name ?? revealIso3;
+    if (effReveal) {
+      const f = featureByIso3.get(effReveal);
+      const c = countryByIso3.get(effReveal);
+      const name = f?.properties.name ?? c?.name ?? effReveal;
       const lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
       const lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
-      pills.push({ id: `reveal-${revealIso3}`, iso3: revealIso3, name, lat, lng, kind: "correct" });
-    } else if (highlightIso3 && highlightIso3 !== wrongIso3) {
-      const f = featureByIso3.get(highlightIso3);
-      const c = countryByIso3.get(highlightIso3);
-      const name = f?.properties.name ?? c?.name ?? highlightIso3;
+      pills.push({ id: `reveal-${effReveal}`, iso3: effReveal, name, lat, lng, kind: "correct" });
+    } else if (effHighlight && effHighlight !== effWrong) {
+      const f = featureByIso3.get(effHighlight);
+      const c = countryByIso3.get(effHighlight);
+      const name = f?.properties.name ?? c?.name ?? effHighlight;
       const lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
       const lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
-      pills.push({ id: `highlight-${highlightIso3}`, iso3: highlightIso3, name, lat, lng, kind: "correct" });
+      pills.push({ id: `highlight-${effHighlight}`, iso3: effHighlight, name, lat, lng, kind: "correct" });
     }
 
     return pills;
-  }, [wrongIso3, revealIso3, highlightIso3, featureByIso3, countryByIso3]);
+  }, [effWrong, effReveal, effHighlight, featureByIso3, countryByIso3]);
 
   const htmlElementFn = useCallback((d: object) => {
     const p = d as SpatialPill;
@@ -885,10 +884,10 @@ export default function Globe3D({
         );
       } else if ((e.key === "Enter" || e.key === " ") && hoverIso3) {
         e.preventDefault();
-        onCountryClick?.(hoverIso3);
+        handleFeatureClick?.(hoverIso3);
       }
     },
-    [zoomBy, resetView, hoverIso3, onCountryClick],
+    [zoomBy, resetView, hoverIso3, handleFeatureClick],
   );
 
   // ---- Render ---------------------------------------------------------

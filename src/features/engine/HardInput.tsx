@@ -2,10 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { spring } from "@/lib/motion";
 import { exactMatch, fuzzyMatch } from "@/lib/fuzzy";
-import type { Country } from "@/types/country";
+export interface HardInputTarget {
+  name: string;
+  id?: string;
+  iso3?: string;
+}
 
 interface Props {
-  target: Country;
+  target: HardInputTarget;
   matchTarget?: string;
   onSubmit: (ok: boolean) => void;
   placeholder?: string;
@@ -21,11 +25,13 @@ export function HardInput({ target, matchTarget, onSubmit, placeholder = "Type t
   const [val, setVal] = useState("");
   const ref = useRef<HTMLInputElement>(null);
 
+  const targetKey = target.id ?? target.iso3 ?? target.name;
+
   // Re-focus and clear when target changes
   useEffect(() => {
     ref.current?.focus();
     setVal("");
-  }, [target.iso3]);
+  }, [targetKey]);
 
   const expectedText = matchTarget ?? target.name;
 
