@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, useCallback } from "react";
+import { Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
@@ -111,7 +112,17 @@ export default function CapitalsPage() {
   /** Unified Top Toolbar (Responsive Left/Right Split) */
   const Toolbar = (
     <div className="w-full max-w-5xl mx-auto px-4 md:px-6 mb-4 z-20 flex flex-wrap items-center justify-between gap-4 pointer-events-auto">
-      <ContinentSelect value={continent} onChange={restartWithContinent} />
+      <div className="flex items-center gap-2 flex-wrap">
+        <ContinentSelect value={continent} onChange={restartWithContinent} />
+        <Link
+          to="/spain"
+          search={{ skill: "capitals" }}
+          className="glass rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1 shrink-0"
+          title="Master Spain's regional and provincial capitals"
+        >
+          <span>🇪🇸</span> Spain
+        </Link>
+      </div>
       <div className="flex items-center gap-2 flex-wrap">
         <ModeDropdown options={SUB_MODE_OPTIONS} value={sub} onChange={setSub} />
         {sub === "countryToCap" && (

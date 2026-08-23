@@ -1,10 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { z } from "zod";
 import SpainPage from "@/features/spain/SpainPage";
 
+const spainSearchSchema = z.object({
+  skill: z.enum(["locate", "name", "flags", "capitals"]).optional(),
+});
+
 export const Route = createFileRoute("/spain")({
+  validateSearch: (search) => spainSearchSchema.parse(search),
   head: () => ({
     meta: [
-      { title: "Spain — Orbita" },
+      { title: "Geography — Spain — Orbita" },
       {
         name: "description",
         content:

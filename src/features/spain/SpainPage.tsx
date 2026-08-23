@@ -39,6 +39,7 @@ import {
   loadSpainProvinceFeatures,
   getSpainFlagUrl,
 } from "@/lib/spain";
+import { useSearch } from "@tanstack/react-router";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
@@ -183,7 +184,14 @@ function makeCapColor(
 // ---------------------------------------------------------------------------
 
 export default function SpainPage() {
-  const [skill, setSkill] = useState<GameSkill>("locate");
+  const search = useSearch({ from: "/spain", shouldThrow: false }) as { skill?: GameSkill } | undefined;
+  const [skill, setSkill] = useState<GameSkill>(() => search?.skill ?? "locate");
+
+  useEffect(() => {
+    if (search?.skill && search.skill !== skill) {
+      setSkill(search.skill);
+    }
+  }, [search?.skill]);
   const [level, setLevel] = useState<AdminLevel>("ccaa");
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
