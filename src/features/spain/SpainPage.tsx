@@ -27,6 +27,7 @@ import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
+import { RegionSelect } from "@/features/engine/ContinentSelect";
 import { SessionLengthSelect, type SessionLengthMode } from "@/features/engine/SessionLengthSelect";
 import { cn } from "@/lib/utils";
 import { spring } from "@/lib/motion";
@@ -387,9 +388,10 @@ export default function SpainPage() {
             )}
           >
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="glass px-3 py-1.5 rounded-full font-mono text-[11px] uppercase tracking-widest text-white/80 flex items-center gap-1.5">
-                <span>🇪🇸</span> Spain
-              </span>
+              <RegionSelect
+                isSpainActive={true}
+                spainSkill={skill}
+              />
               <ModeDropdown options={SKILL_OPTIONS} value={skill} onChange={setSkill} />
               {skill !== "flags" && (
                 <ModeDropdown options={LEVEL_OPTIONS} value={level} onChange={setLevel} />

@@ -14,7 +14,7 @@ import { FlagImage } from "@/components/ui/FlagImage";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { selectAllForContinent } from "@/lib/mastery";
 import {
-  ContinentSelect,
+  RegionSelect,
   useContinentPref,
   type ContinentChoice,
 } from "@/features/engine/ContinentSelect";
@@ -181,15 +181,11 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
           {/* Top HUD Controls */}
           <div className="absolute top-24 inset-x-0 z-20 px-4 md:px-6 flex items-center justify-between pointer-events-auto max-w-5xl mx-auto">
             <div className="flex items-center gap-2 flex-wrap">
-              <ContinentSelect value={continent} onChange={restartWithContinent} />
-              <Link
-                to="/spain"
-                search={{ skill: "locate" }}
-                className="glass rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1 shrink-0"
-                title="Master Spain's geography (autonomous communities and provinces)"
-              >
-                <span>🇪🇸</span> Spain
-              </Link>
+              <RegionSelect
+                value={continent}
+                onChangeContinent={restartWithContinent}
+                spainSkill={sub === "name" ? "name" : "locate"}
+              />
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">

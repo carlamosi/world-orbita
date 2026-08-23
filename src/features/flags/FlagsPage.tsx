@@ -13,7 +13,7 @@ import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import {
-  ContinentSelect,
+  RegionSelect,
   useContinentPref,
   type ContinentChoice,
 } from "@/features/engine/ContinentSelect";
@@ -106,15 +106,11 @@ export default function FlagsPage() {
               {/* Minimized HUD Toolbar */}
               <div className="w-full max-w-5xl mx-auto px-4 md:px-6 mb-4 z-20 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <ContinentSelect value={continent} onChange={restartWithContinent} />
-                  <Link
-                    to="/spain"
-                    search={{ skill: "flags" }}
-                    className="glass rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1 shrink-0"
-                    title="Master Spain's autonomous community flags"
-                  >
-                    <span>🇪🇸</span> Spain (CCAA)
-                  </Link>
+                  <RegionSelect
+                    value={continent}
+                    onChangeContinent={restartWithContinent}
+                    spainSkill="flags"
+                  />
                 </div>
                 <ModeDropdown
                   options={SUB_MODE_OPTIONS}
