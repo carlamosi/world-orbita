@@ -3,17 +3,9 @@
  *
  * Supported Game Modes:
  *  1. Locate: Click the target CCAA / Province on the 3D globe.
- *  2. Name: A mystery region is highlighted on the globe — identify it (Easy multiple-choice or Hard direct typing).
- *  3. Flags: Learn the 19 Autonomous Community / City flags (Flag -> Name or Name -> Flag).
+ *  2. Name: A mystery region is highlighted — identify it (Easy or Hard).
+ *  3. Flags: Learn the 19 CCAA / City flags. Globe HIDDEN — large flag card + choice buttons.
  *  4. Capitals: Match each CCAA or Province with its capital city.
- *
- * Supported Administrative Levels:
- *  - Comunidades Autónomas (17 CCAA + 2 Autonomous Cities)
- *  - Provincias (50 provinces)
- *
- * Supported Session Lengths:
- *  - Quick Practice (10 questions, FSRS-weighted)
- *  - Complete (all 19 CCAA or all 50 provinces)
  */
 
 import {
@@ -34,7 +26,6 @@ import { SessionEnd } from "@/features/engine/SessionEnd";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
-import { FlagImage } from "@/components/ui/FlagImage";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { SessionLengthSelect, type SessionLengthMode } from "@/features/engine/SessionLengthSelect";
 import { cn } from "@/lib/utils";
@@ -46,6 +37,7 @@ import {
   type SpainFeatureCollection,
   loadSpainCCAAFeatures,
   loadSpainProvinceFeatures,
+  getSpainFlagUrl,
 } from "@/lib/spain";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
@@ -152,14 +144,13 @@ function pickRandomSpainEntities(
   pool: readonly SpainEntity[],
   excludeId: string,
 ): SpainEntity[] {
-  const candidates = pool.filter((e) => e.id !== excludeId);
-  const shuffled = shuffle(candidates);
-  return shuffled.slice(0, count);
+  return shuffle(pool.filter((e) => e.id !== excludeId)).slice(0, count);
 }
 
 function makeCapColor(
   currentId: string | undefined,
   lastWrongId: string | null,
+  hoverId: string | null,
   answerState: string,
   skill: GameSkill,
 ) {
@@ -169,19 +160,20 @@ function makeCapColor(
 
     if (fid === currentId) {
       if (skill === "name") {
-        if (answerState === "idle") return "rgba(0, 212, 255, 0.45)"; // Cyan target highlight
-        if (answerState === "correct") return "rgba(16, 185, 129, 0.65)"; // Emerald correct
-        return "rgba(244, 63, 94, 0.70)"; // Coral wrong
+        if (answerState === "idle") return "rgba(0, 212, 255, 0.45)";
+        if (answerState === "correct") return "rgba(16, 185, 129, 0.65)";
+        return "rgba(244, 63, 94, 0.70)";
       }
       if (answerState === "correct") return "rgba(16, 185, 129, 0.65)";
       if (answerState === "wrong" || answerState === "revealed")
         return "rgba(16, 185, 129, 0.65)";
-      return "rgba(108, 99, 255, 0.16)";
+      return fid === hoverId ? "rgba(0, 212, 255, 0.32)" : "rgba(108, 99, 255, 0.16)";
     }
     if (fid === lastWrongId && answerState === "wrong")
       return "rgba(244, 63, 94, 0.70)";
+    if (fid === hoverId)
+      return "rgba(0, 212, 255, 0.28)";
 
-    // Clean, premium Orbita dark base color matching Locate mode
     return "rgba(108, 99, 255, 0.16)";
   };
 }
@@ -195,8 +187,9 @@ export default function SpainPage() {
   const [level, setLevel] = useState<AdminLevel>("ccaa");
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
+  const [lastWrongId, setLastWrongId] = useState<string | null>(null);
+  const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
 
-  // Stores
   const ccaaFind = useCCAAFindSession();
   const provinceFind = useProvinceFindSession();
   const ccaaName = useCCAANameSession();
@@ -205,17 +198,10 @@ export default function SpainPage() {
   const ccaaCapital = useCCAACapitalSession();
   const provinceCapital = useProvinceCapitalSession();
 
-  // Active store resolution
   const activeStore = useMemo(() => {
-    if (skill === "locate") {
-      return level === "ccaa" ? ccaaFind : provinceFind;
-    }
-    if (skill === "name") {
-      return level === "ccaa" ? ccaaName : provinceName;
-    }
-    if (skill === "flags") {
-      return ccaaFlag;
-    }
+    if (skill === "locate") return level === "ccaa" ? ccaaFind : provinceFind;
+    if (skill === "name") return level === "ccaa" ? ccaaName : provinceName;
+    if (skill === "flags") return ccaaFlag;
     return level === "ccaa" ? ccaaCapital : provinceCapital;
   }, [skill, level, ccaaFind, provinceFind, ccaaName, provinceName, ccaaFlag, ccaaCapital, provinceCapital]);
 
@@ -223,13 +209,11 @@ export default function SpainPage() {
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
 
-  // Active dataset for choices/counts
   const activeDataset = useMemo(() => {
     if (skill === "flags") return SPAIN_CCAA;
     return level === "ccaa" ? SPAIN_CCAA : SPAIN_PROVINCES;
   }, [skill, level]);
 
-  // Lazy TopoJSON geometry
   const [ccaaFeatures, setCCAAFeatures] = useState<SpainFeatureCollection | null>(null);
   const [provinceFeatures, setProvinceFeatures] = useState<SpainFeatureCollection | null>(null);
 
@@ -241,18 +225,14 @@ export default function SpainPage() {
   const activeFeatures = (skill === "flags" || level === "ccaa") ? ccaaFeatures : provinceFeatures;
   const overlayPolygons = useMemo(() => activeFeatures?.features ?? [], [activeFeatures]);
 
-  // Session startup
   const startSession = useCallback(
     (sk: GameSkill, lv: AdminLevel, sm: SessionLengthMode) => {
       setLastWrongId(null);
+      setHoveredRegionId(null);
       const dataset = (sk === "flags" || lv === "ccaa") ? SPAIN_CCAA : SPAIN_PROVINCES;
       const subMode = sk === "locate" ? "find" : sk === "name" ? "name" : sk === "flags" ? "flag" : "capital";
-
       if (sm === "complete") {
-        void activeStore.start({
-          allCountries: shuffle(dataset.slice()) as SpainEntity[],
-          subMode,
-        });
+        void activeStore.start({ allCountries: shuffle(dataset.slice()) as SpainEntity[], subMode });
       } else {
         void activeStore.start({ subMode });
       }
@@ -267,24 +247,16 @@ export default function SpainPage() {
 
   useAutoAdvance({ answerState: s.answerState, finished, next: s.next });
 
-  const [lastWrongId, setLastWrongId] = useState<string | null>(null);
-
   const onSkip = useCallback(() => {
     if (!finished && current && s.answerState === "idle") s.reveal();
   }, [finished, current, s]);
   useSkipHotkey(onSkip);
 
-  // Globe POV - tight close zoom on Spain
-  const SPAIN_POV = useMemo(() => {
-    if (skill === "name" && current) {
-      return { lat: current.coordinates[0], lng: current.coordinates[1], altitude: 0.28 };
-    }
-    return { lat: 39.8, lng: -3.7, altitude: 0.32 };
-  }, [skill, current]);
+  const SPAIN_POV = useMemo(() => ({ lat: 39.8, lng: -3.7, altitude: 0.32 }), []);
 
   const capColor = useMemo(
-    () => makeCapColor(current?.id, lastWrongId, s.answerState, skill),
-    [current?.id, lastWrongId, s.answerState, skill],
+    () => makeCapColor(current?.id, lastWrongId, hoveredRegionId, s.answerState, skill),
+    [current?.id, lastWrongId, hoveredRegionId, s.answerState, skill],
   );
 
   const handleOverlayClick = useCallback(
@@ -301,19 +273,26 @@ export default function SpainPage() {
     [skill, current, s],
   );
 
-  // Multiple Choice Options for Name / Flags / Capitals Easy modes
+  const handleOverlayHover = useCallback(
+    (d: object | null) => {
+      if (!d) { setHoveredRegionId(null); return; }
+      const f = d as { properties?: { id?: string } };
+      setHoveredRegionId(f.properties?.id ?? null);
+    },
+    [],
+  );
+
   const easyOptions = useMemo(() => {
     if (!current || difficulty !== "easy" || skill === "locate") return [];
     const others = pickRandomSpainEntities(3, activeDataset, current.id);
     return shuffle([current, ...others]);
   }, [current, difficulty, skill, activeDataset]);
 
-  // Flag asset
-  const currentFlagSrc = current?.flagCode
-    ? `/assets/flags/spain/${current.flagCode}.svg`
-    : undefined;
+  const currentFlagSrc = useMemo(
+    () => getSpainFlagUrl(current?.flagCode),
+    [current?.flagCode],
+  );
 
-  // Prompt Title
   const promptTitle = useMemo(() => {
     if (!current) return null;
     if (skill === "locate") {
@@ -321,10 +300,10 @@ export default function SpainPage() {
         <>
           Find <span className="text-glow-cyan">{current.name}</span>
           {currentFlagSrc && (
-            <FlagImage
+            <img
               src={currentFlagSrc}
               alt={`${current.name} flag`}
-              className="inline-block ml-2 w-7 h-4.5 rounded-xs align-middle"
+              className="inline-block ml-2 w-7 h-5 rounded-sm align-middle shadow-md object-cover"
             />
           )}
         </>
@@ -334,9 +313,8 @@ export default function SpainPage() {
       return <>Name this {level === "ccaa" ? "autonomous community" : "province"}</>;
     }
     if (skill === "flags") {
-      return <>Identify this flag</>;
+      return <>Which autonomous community owns this flag?</>;
     }
-    // capitals
     return (
       <>
         What is the capital of <span className="text-glow-cyan">{current.name}</span>?
@@ -345,51 +323,66 @@ export default function SpainPage() {
   }, [current, skill, level, currentFlagSrc]);
 
   return (
-    <div className="relative min-h-dvh pt-20">
-      {/* 3D Globe */}
-      <div className="absolute inset-0">
-        <Suspense fallback={<GlobeFallback />}>
-          <Globe3D
-            countries={COUNTRIES}
-            disableWorldPolygons
-            disableMicrostates
-            autoRotate={false}
-            quality="high"
-            highlightId={
-              s.answerState === "correct"
-                ? (current?.id ?? null)
-                : skill === "name"
+    <div className="relative min-h-dvh pt-20 flex flex-col items-center">
+      {/* 3D Globe: hidden in Flags mode */}
+      {skill !== "flags" && (
+        <div className="absolute inset-0">
+          <Suspense fallback={<GlobeFallback />}>
+            <Globe3D
+              countries={COUNTRIES}
+              disableWorldPolygons
+              disableMicrostates
+              autoRotate={false}
+              quality="high"
+              highlightId={
+                s.answerState === "correct"
+                  ? (current?.id ?? null)
+                  : skill === "name"
+                    ? (current?.id ?? null)
+                    : null
+              }
+              revealId={
+                s.answerState === "wrong" || s.answerState === "revealed"
                   ? (current?.id ?? null)
                   : null
-            }
-            revealId={
-              s.answerState === "wrong" || s.answerState === "revealed"
-                ? (current?.id ?? null)
-                : null
-            }
-            wrongId={s.answerState === "wrong" ? lastWrongId : null}
-            disableHoverLabel={skill === "locate"}
-            questionKey={current?.id ?? null}
-            pointOfView={SPAIN_POV}
-            overlayPolygons={overlayPolygons}
-            overlayCapColor={capColor}
-            overlaySideColor={() => "rgba(108,99,255,0.2)"}
-            overlayStrokeColor={() => "rgba(255,255,255,0.75)"}
-            overlayAltitude={0.012}
-            overlayLabel={(d) => {
-              if (skill === "locate") return "";
-              const f = d as { properties?: { name?: string } };
-              return f.properties?.name ?? "";
-            }}
-            onOverlayClick={handleOverlayClick}
-          />
-        </Suspense>
-      </div>
+              }
+              wrongId={s.answerState === "wrong" ? lastWrongId : null}
+              disableHoverLabel={skill === "locate"}
+              questionKey={current?.id ?? null}
+              pointOfView={SPAIN_POV}
+              overlayPolygons={overlayPolygons}
+              overlayCapColor={capColor}
+              overlaySideColor={() => "rgba(108,99,255,0.2)"}
+              overlayStrokeColor={() => "rgba(255,255,255,0.75)"}
+              overlayAltitude={0.012}
+              overlayLabel={(d) => {
+                if (skill === "locate") return "";
+                const f = d as { properties?: { name?: string } };
+                return f.properties?.name ?? "";
+              }}
+              onOverlayClick={handleOverlayClick}
+              onOverlayHover={handleOverlayHover}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {/* Ambient glow background for Flags mode */}
+      {skill === "flags" && (
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_20%,rgba(108,99,255,0.12)_0%,transparent_70%)] pointer-events-none" />
+      )}
 
       {!finished && current && (
         <>
           {/* Top HUD */}
-          <div className="absolute top-24 inset-x-0 z-20 px-4 md:px-6 flex items-center justify-between pointer-events-auto max-w-5xl mx-auto flex-wrap gap-2">
+          <div
+            className={cn(
+              "z-20 px-4 md:px-6 flex items-center justify-between flex-wrap gap-2 pointer-events-auto",
+              skill === "flags"
+                ? "w-full max-w-5xl mx-auto mb-4"
+                : "absolute top-24 inset-x-0 max-w-5xl mx-auto",
+            )}
+          >
             <div className="flex items-center gap-2 flex-wrap">
               <span className="glass px-3 py-1.5 rounded-full font-mono text-[11px] uppercase tracking-widest text-white/80 flex items-center gap-1.5">
                 <span>🇪🇸</span> Spain
@@ -405,7 +398,6 @@ export default function SpainPage() {
                 continent="Spain"
               />
             </div>
-
             <div className="flex items-center gap-2">
               {skill !== "locate" && (
                 <ModeDropdown
@@ -417,84 +409,145 @@ export default function SpainPage() {
             </div>
           </div>
 
-          {/* Prompt Pill */}
-          <div className="absolute top-40 md:top-36 inset-x-0 z-20 flex flex-col items-center pointer-events-none gap-2">
-            <PromptPill
-              keyId={`spain-${skill}-${level}-${current.id}`}
-              index={s.index}
-              total={s.queue.length}
-              title={promptTitle ?? ""}
-            />
-            {skill === "flags" && currentFlagSrc && (
-              <motion.div
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={spring.crisp}
-                className="pointer-events-auto glass-strong p-2 rounded-2xl shadow-2xl border border-white/20"
-              >
-                <FlagImage
-                  src={currentFlagSrc}
-                  alt="Flag question"
-                  className="w-36 h-24 rounded-lg object-cover"
-                />
-              </motion.div>
-            )}
-          </div>
+          {/* ================================================================
+              FLAGS MODE: 2-column card layout, no globe
+          ================================================================ */}
+          {skill === "flags" && (
+            <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-5xl gap-6 z-20">
+              <PromptPill
+                keyId={`spain-flags-${current.id}`}
+                index={s.index}
+                total={s.queue.length}
+                title={promptTitle ?? ""}
+              />
 
-          {/* Bottom Interactive Area */}
-          <div className="absolute bottom-8 inset-x-0 z-30 px-4">
-            {skill === "locate" ? (
-              <FeedbackBar
-                show={s.answerState !== "idle"}
-                state={
-                  (s.answerState === "idle"
-                    ? "correct"
-                    : s.answerState) as "correct" | "wrong" | "revealed"
-                }
-                title={current.name}
-                subtitle={current.capital ? `Capital: ${current.capital}` : undefined}
-                onNext={() => s.next()}
-                onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                hideNext
-              />
-            ) : s.answerState === "idle" ? (
-              difficulty === "easy" ? (
-                <EasyOptions
-                  options={easyOptions}
-                  targetId={current.id}
-                  labelKey={skill === "capitals" ? "capital" : "name"}
-                  onPick={(id) => s.submit(id === current.id)}
+              <div className="w-full grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-6 lg:gap-8 items-center mt-4">
+                <motion.div
+                  key={current.id}
+                  initial={{ opacity: 0, scale: 0.92, y: 16 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={spring.soft}
+                  className="flex items-center justify-center"
+                >
+                  {currentFlagSrc ? (
+                    <div className="relative overflow-hidden rounded-2xl glass shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] border border-white/20 w-full max-w-[480px] aspect-[3/2]">
+                      <img
+                        src={currentFlagSrc}
+                        alt={`${current.name} flag`}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full max-w-[480px] aspect-[3/2] rounded-2xl glass border border-white/10 flex items-center justify-center text-white/40 font-mono text-sm">
+                      No flag available
+                    </div>
+                  )}
+                </motion.div>
+
+                <div className="flex flex-col justify-center gap-3">
+                  {s.answerState === "idle" ? (
+                    difficulty === "easy" ? (
+                      <EasyOptions
+                        options={easyOptions}
+                        targetId={current.id}
+                        labelKey="name"
+                        onPick={(id) => s.submit(id === current.id)}
+                      />
+                    ) : (
+                      <HardInput
+                        target={current}
+                        matchTarget={current.name}
+                        placeholder="Type the autonomous community name…"
+                        onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                      />
+                    )
+                  ) : (
+                    <div className="max-w-2xl mx-auto w-full">
+                      <FeedbackBar
+                        show
+                        state={s.answerState as "correct" | "wrong" | "revealed"}
+                        title={current.name}
+                        subtitle={current.capital ? `Capital: ${current.capital}` : undefined}
+                        onNext={() => s.next()}
+                        onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
+                        hideNext
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ================================================================
+              MAP MODES: Locate / Name / Capitals
+          ================================================================ */}
+          {skill !== "flags" && (
+            <>
+              <div className="absolute top-40 md:top-36 inset-x-0 z-20 flex flex-col items-center pointer-events-none">
+                <PromptPill
+                  keyId={`spain-${skill}-${level}-${current.id}`}
+                  index={s.index}
+                  total={s.queue.length}
+                  title={promptTitle ?? ""}
                 />
-              ) : (
-                <HardInput
-                  target={current}
-                  matchTarget={skill === "capitals" ? current.capital : current.name}
-                  placeholder={
-                    skill === "capitals"
-                      ? "Type the capital city…"
-                      : "Type the region name…"
-                  }
-                  onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
-                />
-              )
-            ) : (
-              <FeedbackBar
-                show
-                state={s.answerState as "correct" | "wrong" | "revealed"}
-                title={current.name}
-                subtitle={
-                  skill === "capitals"
-                    ? `Capital: ${current.capital ?? "—"}`
-                    : current.capital
-                      ? `Capital: ${current.capital}`
-                      : undefined
-                }
-                onNext={() => s.next()}
-                onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                hideNext
-              />
-            )}
-          </div>
+              </div>
+
+              <div className="absolute bottom-8 inset-x-0 z-30 px-4">
+                {skill === "locate" ? (
+                  <FeedbackBar
+                    show={s.answerState !== "idle"}
+                    state={
+                      (s.answerState === "idle"
+                        ? "correct"
+                        : s.answerState) as "correct" | "wrong" | "revealed"
+                    }
+                    title={current.name}
+                    subtitle={current.capital ? `Capital: ${current.capital}` : undefined}
+                    onNext={() => s.next()}
+                    onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
+                    hideNext
+                  />
+                ) : s.answerState === "idle" ? (
+                  difficulty === "easy" ? (
+                    <EasyOptions
+                      options={easyOptions}
+                      targetId={current.id}
+                      labelKey={skill === "capitals" ? "capital" : "name"}
+                      onPick={(id) => s.submit(id === current.id)}
+                    />
+                  ) : (
+                    <HardInput
+                      target={current}
+                      matchTarget={skill === "capitals" ? current.capital : current.name}
+                      placeholder={
+                        skill === "capitals"
+                          ? "Type the capital city…"
+                          : "Type the region name…"
+                      }
+                      onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                    />
+                  )
+                ) : (
+                  <FeedbackBar
+                    show
+                    state={s.answerState as "correct" | "wrong" | "revealed"}
+                    title={current.name}
+                    subtitle={
+                      skill === "capitals"
+                        ? `Capital: ${current.capital ?? "—"}`
+                        : current.capital
+                          ? `Capital: ${current.capital}`
+                          : undefined
+                    }
+                    onNext={() => s.next()}
+                    onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
+                    hideNext
+                  />
+                )}
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -543,13 +596,15 @@ function EasyOptions({
     >
       {options.map((o, i) => {
         const text = (labelKey === "capital" ? o.capital : o.name) ?? o.name;
+        const flagSrc = getSpainFlagUrl(o.flagCode);
         return (
           <button
             key={o.id}
             onClick={() => onPick(o.id)}
             className={cn(
               "glass rounded-2xl px-5 py-4 text-left transition-all duration-200",
-              "hover:border-white/25 hover:-translate-y-0.5",
+              "hover:bg-white/[0.08] hover:border-white/25 hover:-translate-y-0.5 hover:shadow-lg",
+              "active:scale-[0.98]",
               "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
             )}
           >
@@ -562,12 +617,14 @@ function EasyOptions({
                   {text}
                 </div>
               </div>
-              {o.flagCode && (
-                <FlagImage
-                  src={`/assets/flags/spain/${o.flagCode}.svg`}
-                  alt={o.name}
-                  className="w-10 h-7 rounded-xs shrink-0 object-cover"
-                />
+              {flagSrc && (
+                <div className="w-10 h-7 rounded-sm shrink-0 overflow-hidden border border-white/15 shadow-md">
+                  <img
+                    src={flagSrc}
+                    alt={o.name}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
               )}
             </div>
           </button>

@@ -76,6 +76,8 @@ interface Globe3DProps {
   overlayLabel?: (d: object) => string;
   /** Click handler for overlayPolygons. Receives the feature object. */
   onOverlayClick?: (d: object) => void;
+  /** Hover handler for overlayPolygons. Receives the feature or null on mouse-out. */
+  onOverlayHover?: (d: object | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +166,7 @@ export default function Globe3D({
   overlayAltitude = 0.004,
   overlayLabel,
   onOverlayClick,
+  onOverlayHover,
 }: Globe3DProps) {
   const effHighlight = highlightId ?? highlightIso3 ?? null;
   const effReveal = revealId ?? revealIso3 ?? null;
@@ -514,13 +517,13 @@ export default function Globe3D({
     if (pointOfView) {
       const lat = pointOfView.lat;
       const lng = pointOfView.lng;
-      const altitude = pointOfView.altitude ?? 0.65;
+      const altitude = pointOfView.altitude ?? 0.32;
       return {
         lat,
         lng,
         altitude,
-        key: `pov:${lat.toFixed(3)},${lng.toFixed(3)},${altitude.toFixed(3)}`,
-        duration: 1000,
+        key: `pov:${lat.toFixed(2)},${lng.toFixed(2)},${altitude.toFixed(2)}`,
+        duration: 800,
       };
     }
     return null;
@@ -535,19 +538,11 @@ export default function Globe3D({
 
     try {
       const controls = g.controls();
-      if (controls) {
-        controls.autoRotate = autoRotate ?? false;
+      if (controls && autoRotate !== undefined) {
+        controls.autoRotate = autoRotate;
       }
     } catch {
       // ignore
-    }
-
-    if (pointOfView) {
-      g.pointOfView(
-        { lat: pointOfView.lat, lng: pointOfView.lng, altitude: pointOfView.altitude ?? 0.6 },
-        effectiveQuality === "static" ? 0 : 800,
-      );
-      return;
     }
 
     if (activeCameraTarget) {
@@ -559,7 +554,7 @@ export default function Globe3D({
         );
       }
     }
-  }, [pointOfView, activeCameraTarget, autoRotate, effectiveQuality]);
+  }, [activeCameraTarget, autoRotate, effectiveQuality]);
 
   // ---- Smooth Camera Rotation on Continent Selection (world mode only) -----------------
   const lastActiveContinent = useRef<string | null | undefined>(undefined);
@@ -657,12 +652,14 @@ export default function Globe3D({
     (d: object | null) => {
       if (!d) {
         setHoverIso3(null);
+        onOverlayHover?.(null);
         return;
       }
       const f = d as CountryFeature & { properties: { id?: string } };
       const isOverlay = !f.properties.iso3;
       if (isOverlay) {
         setHoverIso3(f.properties.id ?? null);
+        onOverlayHover?.(d);
         return;
       }
 
@@ -676,7 +673,7 @@ export default function Globe3D({
       }
       setHoverIso3(iso3);
     },
-    [activeContinent, continentByIso3],
+    [activeContinent, continentByIso3, onOverlayHover],
   );
 
   const handleHitboxClick = useCallback(
@@ -741,13 +738,18 @@ export default function Globe3D({
     controls.maxDistance = 420;
     controls.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN };
 
-    if (effectiveQuality === "static") {
+    if (autoRotate === false || effectiveQuality === "static") {
       controls.autoRotate = false;
     } else {
       controls.autoRotate = true;
       controls.autoRotateSpeed = effectiveQuality === "medium" ? 0.18 : 0.35;
     }
-    g.pointOfView({ lat: 20, lng: 0, altitude: 2.4 }, 0);
+
+    if (pointOfView) {
+      g.pointOfView({ lat: pointOfView.lat, lng: pointOfView.lng, altitude: pointOfView.altitude ?? 0.32 }, 0);
+    } else {
+      g.pointOfView({ lat: 20, lng: 0, altitude: 2.4 }, 0);
+    }
 
     // Auto-rotate suspension on user interaction.
     let resumeTimer: number | null = null;
@@ -756,7 +758,7 @@ export default function Globe3D({
       if (resumeTimer) window.clearTimeout(resumeTimer);
     };
     const onEnd = () => {
-      if (effectiveQuality === "static") return;
+      if (autoRotate === false || effectiveQuality === "static") return;
       if (resumeTimer) window.clearTimeout(resumeTimer);
       resumeTimer = window.setTimeout(() => {
         controls.autoRotate = true;
@@ -842,30 +844,125 @@ export default function Globe3D({
     if (effWrong) {
       const f = featureByIso3.get(effWrong);
       const c = countryByIso3.get(effWrong);
-      const name = f?.properties.name ?? c?.name ?? effWrong;
-      const lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
-      const lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+      let name = f?.properties.name ?? c?.name ?? effWrong;
+      let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
+      let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+
+      // Check overlay polygons if not found in world dataset
+      if (!f && !c && overlayPolygons) {
+        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
+          const fid = op.properties?.id ?? op.id ?? "";
+          if (fid === effWrong) {
+            name = op.properties?.name ?? fid;
+            // compute simple centroid from first polygon ring
+            try {
+              const geom = op.geometry;
+              if (geom) {
+                const ring = geom.type === "Polygon"
+                  ? (geom.coordinates as number[][][])[0]
+                  : (geom.coordinates as number[][][][])[0]?.[0];
+                if (ring && ring.length > 0) {
+                  let sumLng = 0;
+                  let sumLat = 0;
+                  for (const pt of ring) {
+                    sumLng += pt[0] ?? 0;
+                    sumLat += pt[1] ?? 0;
+                  }
+                  lng = sumLng / ring.length;
+                  lat = sumLat / ring.length;
+                }
+              }
+            } catch {
+              // fallback
+            }
+            break;
+          }
+        }
+      }
+
       pills.push({ id: `wrong-${effWrong}`, iso3: effWrong, name, lat, lng, kind: "wrong" });
     }
 
     if (effReveal) {
       const f = featureByIso3.get(effReveal);
       const c = countryByIso3.get(effReveal);
-      const name = f?.properties.name ?? c?.name ?? effReveal;
-      const lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
-      const lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+      let name = f?.properties.name ?? c?.name ?? effReveal;
+      let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
+      let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+
+      if (!f && !c && overlayPolygons) {
+        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
+          const fid = op.properties?.id ?? op.id ?? "";
+          if (fid === effReveal) {
+            name = op.properties?.name ?? fid;
+            try {
+              const geom = op.geometry;
+              if (geom) {
+                const ring = geom.type === "Polygon"
+                  ? (geom.coordinates as number[][][])[0]
+                  : (geom.coordinates as number[][][][])[0]?.[0];
+                if (ring && ring.length > 0) {
+                  let sumLng = 0;
+                  let sumLat = 0;
+                  for (const pt of ring) {
+                    sumLng += pt[0] ?? 0;
+                    sumLat += pt[1] ?? 0;
+                  }
+                  lng = sumLng / ring.length;
+                  lat = sumLat / ring.length;
+                }
+              }
+            } catch {
+              // fallback
+            }
+            break;
+          }
+        }
+      }
+
       pills.push({ id: `reveal-${effReveal}`, iso3: effReveal, name, lat, lng, kind: "correct" });
     } else if (effHighlight && effHighlight !== effWrong) {
       const f = featureByIso3.get(effHighlight);
       const c = countryByIso3.get(effHighlight);
-      const name = f?.properties.name ?? c?.name ?? effHighlight;
-      const lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
-      const lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+      let name = f?.properties.name ?? c?.name ?? effHighlight;
+      let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
+      let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+
+      if (!f && !c && overlayPolygons) {
+        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
+          const fid = op.properties?.id ?? op.id ?? "";
+          if (fid === effHighlight) {
+            name = op.properties?.name ?? fid;
+            try {
+              const geom = op.geometry;
+              if (geom) {
+                const ring = geom.type === "Polygon"
+                  ? (geom.coordinates as number[][][])[0]
+                  : (geom.coordinates as number[][][][])[0]?.[0];
+                if (ring && ring.length > 0) {
+                  let sumLng = 0;
+                  let sumLat = 0;
+                  for (const pt of ring) {
+                    sumLng += pt[0] ?? 0;
+                    sumLat += pt[1] ?? 0;
+                  }
+                  lng = sumLng / ring.length;
+                  lat = sumLat / ring.length;
+                }
+              }
+            } catch {
+              // fallback
+            }
+            break;
+          }
+        }
+      }
+
       pills.push({ id: `highlight-${effHighlight}`, iso3: effHighlight, name, lat, lng, kind: "correct" });
     }
 
     return pills;
-  }, [effWrong, effReveal, effHighlight, featureByIso3, countryByIso3]);
+  }, [effWrong, effReveal, effHighlight, featureByIso3, countryByIso3, overlayPolygons]);
 
   const htmlElementFn = useCallback((d: object) => {
     const p = d as SpatialPill;
