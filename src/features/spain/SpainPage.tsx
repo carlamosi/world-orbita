@@ -350,7 +350,9 @@ export default function SpainPage() {
           <Globe3D
             countries={COUNTRIES}
             disableWorldPolygons
+            disableMicrostates
             autoRotate={false}
+            quality="high"
             highlightId={
               s.answerState === "correct"
                 ? (current?.id ?? null)

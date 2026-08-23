@@ -54,6 +54,8 @@ interface Globe3DProps {
   questionKey?: string | null;
   /** Disable loading and rendering the 195 world country base polygons (huge speedup for regional modes like Spain). */
   disableWorldPolygons?: boolean;
+  /** Disable microstate markers (points) on the globe. */
+  disableMicrostates?: boolean;
   /** Control auto-rotation of the globe (set false for regional focus). */
   autoRotate?: boolean;
   /**
@@ -153,6 +155,7 @@ export default function Globe3D({
   disableHoverFeedback = false,
   questionKey = null,
   disableWorldPolygons = false,
+  disableMicrostates = false,
   autoRotate,
   overlayPolygons,
   overlayCapColor,
@@ -243,40 +246,15 @@ export default function Globe3D({
   }, [features]);
 
   // ---- Microstate Marker Cloud -----------------------------------------
-  // CRITICAL ROOT CAUSE: The 110m TopoJSON used for polygon rendering omits or
-  // severely degrades many genuine microstates (Vatican ~0.44 km², Monaco ~2 km²
-  // may have 0-1 polygon vertices at this resolution). Sourcing markers from
-  // the `countries` prop (which uses real-world km² area from the dataset) is
-  // the only reliable approach — it guarantees Vatican, Monaco, etc. always get
-  // a marker regardless of TopoJSON resolution.
-  //
-  // Threshold rationale — countries where normal polygon raycasting is unreliable:
-  //   < 700 km²:  Vatican (0.44), Monaco (2), Nauru (21), Tuvalu (26),
-  //               San Marino (61), Andorra (468), Liechtenstein (160),
-  //               Maldives (298), Malta (316), Bahrain (765)
-  //   < 1500 km²: Singapore (728), Comoros (2235 — borderline),
-  //               Cabo Verde (4033), São Tomé (964), Kiribati (811)
-  //   Normal countries (excluded): Luxembourg (2586), Samoa (2842) and above
-  //
-  // We use 1000 km² as the primary threshold plus a secondary span check
-  // (< 1.5° from the geo data) for tiny island chains that are dispersed.
-  // This is a principled criterion, not a hardcoded list of countries.
-
-  const MICRO_AREA_KM2 = 1000; // Real-world km² from Country dataset
+  const MICRO_AREA_KM2 = 1000;
 
   const hitboxPoints = useMemo(() => {
+    if (disableMicrostates) return [];
     type HitboxPoint = { iso3: string; name: string; lat: number; lng: number; radius: number; micro: boolean };
     const result: HitboxPoint[] = [];
 
     for (const c of countries) {
-      // Primary criterion: real-world area from the canonical Country dataset.
-      // This is immune to TopoJSON resolution degradation.
       const isMicro = c.area > 0 && c.area <= MICRO_AREA_KM2;
-
-      // Secondary criterion: tiny dispersed archipelagos may have larger total
-      // area but still be difficult to click (e.g. Marshall Islands at ~181 km²
-      // but spread across a huge ocean area). These are caught by area already.
-      // We only skip if clearly a normal country.
       if (!isMicro) continue;
 
       if (activeContinent && activeContinent !== "All") {
@@ -532,16 +510,13 @@ export default function Globe3D({
     if (pointOfView) {
       const lat = pointOfView.lat;
       const lng = pointOfView.lng;
-      // If no explicit altitude is provided, preserve the player's current zoom.
-      // This gives a smooth pan-only transition that doesn't yank them out.
-      const liveAlt = ref.current ? ref.current.pointOfView().altitude : 1.8;
-      const altitude = pointOfView.altitude ?? liveAlt;
+      const altitude = pointOfView.altitude ?? 0.65;
       return {
         lat,
         lng,
         altitude,
         key: `pov:${lat.toFixed(3)},${lng.toFixed(3)},${altitude.toFixed(3)}`,
-        duration: 1200,
+        duration: 1000,
       };
     }
     return null;
@@ -549,17 +524,38 @@ export default function Globe3D({
 
   const lastCameraTargetKey = useRef<string | null>(null);
 
+  // Apply camera target whenever it changes or on mount
   useEffect(() => {
-    if (!activeCameraTarget || !ref.current) return;
+    const g = ref.current;
+    if (!g) return;
+    if (!activeCameraTarget) return;
     if (lastCameraTargetKey.current === activeCameraTarget.key) return;
     lastCameraTargetKey.current = activeCameraTarget.key;
 
-    ref.current.controls().autoRotate = false;
-    ref.current.pointOfView(
+    try {
+      const controls = g.controls();
+      if (controls) {
+        controls.autoRotate = autoRotate ?? false;
+      }
+    } catch {
+      // ignore
+    }
+
+    g.pointOfView(
       { lat: activeCameraTarget.lat, lng: activeCameraTarget.lng, altitude: activeCameraTarget.altitude },
       effectiveQuality === "static" ? 0 : activeCameraTarget.duration,
     );
-  }, [activeCameraTarget, effectiveQuality]);
+  }, [activeCameraTarget, autoRotate, effectiveQuality]);
+
+  // Direct initial pointOfView mount effect
+  useEffect(() => {
+    const g = ref.current;
+    if (!g || !pointOfView) return;
+    g.pointOfView(
+      { lat: pointOfView.lat, lng: pointOfView.lng, altitude: pointOfView.altitude ?? 0.65 },
+      0,
+    );
+  }, [pointOfView]);
 
   // ---- Smooth Camera Rotation on Continent Selection -----------------
   const lastActiveContinent = useRef<string | null | undefined>(undefined);
