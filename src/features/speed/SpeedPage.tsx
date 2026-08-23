@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSpeedRuntime, type SpeedMode } from "./speedRuntimeStore";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -14,6 +14,9 @@ import { spring } from "@/lib/motion";
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import type { Country } from "@/types/country";
 import { Zap, Timer, Skull, Flag, MapPin, Type, Globe } from "lucide-react";
+import { SessionLengthSelect, type SessionLengthMode } from "@/features/engine/SessionLengthSelect";
+import { getPref, setPref } from "@/lib/db/repo";
+import { COUNTRIES } from "@/lib/countries";
 
 const MODE_META: Record<SpeedMode, { name: string; sub: string; desc: string; icon: React.ReactNode }> = {
   sprint60: {
@@ -59,6 +62,23 @@ function PreGame() {
   const start = useSpeedRuntime((s) => s.start);
   // Re-use shared continent preference so selection persists across modes
   const [continent, setContinent] = useContinentPref();
+  const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
+
+  useEffect(() => {
+    getPref("speed.sessionMode").then((v) => {
+      if (v === "quick" || v === "complete") setSessionMode(v);
+    });
+  }, []);
+
+  const handleSessionModeChange = (mode: SessionLengthMode) => {
+    setSessionMode(mode);
+    void setPref("speed.sessionMode", mode);
+  };
+
+  const continentCount =
+    continent === "All"
+      ? COUNTRIES.length
+      : COUNTRIES.filter((c) => c.continent === continent).length;
 
   const handleContinentChange = (c: string) => {
     setContinent(c as Parameters<typeof setContinent>[0]);
@@ -161,12 +181,20 @@ function PreGame() {
           </div>
         </div>
 
-        {/* ── Continent ─────────────────────────── */}
-        <div className="flex items-center justify-between gap-4">
+        {/* ── Continent + Session length ─────────── */}
+        <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">
             Region
           </div>
-          <ContinentSelect value={continent} onChange={handleContinentChange} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <ContinentSelect value={continent} onChange={handleContinentChange} />
+            <SessionLengthSelect
+              value={sessionMode}
+              onChange={handleSessionModeChange}
+              continentCount={continentCount}
+              continent={continent}
+            />
+          </div>
         </div>
 
         {/* ── CTA ───────────────────────────────── */}

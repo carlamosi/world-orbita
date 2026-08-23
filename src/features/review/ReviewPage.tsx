@@ -15,6 +15,8 @@ import { db, type ConceptProgressRow, ALL_SKILLS } from "@/lib/db/orbita-db";
 import { generateDueTodayQueue } from "@/lib/fsrs/planner";
 import { spring, fadeUp } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { SessionLengthSelect, type SessionLengthMode } from "@/features/engine/SessionLengthSelect";
+import { getPref, setPref } from "@/lib/db/repo";
 
 // Lazy-load the globe — only needed when a 'location' card appears
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
@@ -158,6 +160,32 @@ export default function ReviewPage() {
   const [blockOffset, setBlockOffset] = useState<number>(0);
   const [selectedIso3, setSelectedIso3] = useState<string | null>(null);
   const [continent, setContinent] = useContinentPref();
+  const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
+
+  // Persist session mode preference
+  useEffect(() => {
+    getPref("review.sessionMode").then((v) => {
+      if (v === "quick" || v === "complete") setSessionMode(v);
+    });
+  }, []);
+
+  const handleSessionModeChange = useCallback((mode: SessionLengthMode) => {
+    setSessionMode(mode);
+    void setPref("review.sessionMode", mode);
+  }, []);
+
+  // Filtered continent count for the selector label
+  const filteredCount = useMemo(
+    () =>
+      continent === "All"
+        ? dueRows.length
+        : dueRows.filter((r) => {
+            const iso3 = r.conceptId.split(":")[0];
+            const country = COUNTRIES.find((c) => c.iso3 === iso3);
+            return country?.continent === continent;
+          }).length,
+    [continent, dueRows],
+  );
 
   const current = s.queue[s.index] ?? null;
   const currentConcept = s.conceptQueue[s.index] ?? null;
@@ -187,12 +215,17 @@ export default function ReviewPage() {
       setLoadState("empty");
     } else {
       setLoadState("ready");
-      const currentBatch = queue.slice(0, BLOCK_SIZE);
+      const currentBatch = sessionMode === "complete" ? queue : queue.slice(0, BLOCK_SIZE);
       await s.start({ conceptRows: currentBatch });
     }
-  }, [s, continent]);
+  }, [s, continent, sessionMode]);
 
   const loadNextBatch = useCallback(async () => {
+    if (sessionMode === "complete") {
+      // In complete mode, just reload fresh
+      await loadQueue();
+      return;
+    }
     const nextOffset = blockOffset + BLOCK_SIZE;
     setBlockOffset(nextOffset);
     const nextBatch = dueRows.slice(nextOffset, nextOffset + BLOCK_SIZE);
@@ -201,9 +234,9 @@ export default function ReviewPage() {
     } else {
       await loadQueue();
     }
-  }, [blockOffset, dueRows, loadQueue, s]);
+  }, [blockOffset, dueRows, loadQueue, s, sessionMode]);
 
-  const hasNextBlock = blockOffset + BLOCK_SIZE < dueRows.length;
+  const hasNextBlock = sessionMode === "quick" && blockOffset + BLOCK_SIZE < dueRows.length;
 
   // Load all due cards on mount or when continent changes
   useEffect(() => {
@@ -450,9 +483,15 @@ export default function ReviewPage() {
           </span>
         </div>
 
-        {/* Continent Filter */}
-        <div className="absolute top-24 inset-x-0 z-20 flex justify-center pointer-events-auto">
+        {/* Continent Filter + Session length */}
+        <div className="absolute top-24 inset-x-0 z-20 flex justify-center pointer-events-auto gap-2">
           <ContinentSelect value={continent} onChange={setContinent} />
+          <SessionLengthSelect
+            value={sessionMode}
+            onChange={handleSessionModeChange}
+            continentCount={filteredCount}
+            continent={continent}
+          />
         </div>
 
         {/* Progress counter */}
@@ -521,8 +560,14 @@ export default function ReviewPage() {
                 )}
               </div>
               
-              <div className="pointer-events-auto">
+              <div className="flex items-center gap-2 pointer-events-auto">
                 <ContinentSelect value={continent} onChange={setContinent} />
+                <SessionLengthSelect
+                  value={sessionMode}
+                  onChange={handleSessionModeChange}
+                  continentCount={filteredCount}
+                  continent={continent}
+                />
               </div>
 
               <span className="font-mono text-xs text-white/30 hidden sm:block">
