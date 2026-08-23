@@ -524,13 +524,10 @@ export default function Globe3D({
 
   const lastCameraTargetKey = useRef<string | null>(null);
 
-  // Apply camera target whenever it changes or on mount
+  // Camera targeting pass
   useEffect(() => {
     const g = ref.current;
     if (!g) return;
-    if (!activeCameraTarget) return;
-    if (lastCameraTargetKey.current === activeCameraTarget.key) return;
-    lastCameraTargetKey.current = activeCameraTarget.key;
 
     try {
       const controls = g.controls();
@@ -541,27 +538,30 @@ export default function Globe3D({
       // ignore
     }
 
-    g.pointOfView(
-      { lat: activeCameraTarget.lat, lng: activeCameraTarget.lng, altitude: activeCameraTarget.altitude },
-      effectiveQuality === "static" ? 0 : activeCameraTarget.duration,
-    );
-  }, [activeCameraTarget, autoRotate, effectiveQuality]);
+    if (pointOfView) {
+      g.pointOfView(
+        { lat: pointOfView.lat, lng: pointOfView.lng, altitude: pointOfView.altitude ?? 0.6 },
+        effectiveQuality === "static" ? 0 : 800,
+      );
+      return;
+    }
 
-  // Direct initial pointOfView mount effect
-  useEffect(() => {
-    const g = ref.current;
-    if (!g || !pointOfView) return;
-    g.pointOfView(
-      { lat: pointOfView.lat, lng: pointOfView.lng, altitude: pointOfView.altitude ?? 0.65 },
-      0,
-    );
-  }, [pointOfView]);
+    if (activeCameraTarget) {
+      if (lastCameraTargetKey.current !== activeCameraTarget.key) {
+        lastCameraTargetKey.current = activeCameraTarget.key;
+        g.pointOfView(
+          { lat: activeCameraTarget.lat, lng: activeCameraTarget.lng, altitude: activeCameraTarget.altitude },
+          effectiveQuality === "static" ? 0 : activeCameraTarget.duration,
+        );
+      }
+    }
+  }, [pointOfView, activeCameraTarget, autoRotate, effectiveQuality]);
 
-  // ---- Smooth Camera Rotation on Continent Selection -----------------
+  // ---- Smooth Camera Rotation on Continent Selection (world mode only) -----------------
   const lastActiveContinent = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    if (!ref.current) return;
+    if (!ref.current || disableWorldPolygons || pointOfView) return;
     if (lastActiveContinent.current === undefined) {
       lastActiveContinent.current = activeContinent;
       if (activeContinent && CONTINENT_CENTERS[activeContinent]) {
@@ -584,22 +584,13 @@ export default function Globe3D({
         effectiveQuality === "static" ? 0 : 1400,
       );
     }
-  }, [activeContinent, effectiveQuality]);
+  }, [activeContinent, effectiveQuality, disableWorldPolygons, pointOfView]);
 
   // ---- Explore-oriented camera logic for new questions ----------------
-  // When a new question loads (driven by questionKey changes), we avoid centering
-  // exactly on the target country since that reveals the answer. Instead:
-  //  1. Calculate distance from current view center to the target country.
-  //  2. If already in view (dist < threshold), keep the view exactly as is.
-  //     If player is zoomed in too closely (alt < 0.8), zoom out slightly for context.
-  //  3. If not in view (dist > threshold, e.g. on other side of the globe),
-  //     rotate smoothly to the target country's continent center at a zoomed-out
-  //     altitude so the player is oriented to the right region, but still has
-  //     to search for and find the country.
   const lastQuestionKey = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!questionKey || !ref.current) {
+    if (!questionKey || !ref.current || disableWorldPolygons || pointOfView) {
       lastQuestionKey.current = questionKey;
       return;
     }
@@ -619,25 +610,19 @@ export default function Globe3D({
     const targetLng = targetCountry.coordinates[1];
 
     const dist = angularDistanceDeg(currentLat, currentLng, targetLat, targetLng);
-    // Visibility threshold scales with camera altitude: closer zoom = smaller visible field.
     const threshold = Math.min(75, 20 + currentAlt * 30);
 
     if (dist > threshold) {
-      // Pan to the center of the country's continent to orient the player
       const continent = targetCountry.continent;
       const center = CONTINENT_CENTERS[continent] || { lat: targetLat, lng: targetLng };
-      // Zoom out slightly to give context
       const altitude = Math.max(currentAlt * 1.15, 1.6);
-
       g.pointOfView({ lat: center.lat, lng: center.lng, altitude }, 1400);
     } else {
-      // Already in the visible viewport, but if they are zoomed in very close,
-      // perform a subtle zoom-out in place so they have space to search.
       if (currentAlt < 0.8) {
         g.pointOfView({ lat: currentLat, lng: currentLng, altitude: currentAlt * 1.35 }, 800);
       }
     }
-  }, [questionKey, countryByIso3]);
+  }, [questionKey, countryByIso3, disableWorldPolygons, pointOfView]);
 
   // ---- Click / hover handlers (active continent aware) ----------------
   const handlePolygonClick = useCallback(

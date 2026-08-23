@@ -157,6 +157,29 @@ function pickRandomSpainEntities(
   return shuffled.slice(0, count);
 }
 
+// Distinct elegant color palette for Spanish regions so they stand out clearly
+const REGION_PALETTE = [
+  "rgba(108, 99, 255, 0.35)",  // violet
+  "rgba(0, 212, 255, 0.35)",   // cyan
+  "rgba(0, 255, 178, 0.35)",   // emerald/neon
+  "rgba(255, 184, 77, 0.35)",  // amber
+  "rgba(244, 114, 182, 0.35)", // pink
+  "rgba(167, 139, 250, 0.35)", // purple
+  "rgba(56, 189, 248, 0.35)",  // sky
+  "rgba(251, 146, 60, 0.35)",  // orange
+  "rgba(45, 212, 191, 0.35)",  // teal
+  "rgba(129, 140, 248, 0.35)", // indigo
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
 function makeCapColor(
   currentId: string | undefined,
   lastWrongId: string | null,
@@ -169,18 +192,21 @@ function makeCapColor(
 
     if (fid === currentId) {
       if (skill === "name") {
-        if (answerState === "idle") return "rgba(0,212,255,0.7)";
-        if (answerState === "correct") return "rgba(16,185,129,0.75)";
-        return "rgba(244,63,94,0.75)";
+        if (answerState === "idle") return "rgba(0,212,255,0.85)";
+        if (answerState === "correct") return "rgba(16,185,129,0.90)";
+        return "rgba(244,63,94,0.90)";
       }
-      if (answerState === "correct") return "rgba(16,185,129,0.75)";
+      if (answerState === "correct") return "rgba(16,185,129,0.90)";
       if (answerState === "wrong" || answerState === "revealed")
-        return "rgba(16,185,129,0.65)";
-      return "rgba(108,99,255,0.45)";
+        return "rgba(16,185,129,0.80)";
+      return "rgba(108,99,255,0.65)";
     }
     if (fid === lastWrongId && answerState === "wrong")
-      return "rgba(244,63,94,0.75)";
-    return "rgba(108,99,255,0.12)";
+      return "rgba(244,63,94,0.85)";
+
+    // Distinct palette assignment per region for clear boundary perception
+    const idx = hashString(fid) % REGION_PALETTE.length;
+    return REGION_PALETTE[idx]!;
   };
 }
 
@@ -371,9 +397,9 @@ export default function SpainPage() {
             pointOfView={SPAIN_POV}
             overlayPolygons={overlayPolygons}
             overlayCapColor={capColor}
-            overlaySideColor={() => "rgba(108,99,255,0.05)"}
-            overlayStrokeColor={() => "rgba(255,255,255,0.22)"}
-            overlayAltitude={0.005}
+            overlaySideColor={() => "rgba(108,99,255,0.2)"}
+            overlayStrokeColor={() => "rgba(255,255,255,0.75)"}
+            overlayAltitude={0.012}
             overlayLabel={(d) => {
               if (skill === "locate") return "";
               const f = d as { properties?: { name?: string } };
