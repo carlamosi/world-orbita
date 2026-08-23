@@ -9,7 +9,7 @@ const NAV = [
   { to: "/locate", label: "Locate" },
   { to: "/flags", label: "Flags" },
   { to: "/capitals", label: "Capitals" },
-  { to: "/geography", label: "Geography" },
+  { to: "/spain", label: "Spain" },
   { to: "/speed", label: "Speed" },
   { to: "/challenges", label: "Challenges" },
   { to: "/progress", label: "Progress" },
