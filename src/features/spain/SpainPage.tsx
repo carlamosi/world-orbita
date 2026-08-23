@@ -157,29 +157,6 @@ function pickRandomSpainEntities(
   return shuffled.slice(0, count);
 }
 
-// Distinct elegant color palette for Spanish regions so they stand out clearly
-const REGION_PALETTE = [
-  "rgba(108, 99, 255, 0.35)",  // violet
-  "rgba(0, 212, 255, 0.35)",   // cyan
-  "rgba(0, 255, 178, 0.35)",   // emerald/neon
-  "rgba(255, 184, 77, 0.35)",  // amber
-  "rgba(244, 114, 182, 0.35)", // pink
-  "rgba(167, 139, 250, 0.35)", // purple
-  "rgba(56, 189, 248, 0.35)",  // sky
-  "rgba(251, 146, 60, 0.35)",  // orange
-  "rgba(45, 212, 191, 0.35)",  // teal
-  "rgba(129, 140, 248, 0.35)", // indigo
-];
-
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
 function makeCapColor(
   currentId: string | undefined,
   lastWrongId: string | null,
@@ -192,21 +169,20 @@ function makeCapColor(
 
     if (fid === currentId) {
       if (skill === "name") {
-        if (answerState === "idle") return "rgba(0,212,255,0.85)";
-        if (answerState === "correct") return "rgba(16,185,129,0.90)";
-        return "rgba(244,63,94,0.90)";
+        if (answerState === "idle") return "rgba(0, 212, 255, 0.45)"; // Cyan target highlight
+        if (answerState === "correct") return "rgba(16, 185, 129, 0.65)"; // Emerald correct
+        return "rgba(244, 63, 94, 0.70)"; // Coral wrong
       }
-      if (answerState === "correct") return "rgba(16,185,129,0.90)";
+      if (answerState === "correct") return "rgba(16, 185, 129, 0.65)";
       if (answerState === "wrong" || answerState === "revealed")
-        return "rgba(16,185,129,0.80)";
-      return "rgba(108,99,255,0.65)";
+        return "rgba(16, 185, 129, 0.65)";
+      return "rgba(108, 99, 255, 0.16)";
     }
     if (fid === lastWrongId && answerState === "wrong")
-      return "rgba(244,63,94,0.85)";
+      return "rgba(244, 63, 94, 0.70)";
 
-    // Distinct palette assignment per region for clear boundary perception
-    const idx = hashString(fid) % REGION_PALETTE.length;
-    return REGION_PALETTE[idx]!;
+    // Clean, premium Orbita dark base color matching Locate mode
+    return "rgba(108, 99, 255, 0.16)";
   };
 }
 
@@ -298,12 +274,12 @@ export default function SpainPage() {
   }, [finished, current, s]);
   useSkipHotkey(onSkip);
 
-  // Globe POV
+  // Globe POV - tight close zoom on Spain
   const SPAIN_POV = useMemo(() => {
     if (skill === "name" && current) {
-      return { lat: current.coordinates[0], lng: current.coordinates[1], altitude: 0.5 };
+      return { lat: current.coordinates[0], lng: current.coordinates[1], altitude: 0.28 };
     }
-    return { lat: 40.0, lng: -3.5, altitude: 0.65 };
+    return { lat: 39.8, lng: -3.7, altitude: 0.32 };
   }, [skill, current]);
 
   const capColor = useMemo(

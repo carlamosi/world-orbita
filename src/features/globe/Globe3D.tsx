@@ -389,8 +389,12 @@ export default function Globe3D({
   );
 
   const polygonSideColor = useCallback(
-    () => `rgba(${COLOR_BASE}, 0.06)`,
-    [],
+    (d: object) => {
+      const f = d as { properties?: { iso3?: string } };
+      if (!f.properties?.iso3 && overlaySideColor) return overlaySideColor(d);
+      return `rgba(${COLOR_BASE}, 0.06)`;
+    },
+    [overlaySideColor],
   );
 
   const polygonStrokeColor = useCallback(
@@ -400,8 +404,8 @@ export default function Globe3D({
       const fid: string = f.properties.id ?? f.properties.iso3 ?? "";
 
       if (isOverlay) {
-        if (overlaySideColor) return overlaySideColor(d);
-        return "rgba(255,255,255,0.22)";
+        if (overlayStrokeColor) return overlayStrokeColor(d);
+        return "rgba(255, 255, 255, 0.4)";
       }
 
       const iso3 = fid;
