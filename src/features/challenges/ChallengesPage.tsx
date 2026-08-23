@@ -18,6 +18,7 @@ import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 
 import { SessionEnd } from "@/features/engine/SessionEnd";
+import { Link } from "@tanstack/react-router";
 import type { MissedItem } from "@/features/engine/useSession";
 import { HardcoreRunner } from "@/features/challenges/HardcoreRunner";
 import {
@@ -278,6 +279,37 @@ export default function ChallengesPage() {
                 </motion.div>
               );
             })}
+
+            {/* Regional Mastery: Spain Card */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={spring.soft}
+              className="glass-strong rounded-2xl p-5 flex flex-col justify-between gap-4 border border-[color:var(--neon)]/30 bg-gradient-to-b from-[color:var(--neon)]/5 to-transparent"
+            >
+              <div>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-display text-xl text-white tracking-tight flex items-center gap-2">
+                    <span>🇪🇸</span> España
+                  </h3>
+                  <Badge tone="neon">Regional</Badge>
+                </div>
+                <p className="mt-2 font-mono text-[11px] text-white/45 uppercase tracking-wider">
+                  19 CCAA • 50 Provincias • Banderas • Capitales
+                </p>
+                <p className="mt-2 text-[13px] text-white/65">
+                  Complete mastery over Spain's administrative geography: locate, identify, flags, and seats of power.
+                </p>
+              </div>
+
+              <div className="pt-2">
+                <Link to="/spain" className="block w-full">
+                  <Button variant="primary" size="sm" className="w-full">
+                    Aprender España →
+                  </Button>
+                </Link>
+              </div>
+            </motion.div>
           </div>
         </section>
       </div>

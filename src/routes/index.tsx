@@ -62,6 +62,12 @@ const MODES = [
     tone: "violet" as const,
   },
   {
+    to: "/spain",
+    title: "España 🇪🇸",
+    tagline: "17 CCAA, 50 provincias y capitales en el globo 3D.",
+    tone: "neon" as const,
+  },
+  {
     to: "/challenges",
     title: "Daily Quest",
     tagline: "Unlock continents one mastery at a time.",
