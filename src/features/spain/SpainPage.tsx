@@ -229,9 +229,12 @@ export default function SpainPage() {
     (sk: GameSkill, lv: AdminLevel, sm: SessionLengthMode) => {
       setLastWrongId(null);
       setHoveredRegionId(null);
-      const dataset = (sk === "flags" || lv === "ccaa") ? SPAIN_CCAA : SPAIN_PROVINCES;
+      const isCCAA = sk === "flags" || lv === "ccaa";
+      const dataset = isCCAA ? SPAIN_CCAA : SPAIN_PROVINCES;
       const subMode = sk === "locate" ? "find" : sk === "name" ? "name" : sk === "flags" ? "flag" : "capital";
-      if (sm === "complete") {
+
+      // CCAA is ALWAYS all 19 items across all modes
+      if (isCCAA || sm === "complete") {
         void activeStore.start({ allCountries: shuffle(dataset.slice()) as SpainEntity[], subMode });
       } else {
         void activeStore.start({ subMode });
@@ -383,12 +386,14 @@ export default function SpainPage() {
               {skill !== "flags" && (
                 <ModeDropdown options={LEVEL_OPTIONS} value={level} onChange={setLevel} />
               )}
-              <SessionLengthSelect
-                value={sessionMode}
-                onChange={setSessionMode}
-                continentCount={activeDataset.length}
-                continent="Spain"
-              />
+              {skill !== "flags" && level === "provinces" && (
+                <SessionLengthSelect
+                  value={sessionMode}
+                  onChange={setSessionMode}
+                  continentCount={activeDataset.length}
+                  continent="Spain"
+                />
+              )}
             </div>
             <div className="flex items-center gap-2">
               {skill !== "locate" && (
@@ -597,7 +602,7 @@ export default function SpainPage() {
         wrong={s.wrong}
         masteredCount={s.masteredCount}
         missedItems={s.missedItems}
-        hasNextBlock={sessionMode === "quick"}
+        hasNextBlock={level === "provinces" && sessionMode === "quick"}
         onNextBlock={() => startSession(skill, level, sessionMode)}
       />
     </div>
