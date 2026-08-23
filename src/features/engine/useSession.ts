@@ -201,7 +201,45 @@ export function createSessionStore<TItem = Country>({
           const j = Math.floor(Math.random() * (i + 1));
           [q[i], q[j]] = [q[j]!, q[i]!];
         }
-        cq = Array(q.length).fill(null);
+
+        // Populate cq with existing FSRS progress rows from DB, or initialize State.New
+        const allDbConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
+        const dbConceptMap = new Map(allDbConcepts.map((c) => [c.conceptId, c]));
+
+        let defaultSubMode = "";
+        if (skill === "capital") defaultSubMode = "countryToCap";
+        if (skill === "flag") defaultSubMode = "flagToCountry";
+        if (skill === "name") defaultSubMode = "name";
+        if (skill === "location") defaultSubMode = "find";
+        const sm = opts?.subMode && opts.subMode !== "mixed" ? opts.subMode : defaultSubMode;
+
+        cq = q.map((item) => {
+          const raw = item as unknown as SessionItemLike;
+          const entityId = resolveId(item);
+          const conceptId = formatConceptId({
+            domain: domain as any,
+            entityId,
+            skill,
+            subMode: sm || "default",
+          });
+          const existing = dbConceptMap.get(conceptId);
+          if (existing) return existing;
+          return {
+            conceptId,
+            iso3: raw.iso3 ?? entityId,
+            skill,
+            fsrs_state: State.New as any,
+            fsrs_stability: null,
+            fsrs_difficulty: null,
+            fsrs_due: 0,
+            fsrs_reps: 0,
+            fsrs_lapses: 0,
+            fsrs_last_review: 0,
+            updated_at: Date.now(),
+            version: 1,
+            dirty: 0,
+          };
+        });
       } else {
         // FSRS session planner
         const allConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
@@ -392,12 +430,40 @@ export function createSessionStore<TItem = Country>({
       // 2. FSRS update — only the FIRST attempt per conceptId per session counts.
       //    Retries are for in-session desirable-difficulty practice; FSRS state
       //    is already committed from the first answer and must not be double-scored.
-      if (targetConcept && !s.fsrsUpdatedIds.has(targetConcept.conceptId)) {
+      let effectiveConcept = targetConcept;
+      if (!effectiveConcept) {
+        const rawTarget = target as unknown as SessionItemLike;
+        const targetId = resolveId(target);
+        const conceptSkill = skill;
+        const conceptId = formatConceptId({
+          domain: domain as any,
+          entityId: targetId,
+          skill: conceptSkill,
+          subMode: "default",
+        });
+        effectiveConcept = {
+          conceptId,
+          iso3: rawTarget.iso3 ?? targetId,
+          skill: conceptSkill,
+          fsrs_state: State.New as any,
+          fsrs_stability: null,
+          fsrs_difficulty: null,
+          fsrs_due: 0,
+          fsrs_reps: 0,
+          fsrs_lapses: 0,
+          fsrs_last_review: 0,
+          updated_at: Date.now(),
+          version: 1,
+          dirty: 0,
+        };
+      }
+
+      if (effectiveConcept && !s.fsrsUpdatedIds.has(effectiveConcept.conceptId)) {
         const now = Date.now();
 
         // Use the concept's own skill (critical for Due Today mixed sessions)
-        const conceptSkill = targetConcept.skill ?? skill;
-        const parts = targetConcept.conceptId.split(":");
+        const conceptSkill = effectiveConcept.skill ?? skill;
+        const parts = effectiveConcept.conceptId.split(":");
         const actualDirection = parts.length >= 3 ? parts[parts.length - 1]! : `${conceptSkill}->answer`;
 
         const assessment = assess({
@@ -410,7 +476,7 @@ export function createSessionStore<TItem = Country>({
           direction: actualDirection,
         });
 
-        const currentCard = rowToCard(targetConcept);
+        const currentCard = rowToCard(effectiveConcept);
         const { card: nextCard, log: fsrsLog } = processReview(
           currentCard,
           assessment.outcome,
@@ -418,14 +484,14 @@ export function createSessionStore<TItem = Country>({
         );
 
         const updatedProgressRow: ConceptProgressRow = {
-          ...targetConcept,
-          ...cardToRowUpdates(nextCard, 1, true, targetConcept.version),
+          ...effectiveConcept,
+          ...cardToRowUpdates(nextCard, 1, true, effectiveConcept.version),
         };
 
         // Persist async — idempotent via op_id
         recordConceptAttempt(updatedProgressRow, {
           op_id: crypto.randomUUID(),
-          conceptId: targetConcept.conceptId,
+          conceptId: effectiveConcept.conceptId,
           sessionId: "session-" + s.startedAt,
           grade: assessment.outcome === "again" ? 0 : assessment.outcome === "hard" ? 1 : assessment.outcome === "good" ? 2 : 3,
           mode: assessment.retrievalMode,
@@ -438,7 +504,7 @@ export function createSessionStore<TItem = Country>({
 
         // Mark this concept as FSRS-updated for this session
         const nextFsrsUpdatedIds = new Set(s.fsrsUpdatedIds);
-        nextFsrsUpdatedIds.add(targetConcept.conceptId);
+        nextFsrsUpdatedIds.add(effectiveConcept.conceptId);
         updates.fsrsUpdatedIds = nextFsrsUpdatedIds;
 
         // Optimistic row update at the current index position

@@ -2,6 +2,16 @@ import { lazy, Suspense, useEffect, useState, useCallback, useMemo } from "react
 import { motion, AnimatePresence } from "framer-motion";
 import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
 import type { Country } from "@/types/country";
+import {
+  SPAIN_ALL,
+  SPAIN_CCAA,
+  SPAIN_PROVINCES,
+  getSpainFlagUrl,
+  type SpainEntity,
+  loadSpainCCAAFeatures,
+  type SpainFeatureCollection,
+} from "@/lib/spain";
+import { parseConceptId } from "@/lib/fsrs/concept";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -17,6 +27,7 @@ import { spring, fadeUp } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { SessionLengthSelect, type SessionLengthMode } from "@/features/engine/SessionLengthSelect";
 import { getPref, setPref } from "@/lib/db/repo";
+import { ContinentSelect, useContinentPref } from "@/features/engine/ContinentSelect";
 
 // Lazy-load the globe — only needed when a 'location' card appears
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
@@ -38,9 +49,26 @@ function shuffleArray<T>(array: T[]): T[] {
   return arr;
 }
 
-/* The session store: mixed-skill Due Today session.
-   skill="flag" is a placeholder — FSRS updates always use targetConcept.skill. */
-const useReviewSession = createSessionStore({ mode: "find", skill: "flag", questions: 9999 });
+export type ReviewEntity = Country | SpainEntity;
+
+function isSpainEntity(item: ReviewEntity): item is SpainEntity {
+  return "domain" in item && item.domain === "spain";
+}
+
+const ALL_REVIEW_ITEMS: ReviewEntity[] = [...COUNTRIES, ...SPAIN_ALL];
+
+/* The session store: mixed-skill Due Today session across all countries and Spain entities. */
+const useReviewSession = createSessionStore<ReviewEntity>({
+  mode: "find",
+  skill: "flag",
+  questions: 9999,
+  dataset: ALL_REVIEW_ITEMS,
+  getId: (item) => {
+    if ("id" in item && item.id) return item.id;
+    if ("iso3" in item && item.iso3) return item.iso3;
+    return item.name;
+  },
+});
 
 const SKILL_LABELS: Record<string, string> = {
   flag: "Flag",
@@ -59,18 +87,63 @@ const SKILL_COLORS: Record<string, string> = {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 /**
- * Globe-based location question — same UX as LocatePage "Find" mode.
- * The learner must click the correct country on the 3D globe.
+ * Globe-based location question — supports both world countries and Spain regions.
  */
 function LocationQuestion({
   current,
   answerState,
   onSubmit,
+  spainFeatures,
 }: {
-  current: Country;
+  current: ReviewEntity;
   answerState: "idle" | "correct" | "wrong" | "revealed";
-  onSubmit: (iso3: string) => void;
+  onSubmit: (id: string) => void;
+  spainFeatures: SpainFeatureCollection | null;
 }) {
+  const isSpain = isSpainEntity(current);
+  const SPAIN_POV = useMemo(() => ({ lat: 39.2, lng: -3.7, altitude: 0.28 }), []);
+
+  if (isSpain) {
+    const currentId = current.id;
+    return (
+      <div className="absolute inset-0">
+        <Suspense fallback={<GlobeFallback />}>
+          <Globe3D
+            countries={COUNTRIES}
+            disableWorldPolygons
+            disableMicrostates
+            autoRotate={false}
+            quality="high"
+            highlightId={answerState === "correct" ? currentId : null}
+            revealId={answerState === "wrong" || answerState === "revealed" ? currentId : null}
+            disableHoverLabel={answerState === "idle"}
+            questionKey={currentId}
+            pointOfView={SPAIN_POV}
+            overlayPolygons={spainFeatures?.features ?? []}
+            overlayCapColor={(d: any) => {
+              const fid = d?.properties?.id ?? "";
+              if (fid === currentId) {
+                if (answerState === "correct" || answerState === "wrong" || answerState === "revealed") {
+                  return "rgba(16, 185, 129, 0.65)";
+                }
+              }
+              return "rgba(108, 99, 255, 0.16)";
+            }}
+            overlaySideColor={() => "rgba(108,99,255,0.2)"}
+            overlayStrokeColor={() => "rgba(255,255,255,0.75)"}
+            overlayAltitude={0.012}
+            onOverlayClick={(d: any) => {
+              if (answerState === "idle") {
+                const clickedId = d?.properties?.id ?? "";
+                onSubmit(clickedId);
+              }
+            }}
+          />
+        </Suspense>
+      </div>
+    );
+  }
+
   return (
     <div className="absolute inset-0">
       <Suspense fallback={<GlobeFallback />}>
@@ -101,34 +174,37 @@ function McQuestion({
   current,
   skill,
   answerState,
-  selectedIso3,
+  selectedId,
   onSelect,
 }: {
-  options: Country[];
-  current: Country;
+  options: ReviewEntity[];
+  current: ReviewEntity;
   skill: string;
   answerState: "idle" | "correct" | "wrong" | "revealed";
-  selectedIso3: string | null;
-  onSelect: (iso3: string) => void;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }) {
   const revealed = answerState !== "idle";
+  const currentTargetId = isSpainEntity(current) ? current.id : current.iso3;
+
   return (
     <div className="w-full max-w-xl grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-      {options.map((opt: Country, idx: number) => {
+      {options.map((opt: ReviewEntity, idx: number) => {
+        const optId = isSpainEntity(opt) ? opt.id : opt.iso3;
         const label = skill === "capital" ? (opt.capital ?? opt.name) : opt.name;
-        const isCorrectOption = opt.iso3 === current.iso3;
-        const isChosen = selectedIso3 === opt.iso3;
+        const isCorrectOption = optId === currentTargetId;
+        const isChosen = selectedId === optId;
 
         const showGreen = revealed && isCorrectOption;
         const showRed = revealed && isChosen && !isCorrectOption;
 
         return (
           <motion.button
-            key={opt.iso3}
+            key={optId}
             whileHover={!revealed ? { scale: 1.02 } : {}}
             whileTap={!revealed ? { scale: 0.98 } : {}}
             disabled={revealed}
-            onClick={() => onSelect(opt.iso3)}
+            onClick={() => onSelect(optId)}
             className={cn(
               "glass rounded-2xl p-4 text-left font-display font-medium text-base transition-all flex items-center justify-between border",
               !revealed && "text-white/90 hover:bg-white/10 hover:border-white/20 active:bg-white/15",
@@ -147,8 +223,6 @@ function McQuestion({
   );
 }
 
-import { ContinentSelect, useContinentPref } from "@/features/engine/ContinentSelect";
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const BLOCK_SIZE = 10;
@@ -158,9 +232,14 @@ export default function ReviewPage() {
   const [loadState, setLoadState] = useState<"loading" | "empty" | "ready">("loading");
   const [dueRows, setDueRows] = useState<ConceptProgressRow[]>([]);
   const [blockOffset, setBlockOffset] = useState<number>(0);
-  const [selectedIso3, setSelectedIso3] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [continent, setContinent] = useContinentPref();
   const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
+  const [spainFeatures, setSpainFeatures] = useState<SpainFeatureCollection | null>(null);
+
+  useEffect(() => {
+    void loadSpainCCAAFeatures().then(setSpainFeatures);
+  }, []);
 
   // Persist session mode preference
   useEffect(() => {
@@ -180,8 +259,11 @@ export default function ReviewPage() {
       continent === "All"
         ? dueRows.length
         : dueRows.filter((r) => {
-            const iso3 = r.conceptId.split(":")[0];
-            const country = COUNTRIES.find((c) => c.iso3 === iso3);
+            const parsed = parseConceptId(r.conceptId);
+            if (parsed.domain === "spain") {
+              return continent === "Europe";
+            }
+            const country = COUNTRIES.find((c) => c.iso3 === parsed.entityId || c.iso3 === r.iso3);
             return country?.continent === continent;
           }).length,
     [continent, dueRows],
@@ -202,8 +284,11 @@ export default function ReviewPage() {
     const filteredRows = continent === "All" 
       ? allRows 
       : allRows.filter((r) => {
-          const iso3 = r.conceptId.split(":")[0];
-          const country = COUNTRIES.find((c) => c.iso3 === iso3);
+          const parsed = parseConceptId(r.conceptId);
+          if (parsed.domain === "spain") {
+            return continent === "Europe";
+          }
+          const country = COUNTRIES.find((c) => c.iso3 === parsed.entityId || c.iso3 === r.iso3);
           return country?.continent === continent;
         });
 
@@ -222,7 +307,6 @@ export default function ReviewPage() {
 
   const loadNextBatch = useCallback(async () => {
     if (sessionMode === "complete") {
-      // In complete mode, just reload fresh
       await loadQueue();
       return;
     }
@@ -240,15 +324,9 @@ export default function ReviewPage() {
 
   // Load all due cards on mount or when continent changes
   useEffect(() => {
-    let cancelled = false;
     void loadQueue();
-    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continent]);
-
-  const restart = useCallback(async () => {
-    await loadQueue();
-  }, [loadQueue]);
 
   useAutoAdvance({ answerState: s.answerState, finished, next: s.next });
 
@@ -259,54 +337,72 @@ export default function ReviewPage() {
 
   // Clear selection on every new card
   useEffect(() => {
-    setSelectedIso3(null);
+    setSelectedId(null);
   }, [s.index]);
 
   const rawSkill = (currentConcept?.skill ?? "flag") as string;
   let skill = rawSkill;
   let subMode = "";
   if (currentConcept && currentConcept.conceptId) {
-    const parts = currentConcept.conceptId.split(":");
-    if (parts.length >= 3) {
-       skill = parts[1] as string;
-       subMode = parts[2] as string;
-    }
+    const parsed = parseConceptId(currentConcept.conceptId);
+    skill = parsed.skill;
+    subMode = parsed.subMode ?? "";
   }
 
   const skillLabel = SKILL_LABELS[skill] ?? skill;
   const skillColor = SKILL_COLORS[skill] ?? SKILL_COLORS.flag!;
   const isLocationSkill = skill === "location" || subMode === "find" || subMode === "locator";
 
-  // Generate 4 MC options (continent-scoped) — used for flag / capital / name
-  const mcOptions: Country[] = useMemo(() => {
+  // Generate 4 MC options
+  const mcOptions: ReviewEntity[] = useMemo(() => {
     if (!current || isLocationSkill) return [];
+    if (isSpainEntity(current)) {
+      const isCCAA = current.category === "autonomous_community";
+      const pool = isCCAA ? SPAIN_CCAA : SPAIN_PROVINCES;
+      const distractors = shuffleArray(pool.filter((e) => e.id !== current.id)).slice(0, 3);
+      return shuffleArray([current, ...distractors]);
+    }
     const distractors = pickRandomCountries(3, new Set([current.iso3]), current.continent);
     return shuffleArray([current, ...distractors]);
   }, [current, isLocationSkill]);
 
+  const currentId = current ? (isSpainEntity(current) ? current.id : current.iso3) : "";
+
   // Keyboard shortcuts for MC skills
   const hotkeyItems = useMemo(
-    () => (s.answerState === "idle" && !isLocationSkill ? mcOptions.map((o) => ({ id: o.iso3 })) : []),
+    () => (s.answerState === "idle" && !isLocationSkill ? mcOptions.map((o) => ({ id: isSpainEntity(o) ? o.id : o.iso3 })) : []),
     [mcOptions, s.answerState, isLocationSkill],
   );
   const onHotkey = useCallback(
     (id: string) => {
       if (!current || s.answerState !== "idle") return;
-      setSelectedIso3(id);
-      s.submit(id === current.iso3);
+      setSelectedId(id);
+      s.submit(id === currentId);
     },
-    [current, s],
+    [current, currentId, s],
   );
   useAnswerHotkeys(hotkeyItems, onHotkey);
 
   // Prompt and supplementary info per skill
   const questionMeta = useMemo(() => {
     if (!current) return null;
+    const isSpain = isSpainEntity(current);
+    const regionName = isSpain ? current.name : current.name;
+    const subTitle = isSpain ? (current.capital ? `Capital: ${current.capital}` : undefined) : `Capital: ${current.capital ?? "—"}`;
+
     switch (skill) {
       case "flag":
         return {
-          prompt: "Which country owns this flag?",
-          visual: (
+          prompt: isSpain ? "Which autonomous community owns this flag?" : "Which country owns this flag?",
+          visual: isSpain ? (
+            <div className="w-full max-w-[420px] aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto border border-white/20">
+              <img
+                src={getSpainFlagUrl(current.flagCode)}
+                alt="Mystery flag"
+                className="w-full h-full object-cover"
+              />
+            </div>
+          ) : (
             <FlagImage
               iso2={current.iso2}
               alt="Mystery flag"
@@ -314,12 +410,12 @@ export default function ReviewPage() {
               className="w-full max-w-[420px] h-auto aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto"
             />
           ),
-          subtitle: `Capital: ${current.capital ?? "—"}`,
+          subtitle: subTitle,
         };
       case "capital":
         if (subMode === "capToCountry") {
           return {
-            prompt: `Which country's capital is ${current.capital}?`,
+            prompt: `Which ${isSpain ? "region" : "country"}'s capital is ${current.capital}?`,
             visual: (
               <div className="flex flex-col items-center gap-3 py-6">
                 <div className="font-display text-5xl md:text-6xl font-bold text-[color:var(--cyan)] tracking-tight text-center">
@@ -327,34 +423,42 @@ export default function ReviewPage() {
                 </div>
               </div>
             ),
-            subtitle: `Capital of ${current.name}`,
+            subtitle: `Capital of ${regionName}`,
           };
         }
         return {
-          prompt: `What's the capital of ${current.name}?`,
+          prompt: `What's the capital of ${regionName}?`,
           visual: (
             <div className="flex flex-col items-center gap-3 py-6">
               <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
-                {current.name}
+                {regionName}
               </div>
               <div className="font-mono text-xs uppercase tracking-widest text-white/30">
-                {current.continent}
+                {isSpain ? "Spain" : current.continent}
               </div>
             </div>
           ),
-          subtitle: `Capital of ${current.name}`,
+          subtitle: `Capital of ${regionName}`,
         };
       case "location":
         return {
           prompt: "", // rendered as PromptPill overlay on the globe
           visual: null,
-          subtitle: current.continent,
+          subtitle: isSpain ? "Spain" : current.continent,
         };
       case "name":
       default:
         return {
-          prompt: "Which country does this flag belong to?",
-          visual: (
+          prompt: isSpain ? "Name this region" : "Which country does this flag belong to?",
+          visual: isSpain ? (
+            <div className="w-full max-w-[420px] aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto border border-white/20">
+              <img
+                src={getSpainFlagUrl(current.flagCode)}
+                alt="Mystery flag"
+                className="w-full h-full object-cover"
+              />
+            </div>
+          ) : (
             <FlagImage
               iso2={current.iso2}
               alt="Mystery flag"
@@ -362,19 +466,19 @@ export default function ReviewPage() {
               className="w-full max-w-[420px] h-auto aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto"
             />
           ),
-          subtitle: `Capital: ${current.capital ?? "—"}`,
+          subtitle: subTitle,
         };
     }
   }, [current, skill, subMode]);
 
   // ── Globe submit handler (location skill) ──────────────────────────────────
   const handleGlobeClick = useCallback(
-    (iso3: string) => {
+    (id: string) => {
       if (!current || s.answerState !== "idle") return;
-      setSelectedIso3(iso3);
-      s.submit(iso3 === current.iso3);
+      setSelectedId(id);
+      s.submit(id === currentId);
     },
-    [current, s],
+    [current, currentId, s],
   );
 
   /* ─── Loading ─── */
@@ -462,15 +566,16 @@ export default function ReviewPage() {
     );
   }
 
-  /* ─── Active session — LOCATION skill: full-screen globe (identical to LocatePage Find) ─── */
+  /* ─── Active session — LOCATION skill: full-screen globe ─── */
   if (isLocationSkill && current) {
+    const displayName = current.name;
     return (
       <div className="relative min-h-dvh pt-20">
-        {/* Globe fills the screen */}
         <LocationQuestion
           current={current}
           answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
           onSubmit={handleGlobeClick}
+          spainFeatures={spainFeatures}
         />
 
         {/* Skill badge */}
@@ -504,11 +609,11 @@ export default function ReviewPage() {
         {/* Prompt pill overlay */}
         <div className="absolute top-36 md:top-32 inset-x-0 z-20 flex justify-center pointer-events-none">
           <PromptPill
-            keyId={`review-loc-${s.index}-${current.iso3}`}
+            keyId={`review-loc-${s.index}-${currentId}`}
             index={s.index}
             total={s.queue.length}
             title={
-              <>Find <span className="text-glow-cyan">{current.name}</span> on the map</>
+              <>Find <span className="text-glow-cyan">{displayName}</span> on the map</>
             }
           />
         </div>
@@ -519,8 +624,8 @@ export default function ReviewPage() {
             <FeedbackBar
               show={s.answerState !== "idle"}
               state={s.answerState as "correct" | "wrong" | "revealed"}
-              title={current.name}
-              subtitle={current.continent}
+              title={displayName}
+              subtitle={isSpainEntity(current) ? "Spain" : current.continent}
               onNext={() => s.next()}
               onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
               hideNext
@@ -537,7 +642,7 @@ export default function ReviewPage() {
       <AnimatePresence mode="wait">
         {current && questionMeta && (
           <motion.div
-            key={`${s.index}-${current.iso3}`}
+            key={`${s.index}-${currentId}`}
             variants={fadeUp}
             initial="hidden"
             animate="show"
@@ -576,7 +681,7 @@ export default function ReviewPage() {
             </div>
 
             <PromptPill
-              keyId={`review-${s.index}-${current.iso3}`}
+              keyId={`review-${s.index}-${currentId}`}
               index={s.index}
               total={s.queue.length}
               title={questionMeta.prompt}
@@ -603,7 +708,7 @@ export default function ReviewPage() {
                   target={current}
                   matchTarget={current.name}
                   onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
-                  placeholder="Type the country…"
+                  placeholder="Type the name…"
                 />
               </div>
             ) : (
@@ -612,11 +717,11 @@ export default function ReviewPage() {
                 current={current}
                 skill={skill}
                 answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
-                selectedIso3={selectedIso3}
-                onSelect={(iso3) => {
+                selectedId={selectedId}
+                onSelect={(id) => {
                   if (!current || s.answerState !== "idle") return;
-                  setSelectedIso3(iso3);
-                  s.submit(iso3 === current.iso3);
+                  setSelectedId(id);
+                  s.submit(id === currentId);
                 }}
               />
             )}
