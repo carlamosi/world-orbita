@@ -125,15 +125,6 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
     [setContinent],
   );
 
-  // Globe POV
-  const pov = useMemo(() => {
-    if (!current) return undefined;
-    if (sub === "name") {
-      return { lat: current.coordinates[0], lng: current.coordinates[1], altitude: 1.2 };
-    }
-    return undefined;
-  }, [sub, current?.iso3, current?.coordinates]);
-
   // Options for Name Easy Mode (filtered by continent per Task 2 fix)
   const nameOptions = useMemo(() => {
     if (!current || sub !== "name" || difficulty !== "easy") return [];
@@ -144,6 +135,23 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
     );
     return shuffle([current, ...others]);
   }, [current, sub, difficulty, continent]);
+
+  const handleNameSubmit = useCallback(
+    (isCorrect: boolean, country: Country) => {
+      unlock();
+      if (isCorrect) {
+        playCorrect();
+        setFindToast({ kind: "correct", name: country.name });
+      } else {
+        playWrong();
+        setFindToast({ kind: "wrong", name: country.name });
+      }
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setFindToast(null), 1200);
+      s.submit(isCorrect);
+    },
+    [playCorrect, playWrong, unlock, s],
+  );
 
   return (
     <div className="relative min-h-dvh pt-20">
@@ -188,9 +196,8 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                   }
                 : undefined
             }
-            disableHoverLabel={sub === "find"}
+            disableHoverLabel
             questionKey={current?.iso3 ?? null}
-            pointOfView={pov}
             activeContinent={continent === "All" ? null : continent}
           />
         </Suspense>
@@ -273,34 +280,20 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
             />
           </div>
 
-          {/* Find-mode: centered ripple feedback toast (replaces bottom bar) */}
-          {sub === "find" && (
-            <GlobeFeedbackToast toast={findToast} />
-          )}
+          {/* Centered ripple HUD feedback toast */}
+          <GlobeFeedbackToast toast={findToast} />
 
           {/* Answer Controls & Surface */}
           <div className="absolute bottom-8 inset-x-0 z-30 px-4">
-            {sub === "name" ? (
-              s.answerState === "idle" ? (
-                difficulty === "easy" ? (
-                  <EasyOptions
-                    options={nameOptions}
-                    targetIso3={current.iso3}
-                    onPick={(iso3) => s.submit(iso3 === current.iso3)}
-                  />
-                ) : (
-                  <HardInput target={current} onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })} />
-                )
-              ) : (
-                <FeedbackBar
-                  show
-                  state={s.answerState as "correct" | "wrong" | "revealed"}
-                  title={current.name}
-                  subtitle={`Capital: ${current.capital ?? "—"}`}
-                  onNext={() => s.next()}
-                  onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                  hideNext
+            {sub === "name" && s.answerState === "idle" ? (
+              difficulty === "easy" ? (
+                <EasyOptions
+                  options={nameOptions}
+                  targetIso3={current.iso3}
+                  onPick={(iso3) => handleNameSubmit(iso3 === current.iso3, current)}
                 />
+              ) : (
+                <HardInput target={current} onSubmit={(ok) => handleNameSubmit(ok, current)} />
               )
             ) : null}
           </div>

@@ -364,9 +364,9 @@ export default function Globe3D({
       }
 
       const iso3 = fid;
-      if (iso3 === effWrong) return `rgba(${COLOR_WRONG}, 0.22)`;
-      if (iso3 === effReveal) return `rgba(${COLOR_REVEAL}, 0.22)`;
-      if (iso3 === effHighlight) return `rgba(${COLOR_HIGHLIGHT}, 0.22)`;
+      if (iso3 === effWrong) return `rgba(${COLOR_WRONG}, 0.45)`;
+      if (iso3 === effReveal) return `rgba(${COLOR_REVEAL}, 0.55)`;
+      if (iso3 === effHighlight) return `rgba(${COLOR_HIGHLIGHT}, 0.60)`;
       if (iso3 === effHoverIso3) {
         const cont = continentByIso3.get(iso3);
         if (activeContinent && activeContinent !== "All" && cont !== activeContinent) {
@@ -412,9 +412,9 @@ export default function Globe3D({
       }
 
       const iso3 = fid;
-      if (iso3 === effWrong) return `rgba(${COLOR_WRONG}, 0.85)`;
-      if (iso3 === effReveal) return `rgba(${COLOR_REVEAL}, 0.85)`;
-      if (iso3 === effHighlight) return `rgba(${COLOR_HIGHLIGHT}, 0.85)`;
+      if (iso3 === effWrong) return `rgba(${COLOR_WRONG}, 0.95)`;
+      if (iso3 === effReveal) return `rgba(${COLOR_REVEAL}, 0.95)`;
+      if (iso3 === effHighlight) return "#34d399"; // Crisp high-visibility emerald stroke
       if (iso3 === effHoverIso3) {
         const cont = continentByIso3.get(iso3);
         if (activeContinent && activeContinent !== "All" && cont !== activeContinent) {
@@ -439,14 +439,14 @@ export default function Globe3D({
       const fid: string = f.properties.id ?? f.properties.iso3 ?? "";
 
       if (isOverlay) {
-        if (fid === effWrong || fid === effReveal || fid === effHighlight) return 0.012;
+        if (fid === effWrong || fid === effReveal || fid === effHighlight) return 0.025;
         return overlayAltitude as number;
       }
 
       const iso3 = fid;
       const inActive = !activeContinent || activeContinent === "All" || continentByIso3.get(iso3) === activeContinent;
       if (!inActive) return 0.002;
-      if (iso3 === effWrong || iso3 === effReveal || iso3 === effHighlight) return 0.02;
+      if (iso3 === effWrong || iso3 === effReveal || iso3 === effHighlight) return 0.035; // Distinct 3D extruded lift
       if (iso3 === effHoverIso3) return 0.012;
       return 0.004;
     },
