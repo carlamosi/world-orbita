@@ -1,4 +1,5 @@
-﻿import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface GlobeToast {
@@ -13,75 +14,82 @@ export function GlobeFeedbackToast({ toast }: { toast: GlobeToast | null }) {
     <AnimatePresence mode="wait">
       {toast && (
         <motion.div
-          key={`${toast.kind}-${toast.name}-${toast.subtitle ?? ""}`}
-          initial={{ opacity: 0, scale: 0.7, y: 0 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.85, y: -12 }}
-          transition={{ type: "spring", stiffness: 420, damping: 26 }}
-          className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center"
+          key={`${toast.kind}-${toast.name}-${toast.wrongName ?? ""}`}
+          initial={{ opacity: 0, y: -24, scale: 0.94 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -16, scale: 0.96 }}
+          transition={{ type: "spring", stiffness: 480, damping: 28 }}
+          className="pointer-events-none absolute top-48 md:top-44 inset-x-0 z-40 flex justify-center px-4"
         >
-          <div className="relative flex flex-col items-center gap-3">
-            {/* Ripple rings */}
-            <RippleRings kind={toast.kind} />
-
-            {/* Icon badge */}
-            <motion.div
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", stiffness: 500, damping: 20, delay: 0.04 }}
-              className={cn(
-                "relative z-10 flex h-16 w-16 items-center justify-center rounded-full border-2 backdrop-blur-xl shadow-2xl",
-                toast.kind === "correct"
-                  ? "border-emerald-400/80 bg-emerald-950/70 shadow-emerald-500/40"
-                  : "border-rose-400/80 bg-rose-950/70 shadow-rose-500/40",
-              )}
-            >
+          <div
+            className={cn(
+              "relative flex flex-col items-center gap-2 rounded-2xl px-6 py-3.5 backdrop-blur-2xl border shadow-2xl transition-all duration-300 max-w-md w-full",
+              toast.kind === "correct"
+                ? "bg-slate-950/80 border-emerald-500/40 shadow-[0_12px_40px_-8px_rgba(16,185,129,0.3)]"
+                : "bg-slate-950/85 border-rose-500/40 shadow-[0_12px_40px_-8px_rgba(244,63,94,0.3)]",
+            )}
+          >
+            {/* Header: Icon + Result Label */}
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "flex size-6 items-center justify-center rounded-full text-xs font-bold shrink-0",
+                  toast.kind === "correct"
+                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.5)]"
+                    : "bg-rose-500/20 text-rose-400 border border-rose-500/50 shadow-[0_0_12px_rgba(244,63,94,0.5)]",
+                )}
+              >
+                {toast.kind === "correct" ? <Check className="size-3.5 stroke-[3]" /> : <X className="size-3.5 stroke-[3]" />}
+              </div>
               <span
                 className={cn(
-                  "text-3xl font-bold leading-none",
-                  toast.kind === "correct" ? "text-emerald-300" : "text-rose-300",
+                  "font-mono text-xs uppercase tracking-[0.2em] font-semibold",
+                  toast.kind === "correct" ? "text-emerald-400" : "text-rose-400",
                 )}
               >
-                {toast.kind === "correct" ? "✓" : "✕"}
+                {toast.kind === "correct" ? "Correct" : "Incorrect"}
               </span>
-            </motion.div>
+            </div>
 
-            {/* Country/Capital name pill */}
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.12, duration: 0.3 }}
-              className={cn(
-                "relative z-10 rounded-full border px-5 py-2.5 backdrop-blur-xl shadow-xl flex flex-col items-center",
-                toast.kind === "correct"
-                  ? "border-emerald-500/40 bg-emerald-950/85 shadow-emerald-500/20"
-                  : "border-rose-500/40 bg-rose-950/85 shadow-rose-500/20",
-              )}
-            >
-              <p
-                className={cn(
-                  "font-display text-xl font-semibold tracking-tight text-center",
-                  toast.kind === "correct" ? "text-emerald-200" : "text-rose-200",
+            {/* Content: Target and Differential Comparison */}
+            {toast.kind === "correct" ? (
+              <div className="flex flex-col items-center">
+                <span className="font-display text-lg font-bold text-white tracking-tight">
+                  {toast.name}
+                </span>
+                {toast.subtitle && (
+                  <span className="text-[12px] font-mono text-white/60">
+                    {toast.subtitle}
+                  </span>
                 )}
-              >
-                {toast.name}
-              </p>
-              {toast.subtitle && (
-                <p
-                  className={cn(
-                    "text-xs font-mono tracking-wider opacity-90",
-                    toast.kind === "correct" ? "text-emerald-300/90" : "text-rose-300/90",
-                  )}
-                >
-                  {toast.subtitle}
-                </p>
-              )}
-              {toast.kind === "wrong" && toast.wrongName && (
-                <p className="mt-0.5 text-center text-[11px] font-mono uppercase tracking-wider text-rose-400/90">
-                  You clicked {toast.wrongName}
-                </p>
-              )}
-            </motion.div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-1.5 w-full">
+                {toast.wrongName && (
+                  <div className="flex items-center justify-between w-full px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                    <span className="text-[11px] font-mono text-rose-300/70 uppercase tracking-wider">
+                      You clicked
+                    </span>
+                    <span className="text-xs font-semibold text-rose-200">
+                      {toast.wrongName}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between w-full px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                  <span className="text-[11px] font-mono text-emerald-300/70 uppercase tracking-wider">
+                    Correct target
+                  </span>
+                  <span className="text-xs font-semibold text-emerald-200">
+                    {toast.name}
+                  </span>
+                </div>
+                {toast.subtitle && (
+                  <span className="text-[11px] font-mono text-white/50">
+                    {toast.subtitle}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </motion.div>
       )}
@@ -89,34 +97,3 @@ export function GlobeFeedbackToast({ toast }: { toast: GlobeToast | null }) {
   );
 }
 
-function RippleRings({ kind }: { kind: "correct" | "wrong" }) {
-  const color = kind === "correct" ? "rgba(16,185,129," : "rgba(244,63,94,";
-  const rings = [0, 1, 2];
-
-  return (
-    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-      {rings.map((i) => (
-        <motion.div
-          key={i}
-          className="absolute rounded-full border"
-          style={{
-            borderColor: `${color}0.7)`,
-            boxShadow: `0 0 20px ${color}0.3)`,
-          }}
-          initial={{ width: 64, height: 64, opacity: 0.9 }}
-          animate={{
-            width: [64, 220 + i * 80],
-            height: [64, 220 + i * 80],
-            opacity: [0.9, 0],
-          }}
-          transition={{
-            duration: 1.1,
-            delay: i * 0.18,
-            ease: "easeOut",
-            repeat: 0,
-          }}
-        />
-      ))}
-    </div>
-  );
-}

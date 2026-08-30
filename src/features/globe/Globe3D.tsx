@@ -973,29 +973,61 @@ export default function Globe3D({
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 5px 13px;
-          background: rgba(22, 10, 15, 0.85);
-          border: 1px solid rgba(244, 63, 94, 0.75);
-          box-shadow: 0 0 8px rgba(244, 63, 94, 0.6), 0 2px 6px rgba(0,0,0,0.4);
+          padding: 6px 14px;
+          background: rgba(15, 6, 10, 0.92);
+          border: 1.5px solid rgba(244, 63, 94, 0.9);
+          box-shadow: 0 0 16px rgba(244, 63, 94, 0.5), 0 4px 12px rgba(0,0,0,0.6);
           border-radius: 9999px;
-          color: #fda4af;
-          font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 12px;
-          font-weight: 600;
+          color: #fff;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          font-size: 13px;
+          font-weight: 700;
           letter-spacing: 0.02em;
-          backdrop-filter: blur(8px);
+          backdrop-filter: blur(12px);
           white-space: nowrap;
-          animation: pulse 1.5s ease-out infinite;
+          animation: floatPill 2s ease-in-out infinite;
         ">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;background:rgba(244,63,94,0.2);border-radius:50%;color:#fb7185;font-size:10px;font-weight:800;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:rgba(244,63,94,0.3);border-radius:50%;color:#fb7185;font-size:11px;font-weight:900;">
             ✕
           </span>
-          <span>${p.name}</span>
+          <span style="color:#fecdd3;">${p.name}</span>
         </div>
-        <style>@keyframes pulse {0% {transform: scale(0.95); opacity:0.9;} 50% {transform: scale(1.05); opacity:1;} 100% {transform: scale(0.95); opacity:0.9;}}</style>
+        <style>
+          @keyframes floatPill {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+          }
+        </style>
+      `;
+    } else if (p.id.startsWith("reveal-")) {
+      // On mistake / reveal: highlight the true target location in green 3D badge as well
+      el.innerHTML = `
+        <div style="
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 14px;
+          background: rgba(4, 18, 12, 0.92);
+          border: 1.5px solid rgba(16, 185, 129, 0.9);
+          box-shadow: 0 0 16px rgba(16, 185, 129, 0.5), 0 4px 12px rgba(0,0,0,0.6);
+          border-radius: 9999px;
+          color: #fff;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          backdrop-filter: blur(12px);
+          white-space: nowrap;
+          animation: floatPill 2s ease-in-out infinite;
+        ">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:rgba(16,185,129,0.3);border-radius:50%;color:#6ee7b7;font-size:11px;font-weight:900;">
+            ✓
+          </span>
+          <span style="color:#a7f3d0;">${p.name}</span>
+        </div>
       `;
     } else {
-      // No badge for correct answers – render an empty invisible element.
+      // Normal correct answer without reveal – keep minimal
       el.style.display = "none";
     }
     return el;
