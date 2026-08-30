@@ -180,9 +180,9 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                         playCorrect();
                         setFindToast({ kind: "correct", name: current.name });
                       }
-                      // Auto-dismiss toast
+                      // Auto-dismiss toast snappy and visual
                       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-                      toastTimerRef.current = setTimeout(() => setFindToast(null), isCorrect ? 1100 : 2600);
+                      toastTimerRef.current = setTimeout(() => setFindToast(null), 1200);
                       s.submit(isCorrect);
                     }
                   }

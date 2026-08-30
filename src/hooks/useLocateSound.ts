@@ -1,4 +1,4 @@
-﻿/**
+/**
  * useLocateSound — Web Audio API synth sounds for Locate mode feedback.
  * No external audio files needed. Generates pleasant tones procedurally.
  */
@@ -45,22 +45,50 @@ export function playCorrect() {
   });
 }
 
-/** Descending buzz — wrong answer */
+/** Descending buzz / error strike — wrong answer */
 export function playWrong() {
   const ac = ctx();
   if (!ac) return;
   const now = ac.currentTime;
-  const osc = ac.createOscillator();
-  const gain = ac.createGain();
-  osc.connect(gain);
-  gain.connect(ac.destination);
-  osc.type = "sawtooth";
-  osc.frequency.setValueAtTime(210, now);
-  osc.frequency.exponentialRampToValueAtTime(105, now + 0.38);
-  gain.gain.setValueAtTime(0.15, now);
-  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-  osc.start(now);
-  osc.stop(now + 0.5);
+
+  // Layer 1: Low fundamental thump for physical impact
+  const subOsc = ac.createOscillator();
+  const subGain = ac.createGain();
+  subOsc.connect(subGain);
+  subGain.connect(ac.destination);
+  subOsc.type = "sine";
+  subOsc.frequency.setValueAtTime(130, now);
+  subOsc.frequency.exponentialRampToValueAtTime(55, now + 0.28);
+  subGain.gain.setValueAtTime(0.35, now);
+  subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+  subOsc.start(now);
+  subOsc.stop(now + 0.35);
+
+  // Layer 2: Dissonant dual-saw interval (tritone / minor second clash)
+  const tones = [260, 245];
+  tones.forEach((freq) => {
+    const osc = ac.createOscillator();
+    const filter = ac.createBiquadFilter();
+    const gain = ac.createGain();
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ac.destination);
+
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.65, now + 0.32);
+
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(800, now);
+    filter.frequency.exponentialRampToValueAtTime(200, now + 0.32);
+
+    gain.gain.setValueAtTime(0.22, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+    osc.start(now);
+    osc.stop(now + 0.38);
+  });
 }
 
 export function useLocateSound() {

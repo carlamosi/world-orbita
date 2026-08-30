@@ -136,7 +136,7 @@ export default function CapitalsPage() {
                     });
                   }
                   if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-                  toastTimerRef.current = setTimeout(() => setLocatorToast(null), isCorrect ? 1100 : 2600);
+                  toastTimerRef.current = setTimeout(() => setLocatorToast(null), 1200);
                   s.submit(isCorrect);
                 }
               }}

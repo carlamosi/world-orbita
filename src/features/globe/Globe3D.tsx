@@ -793,30 +793,33 @@ export default function Globe3D({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveQuality]);
 
-  // ---- Dual Ring Shockwave (Error / Success) ---------------------------
+  // ---- Single-State Ripple Shockwave (Error vs Success Isolation) ----
   const rings = useMemo(() => {
     if (effectiveQuality === "static") return [];
     const res = [];
+
+    // Prioritize error state exclusively: when wrong, ONLY show the red mistake ripple
     if (effWrong) {
       const c = countryByIso3.get(effWrong);
       if (c) {
-        // Three red rings — staggered for dramatic shockwave
         res.push(
-          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 5, propagationSpeed: 5, repeatPeriod: 700, color: COLOR_WRONG },
-          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 9, propagationSpeed: 3.5, repeatPeriod: 800, color: COLOR_WRONG },
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 6, propagationSpeed: 4.5, repeatPeriod: 600, color: COLOR_WRONG },
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 10, propagationSpeed: 3.2, repeatPeriod: 750, color: COLOR_WRONG },
         );
       }
+      return res; // NEVER mix with green reveal rings simultaneously
     }
+
+    // Success / Reveal state
     const target = effReveal ?? effHighlight;
     if (target) {
       const c = countryByIso3.get(target);
       if (c) {
         const isReveal = target === effReveal;
-        // Three green rings — cascading shockwave
         res.push(
-          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 4, propagationSpeed: 6, repeatPeriod: isReveal ? 700 : 1000, color: COLOR_HIGHLIGHT },
-          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 8, propagationSpeed: 4, repeatPeriod: isReveal ? 800 : 1100, color: COLOR_HIGHLIGHT },
-          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 13, propagationSpeed: 2.5, repeatPeriod: isReveal ? 900 : 1200, color: COLOR_HIGHLIGHT },
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 4, propagationSpeed: 5.5, repeatPeriod: isReveal ? 700 : 1000, color: COLOR_HIGHLIGHT },
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 8, propagationSpeed: 3.8, repeatPeriod: isReveal ? 800 : 1100, color: COLOR_HIGHLIGHT },
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 12, propagationSpeed: 2.4, repeatPeriod: isReveal ? 900 : 1200, color: COLOR_HIGHLIGHT },
         );
       }
     }
