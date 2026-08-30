@@ -118,15 +118,16 @@ export function HardcoreRunner({
 
   const missedItems = useMemo(() => {
     return state.queue
-      .map((item, idx) => ({ item, ans: state.answers[idx] }))
+      .map((q, i) => ({ q, ans: state.answers[i] }))
       .filter(({ ans }) => ans === "wrong")
-      .map(({ item }) => ({
-        id: item.id,
-        prompt: item.countryName,
-        answer: item.type === "countryToCap" ? (item.capital ?? "—") : item.countryName,
-        flagIso2: COUNTRIES.find((c) => c.iso3 === item.iso3)?.iso2,
-        subMode: item.type,
-      }));
+      .map(({ q }) => {
+        const c = COUNTRIES.find((country) => country.iso3 === q.iso3);
+        return {
+          label: c?.name ?? q.iso3,
+          detail: c?.capital ?? undefined,
+          iso2: c?.iso2,
+        };
+      });
   }, [state.queue, state.answers]);
 
   if (finished) {
@@ -135,10 +136,12 @@ export function HardcoreRunner({
         <SessionEnd
           show
           score={state.score}
+          masteredCount={state.correct}
           correct={state.correct}
           total={state.queue.length}
           wrong={state.wrong}
-          masteredCount={state.correct}
+          bestCombo={state.bestCombo}
+          durationMs={Date.now() - state.startedAt}
           missedItems={missedItems}
           hasNextBlock={false}
           onReplay={() => {

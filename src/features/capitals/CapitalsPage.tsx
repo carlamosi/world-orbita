@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState, useCallback } from "react";
-import { Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
-import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
+import { COUNTRIES } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -12,13 +11,11 @@ import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { HardInput } from "@/features/engine/HardInput";
 import { Button } from "@/components/ui/orbita-button";
 import { Badge } from "@/components/ui/orbita-badge";
-import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import {
   RegionSelect,
   useContinentPref,
   type ContinentChoice,
 } from "@/features/engine/ContinentSelect";
-import { cn } from "@/lib/utils";
 import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
 import { getPref, setPref } from "@/lib/db/repo";
@@ -28,48 +25,38 @@ const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 const useCapSession = createSessionStore({ mode: "capital", skill: "capital" });
 
 type SubMode = "countryToCap" | "capToCountry" | "locator";
-type Mode = "easy" | "hard";
 
 const SUB_MODE_OPTIONS = [
-  { value: "countryToCap" as const, label: "Country → Capital" },
-  { value: "capToCountry" as const, label: "Capital → Country" },
+  { value: "countryToCap" as const, label: "Country → Cap" },
+  { value: "capToCountry" as const, label: "Cap → Country" },
   { value: "locator" as const, label: "Globe Locator" },
-];
-
-const MODE_OPTIONS = [
-  { value: "easy" as const, label: "Easy" },
-  { value: "hard" as const, label: "Hard" },
 ];
 
 export default function CapitalsPage() {
   const s = useCapSession();
   const [sub, setSub] = useState<SubMode>("countryToCap");
-  const [mode, setMode] = useState<Mode>("easy");
   const [continent, setContinent] = useContinentPref();
   const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
 
-  // Persist preferences
+  // activeSub is always the chosen sub-mode (mixed removed)
+  const activeSub = sub;
+
+  // Persist sub-mode preference
   useEffect(() => {
-    getPref("capitals.sub").then((sb) => {
-      if (sb === "countryToCap" || sb === "capToCountry" || sb === "locator") {
-        setSub(sb as SubMode);
-      }
-    });
-    getPref("capitals.mode").then((m) => m && setMode(m as Mode));
+    getPref("capitals.sub").then((sb) => sb && setSub(sb as SubMode));
   }, []);
   useEffect(() => {
     setPref("capitals.sub", sub);
-    setPref("capitals.mode", mode);
-  }, [sub, mode]);
+  }, [sub]);
 
   // Restart on format changes
   useEffect(() => {
     setLastWrongIso3(null);
     void s.start({ continent: continent === "All" ? undefined : continent, subMode: sub });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [continent, sub, mode]);
+  }, [continent, sub]);
 
   useAutoAdvance({
     answerState: s.answerState,
@@ -91,23 +78,13 @@ export default function CapitalsPage() {
 
   const valid = current && current.capital;
 
-  const options = useMemo(() => {
-    if (!current) return [];
-    const others = pickRandomCountries(
-      3,
-      new Set([current.iso3]),
-      continent === "All" ? undefined : continent,
-    ).filter((c) => c.capital);
-    return shuffle([current, ...others].slice(0, 4));
-  }, [current, continent]);
-
   const pov = useMemo(() => {
-    if (sub !== "locator" || !current) return undefined;
+    if (activeSub !== "locator" || !current) return undefined;
     if (s.answerState === "idle") {
       return { lat: current.coordinates[0], lng: current.coordinates[1] };
     }
     return undefined;
-  }, [sub, s.answerState, current?.iso3, current?.coordinates]);
+  }, [activeSub, s.answerState, current?.iso3, current?.coordinates]);
 
   /** Unified Top Toolbar (Responsive Left/Right Split) */
   const Toolbar = (
@@ -121,14 +98,11 @@ export default function CapitalsPage() {
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <ModeDropdown options={SUB_MODE_OPTIONS} value={sub} onChange={setSub} />
-        {sub === "countryToCap" && (
-          <ModeDropdown options={MODE_OPTIONS} value={mode} onChange={setMode} />
-        )}
       </div>
     </div>
   );
 
-  if (sub === "locator") {
+  if (activeSub === "locator") {
     return (
       <div className="relative min-h-dvh pt-20">
         <div className="absolute inset-0">
@@ -189,13 +163,14 @@ export default function CapitalsPage() {
         <SessionEnd
           show={finished}
           score={s.score}
+          masteredCount={s.masteredCount}
           correct={s.correct}
           total={s.queue.length}
           wrong={s.wrong}
-          masteredCount={s.masteredCount}
+          bestCombo={s.bestCombo}
+          durationMs={(s.endedAt ?? 0) - s.startedAt}
           missedItems={s.missedItems}
-          hasNextBlock={true}
-          onNextBlock={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
+          onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
         />
       </div>
     );
@@ -213,7 +188,7 @@ export default function CapitalsPage() {
               index={s.index}
               total={s.queue.length}
               title={
-                sub === "countryToCap" ? (
+                activeSub === "countryToCap" ? (
                   <>What's the capital of <span className="text-glow-cyan">{current.name}</span>?</>
                 ) : (
                   <>Which country's capital is <span className="text-glow-cyan">{current.capital}</span>?</>
@@ -222,24 +197,14 @@ export default function CapitalsPage() {
             />
 
             <div className="w-full flex justify-center">
-              {sub === "countryToCap" && mode === "easy" ? (
-                <ChoiceGrid
-                  options={options}
-                  sub={sub}
+              <div className="w-full max-w-md mx-auto">
+                <HardInput
                   target={current}
-                  disabled={s.answerState !== "idle"}
-                  onPick={(iso3) => s.submit(iso3 === current.iso3)}
+                  matchTarget={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
+                  onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                  placeholder={activeSub === "countryToCap" ? "Type the capital…" : "Type the country…"}
                 />
-              ) : (
-                <div className="w-full max-w-md mx-auto">
-                  <HardInput
-                    target={current}
-                    matchTarget={sub === "countryToCap" ? (current.capital ?? undefined) : current.name}
-                    onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
-                    placeholder={sub === "countryToCap" ? "Type the capital…" : "Type the country…"}
-                  />
-                </div>
-              )}
+              </div>
             </div>
           </div>
 
@@ -273,77 +238,17 @@ export default function CapitalsPage() {
       <SessionEnd
         show={finished}
         score={s.score}
+        masteredCount={s.masteredCount}
         correct={s.correct}
         total={s.queue.length}
         wrong={s.wrong}
-        masteredCount={s.masteredCount}
+        bestCombo={s.bestCombo}
+        durationMs={(s.endedAt ?? 0) - s.startedAt}
         missedItems={s.missedItems}
-        hasNextBlock={true}
-        onNextBlock={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
+        onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
       />
     </div>
   );
-}
-
-function ChoiceGrid({
-  options,
-  sub,
-  target,
-  disabled,
-  onPick,
-}: {
-  options: Country[];
-  sub: SubMode;
-  target: Country;
-  disabled: boolean;
-  onPick: (iso3: string) => void;
-}) {
-  const hotkeyItems = useMemo(
-    () => (disabled ? [] : options.map((o) => ({ id: o.iso3 }))),
-    [options, disabled],
-  );
-  const onPickById = useCallback((id: string) => onPick(id), [onPick]);
-  useAnswerHotkeys(hotkeyItems, onPickById);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={spring.soft}
-      className="grid grid-cols-2 gap-3 w-full max-w-2xl mx-auto"
-    >
-      {options.map((o, i) => (
-        <button
-          key={o.iso3}
-          onClick={() => onPick(o.iso3)}
-          disabled={disabled}
-          className={cn(
-            "glass rounded-2xl px-5 py-4 text-left transition-all duration-200",
-            "hover:border-white/25 hover:-translate-y-0.5",
-            "disabled:opacity-60 disabled:hover:translate-y-0",
-            "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
-          )}
-        >
-          <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">
-            {i + 1}
-          </div>
-          <div className="font-display text-lg text-white tracking-tight">
-            {sub === "countryToCap" ? o.capital ?? "—" : o.name}
-          </div>
-        </button>
-      ))}
-      <input type="hidden" data-target={target.iso3} />
-    </motion.div>
-  );
-}
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j]!, a[i]!];
-  }
-  return a;
 }
 
 function GlobeFallback() {

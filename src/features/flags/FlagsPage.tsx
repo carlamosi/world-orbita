@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
-import { pickRandomCountries } from "@/lib/countries";
+import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -99,19 +98,17 @@ export default function FlagsPage() {
         <>
           {s.loading && !current ? (
             <div className="flex items-center justify-center min-h-[200px]">
-              <span className="text-white">Loading…</span>
+              <div className="size-8 rounded-full border-2 border-white/10 border-t-[color:var(--cyan)] animate-spin" />
             </div>
           ) : (
             <>
               {/* Minimized HUD Toolbar */}
               <div className="w-full max-w-5xl mx-auto px-4 md:px-6 mb-4 z-20 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <RegionSelect
-                    value={continent}
-                    onChangeContinent={restartWithContinent}
-                    spainSkill="flags"
-                  />
-                </div>
+                <RegionSelect
+                  value={continent}
+                  onChangeContinent={restartWithContinent}
+                  spainSkill="flags"
+                />
                 <ModeDropdown
                   options={SUB_MODE_OPTIONS}
                   value={sub}
@@ -135,18 +132,20 @@ export default function FlagsPage() {
                 />
 
                 <div className="w-full flex justify-center">
-                  {sub === "flagToCountry" ? (
+                  {sub === "flagToCountry" && current ? (
                     <FlagToCountry
                       target={current}
                       options={options}
                       disabled={s.answerState !== "idle"}
-                      onPick={(iso3) => s.submit(iso3 === current?.iso3)}
+                      onPick={(iso3) => s.submit(iso3 === current.iso3)}
                     />
-                  ) : (
-                    <FlagToType
-                      target={current}
-                      onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
-                    />
+                  ) : sub === "flagToCountry" ? null : (
+                    current ? (
+                      <FlagToType
+                        target={current}
+                        onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                      />
+                    ) : null
                   )}
                 </div>
               </div>
@@ -173,13 +172,14 @@ export default function FlagsPage() {
       <SessionEnd
         show={finished}
         score={s.score}
+        masteredCount={s.masteredCount}
         correct={s.correct}
         total={s.queue.length}
         wrong={s.wrong}
-        masteredCount={s.masteredCount}
+        bestCombo={s.bestCombo}
+        durationMs={(s.endedAt ?? 0) - s.startedAt}
         missedItems={s.missedItems}
-        hasNextBlock={true}
-        onNextBlock={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
+        onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
       />
     </div>
   );

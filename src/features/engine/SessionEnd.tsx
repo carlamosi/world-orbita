@@ -1,64 +1,70 @@
 import { useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Link } from "@tanstack/react-router";
-import { useLiveQuery } from "dexie-react-hooks";
 import { Badge } from "@/components/ui/orbita-badge";
 import { Button } from "@/components/ui/orbita-button";
 import { FlagImage } from "@/components/ui/FlagImage";
-import { spring } from "@/lib/motion";
+import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db/orbita-db";
-import { currentStreak, dateKey } from "@/lib/streak";
-import type { MissedItem } from "@/features/engine/useSession";
+import { dateKey, currentStreak } from "@/lib/streak";
+import { spring } from "@/lib/motion";
 
-export interface SessionEndProps {
+export interface MissedItem {
+  id?: string;
+  label?: string;
+  prompt?: string;
+  detail?: string;
+  answer?: string;
+  iso2?: string;
+  flagIso2?: string;
+  subMode?: string;
+}
+
+interface Props {
   show: boolean;
   score?: number;
+  masteredCount?: number;
   correct: number;
   total: number;
   wrong?: number;
   bestCombo?: number;
   durationMs?: number;
-  masteredCount?: number;
+  showTime?: boolean;
+  isSpeedMode?: boolean;
+  qpm?: number;
   missedItems?: MissedItem[];
   hasNextBlock?: boolean;
   onNextBlock?: () => void;
   onReplay?: () => void;
-  isSpeedMode?: boolean;
-  qpm?: number;
 }
 
 export function SessionEnd({
   show,
-  score = 0,
+  score,
+  masteredCount,
   correct,
   total,
-  wrong: rawWrong,
   durationMs = 0,
-  masteredCount: customMasteredCount,
+  showTime = false,
+  isSpeedMode = false,
+  qpm,
   missedItems = [],
   hasNextBlock = true,
   onNextBlock,
   onReplay,
-  isSpeedMode = false,
-  qpm,
-}: SessionEndProps) {
-  // Query sessions from Dexie to compute distinct calendar day streak
+}: Props) {
   const sessions = useLiveQuery(() => db().gameSessions.toArray(), []) ?? [];
-  const activeDays = useMemo(() => {
-    const set = new Set(sessions.map((s) => dateKey(s.createdAt)));
-    // Include today since the current session just finished
-    set.add(dateKey());
-    return set;
+  const streak = useMemo(() => {
+    const activeDays = new Set(sessions.map((s) => dateKey(s.createdAt)));
+    activeDays.add(dateKey());
+    return currentStreak(activeDays);
   }, [sessions]);
 
-  const streak = useMemo(() => currentStreak(activeDays, dateKey()), [activeDays]);
-
   const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+  const effectiveMastered = masteredCount ?? correct;
   const seconds = Math.round(durationMs / 100) / 10;
-  const masteredCount = customMasteredCount ?? correct;
-  const wrongCount = rawWrong ?? missedItems.length;
-
   const handleNext = onNextBlock ?? onReplay;
+  const displayTime = isSpeedMode || showTime;
 
   return (
     <AnimatePresence>
@@ -67,115 +73,105 @@ export function SessionEnd({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 backdrop-blur-md bg-black/60 overflow-y-auto"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 sm:px-6 backdrop-blur-md bg-black/60 overflow-y-auto py-8"
         >
           <motion.div
             initial={{ y: 30, scale: 0.96, opacity: 0 }}
             animate={{ y: 0, scale: 1, opacity: 1 }}
             transition={spring.soft}
-            className="glass-strong rounded-3xl p-6 sm:p-8 md:p-10 max-w-lg w-full text-center my-auto shadow-[0_25px_70px_-15px_rgba(0,0,0,0.7)] border border-white/10"
+            className="glass-strong rounded-3xl p-6 sm:p-8 max-w-lg w-full text-center my-auto border border-white/15 shadow-2xl"
           >
-            {/* Top Badge & Streak */}
             <div className="flex items-center justify-center gap-2">
-              <Badge tone={masteredCount > 0 ? "cyan" : "muted"}>Session Complete</Badge>
-              {streak > 0 && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-mono bg-amber-400/10 border border-amber-400/25 text-amber-300">
-                  <span>🔥</span>
-                  <span>
-                    {streak} {streak === 1 ? "day" : "days"} streak
-                  </span>
-                </span>
+              <Badge tone="cyan">{isSpeedMode ? "Run complete" : "Block complete"}</Badge>
+              <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-mono tracking-wider bg-amber-500/15 border border-amber-500/30 text-amber-300">
+                🔥 {streak} {streak === 1 ? "day streak" : "day streak"}
+              </span>
+            </div>
+
+            {/* Headline learning-relevant metric */}
+            <div className="mt-4 font-display text-4xl sm:text-5xl text-white tracking-tight text-glow-violet">
+              {isSpeedMode ? (
+                <>
+                  {score ?? effectiveMastered}{" "}
+                  <span className="text-[color:var(--cyan)] text-2xl font-sans font-normal">pts</span>
+                </>
+              ) : (
+                <>
+                  {effectiveMastered}{" "}
+                  <span className="text-[color:var(--cyan)] text-2xl font-sans font-normal">mastered</span>
+                </>
               )}
             </div>
-
-            {/* Primary Headline Metric: Learning-relevant Mastery */}
-            <div className="mt-5">
-              <div className="font-display text-5xl md:text-6xl font-bold text-white tracking-tight text-glow-violet">
-                {masteredCount}
-              </div>
-              <div className="mt-1 text-sm md:text-base text-white/70 font-medium">
-                {masteredCount === 1 ? "concept mastered today" : "concepts mastered today"}
-              </div>
-              <div className="mt-1 text-xs font-mono text-white/40">
-                {correct} of {total} correct ({accuracy}%)
-              </div>
+            <div className="mt-2 text-white/55 text-sm">
+              {correct} of {total} correct · {accuracy}% accuracy
+              {displayTime && ` · ${seconds}s`}
             </div>
 
-            {/* Stat Cards Grid */}
+            {/* Key stats row */}
             <div className="mt-6 grid grid-cols-3 gap-2.5 font-mono text-[11px] uppercase tracking-wider text-white/55">
               <Stat label="Accuracy" value={`${accuracy}%`} />
-              <Stat
-                label="Consistency"
-                value={`${streak}d`}
-                highlight={streak >= 3}
-              />
+              <Stat label="Day Streak" value={`🔥 ${streak}d`} />
               {isSpeedMode ? (
-                <Stat label="Speed" value={`${qpm ?? Math.round((total / Math.max(1, durationMs)) * 60000)} QPM`} />
+                <Stat
+                  label="Speed"
+                  value={`${qpm ?? Math.round((total / Math.max(1, durationMs)) * 60_000)} QPM`}
+                />
               ) : (
-                <Stat label="Score" value={score} />
+                <Stat label="Missed" value={missedItems.length > 0 ? missedItems.length : "0"} />
               )}
             </div>
 
-            {/* In Speed Mode: Show elapsed time */}
-            {isSpeedMode && (
-              <div className="mt-3 text-xs font-mono text-white/50">
-                Elapsed: <span className="text-white font-medium">{seconds}s</span> · Points:{" "}
-                <span className="text-[color:var(--cyan)] font-medium">{score}</span>
+            {/* Missed items list */}
+            {missedItems.length > 0 ? (
+              <div className="mt-6 text-left">
+                <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40 mb-2 px-1">
+                  Missed Items ({missedItems.length})
+                </div>
+                <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                  {missedItems.map((item, idx) => {
+                    const flagCode = item.flagIso2 ?? item.iso2;
+                    const title = item.prompt ?? item.label ?? "";
+                    const detail = item.answer ?? item.detail ?? "";
+                    return (
+                      <div
+                        key={item.id ?? idx}
+                        className="glass rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-3 text-xs border border-white/10"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {flagCode && (
+                            <FlagImage
+                              iso2={flagCode}
+                              alt=""
+                              className="w-5 h-3.5 shrink-0 rounded-[2px]"
+                            />
+                          )}
+                          <span className="text-white font-medium truncate">{title}</span>
+                        </div>
+                        {detail && (
+                          <span className="text-[color:var(--coral)]/85 font-mono text-[11px] shrink-0">
+                            {detail}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-6 p-3 rounded-2xl bg-[color:var(--neon)]/10 border border-[color:var(--neon)]/25 text-[color:var(--neon)] text-xs font-mono">
+                ✨ Flawless round! All {total} items answered correctly.
               </div>
             )}
 
-            {/* Missed Items Section */}
-            <div className="mt-6 text-left">
-              {missedItems.length > 0 ? (
-                <div className="glass rounded-2xl p-4 border border-white/10">
-                  <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-white/60 mb-3">
-                    <span>Missed Items ({missedItems.length})</span>
-                    <span className="text-[10px] text-white/40">Review to reinforce</span>
-                  </div>
-                  <div className="max-h-44 overflow-y-auto space-y-2 pr-1 divide-y divide-white/5">
-                    {missedItems.map((item, idx) => (
-                      <div
-                        key={`${item.id}-${idx}`}
-                        className="pt-2 first:pt-0 flex items-center justify-between gap-3 text-xs md:text-sm"
-                      >
-                        <div className="flex items-center gap-2 min-w-0 truncate">
-                          {item.flagIso2 && (
-                            <FlagImage
-                              iso2={item.flagIso2}
-                              alt=""
-                              className="w-5 h-3.5 rounded-xs shrink-0 object-cover shadow-sm"
-                            />
-                          )}
-                          <span className="text-white/80 font-medium truncate">{item.prompt}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 font-medium">
-                          <span className="text-white/30">→</span>
-                          <span className="text-[color:var(--cyan)] text-glow-cyan">{item.answer}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : wrongCount === 0 ? (
-                <div className="glass rounded-2xl p-3.5 text-center text-xs md:text-sm text-[color:var(--neon)] flex items-center justify-center gap-2 border border-[color:var(--neon)]/20 bg-[color:var(--neon)]/5">
-                  <span>✨</span>
-                  <span className="font-medium">Flawless round! Zero mistakes.</span>
-                </div>
-              ) : null}
-            </div>
-
-            {/* Action Buttons: Next 10 → and Done for today */}
-            <div className="mt-8 flex gap-3 justify-center">
+            {/* Action buttons */}
+            <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
               {hasNextBlock && handleNext && (
-                <Button onClick={handleNext} className="flex-1">
+                <Button onClick={handleNext} className="w-full sm:w-auto font-medium">
                   Next 10 →
                 </Button>
               )}
-              <Link to="/" className={hasNextBlock && handleNext ? "flex-1" : "w-full"}>
-                <Button
-                  variant={hasNextBlock && handleNext ? "secondary" : "primary"}
-                  className="w-full"
-                >
+              <Link to="/" className="w-full sm:w-auto">
+                <Button variant="secondary" className="w-full">
                   Done for today
                 </Button>
               </Link>
@@ -187,25 +183,13 @@ export function SessionEnd({
   );
 }
 
-function Stat({
-  label,
-  value,
-  highlight = false,
-}: {
-  label: string;
-  value: string | number;
-  highlight?: boolean;
-}) {
+function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="glass rounded-xl py-3 px-2 border border-white/5">
-      <div
-        className={`font-display text-base normal-case tracking-tight ${
-          highlight ? "text-amber-300 font-semibold" : "text-white"
-        }`}
-      >
+    <div className="glass rounded-xl py-3">
+      <div className="font-display text-base text-white normal-case tracking-tight">
         {value}
       </div>
-      <div className="mt-1 text-[10px] text-white/45">{label}</div>
+      <div className="mt-1 text-[10px]">{label}</div>
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useMemo, useCallback, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { COUNTRIES, COUNTRY_BY_ISO3, pickRandomCountries } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
@@ -184,8 +183,43 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               <RegionSelect
                 value={continent}
                 onChangeContinent={restartWithContinent}
-                spainSkill={sub === "name" ? "name" : "locate"}
+                spainSkill="locate"
               />
+              {sub === "find" && (
+                <div
+                  className="glass rounded-full p-1 flex flex-nowrap items-center gap-0.5"
+                  role="group"
+                  aria-label="Session length"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSessionMode("quick")}
+                    aria-pressed={sessionMode === "quick"}
+                    className={cn(
+                      "px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider transition-colors",
+                      sessionMode === "quick"
+                        ? "bg-white/15 text-white"
+                        : "text-white/55 hover:text-white",
+                    )}
+                  >
+                    10 Q
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSessionMode("complete")}
+                    aria-pressed={sessionMode === "complete"}
+                    title={`All ${continentCount} countries in ${continent === "All" ? "the world" : continent}`}
+                    className={cn(
+                      "px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider transition-colors",
+                      sessionMode === "complete"
+                        ? "bg-white/15 text-white"
+                        : "text-white/55 hover:text-white",
+                    )}
+                  >
+                    All {continentCount}
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
@@ -264,13 +298,15 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
       <SessionEnd
         show={finished}
         score={s.score}
+        masteredCount={s.masteredCount}
         correct={s.correct}
         total={s.queue.length}
         wrong={s.wrong}
-        masteredCount={s.masteredCount}
+        bestCombo={s.bestCombo}
+        durationMs={(s.endedAt ?? 0) - s.startedAt}
         missedItems={s.missedItems}
-        hasNextBlock={sessionMode === "quick"}
-        onNextBlock={() => startSession(continent, sub, sessionMode)}
+        hasNextBlock={sessionMode !== "complete"}
+        onReplay={() => startSession(continent, sub, sessionMode)}
       />
     </div>
   );

@@ -1,22 +1,21 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSpeedRuntime, type SpeedMode } from "./speedRuntimeStore";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { Button } from "@/components/ui/orbita-button";
 import { Badge } from "@/components/ui/orbita-badge";
 import { FlagImage } from "@/components/ui/FlagImage";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "@/lib/db/orbita-db";
+import { dateKey, currentStreak } from "@/lib/streak";
 import {
   ContinentSelect,
   useContinentPref,
 } from "@/features/engine/ContinentSelect";
 import { cn } from "@/lib/utils";
 import { spring } from "@/lib/motion";
-import { SessionEnd } from "@/features/engine/SessionEnd";
 import type { Country } from "@/types/country";
 import { Zap, Timer, Skull, Flag, MapPin, Type, Globe } from "lucide-react";
-import { SessionLengthSelect, type SessionLengthMode } from "@/features/engine/SessionLengthSelect";
-import { getPref, setPref } from "@/lib/db/repo";
-import { COUNTRIES } from "@/lib/countries";
 
 const MODE_META: Record<SpeedMode, { name: string; sub: string; desc: string; icon: React.ReactNode }> = {
   sprint60: {
@@ -62,23 +61,6 @@ function PreGame() {
   const start = useSpeedRuntime((s) => s.start);
   // Re-use shared continent preference so selection persists across modes
   const [continent, setContinent] = useContinentPref();
-  const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
-
-  useEffect(() => {
-    getPref("speed.sessionMode").then((v) => {
-      if (v === "quick" || v === "complete") setSessionMode(v);
-    });
-  }, []);
-
-  const handleSessionModeChange = (mode: SessionLengthMode) => {
-    setSessionMode(mode);
-    void setPref("speed.sessionMode", mode);
-  };
-
-  const continentCount =
-    continent === "All"
-      ? COUNTRIES.length
-      : COUNTRIES.filter((c) => c.continent === continent).length;
 
   const handleContinentChange = (c: string) => {
     setContinent(c as Parameters<typeof setContinent>[0]);
@@ -181,20 +163,12 @@ function PreGame() {
           </div>
         </div>
 
-        {/* ── Continent + Session length ─────────── */}
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+        {/* ── Continent ─────────────────────────── */}
+        <div className="flex items-center justify-between gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">
             Region
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <ContinentSelect value={continent} onChange={handleContinentChange} />
-            <SessionLengthSelect
-              value={sessionMode}
-              onChange={handleSessionModeChange}
-              continentCount={continentCount}
-              continent={continent}
-            />
-          </div>
+          <ContinentSelect value={continent} onChange={handleContinentChange} />
         </div>
 
         {/* ── CTA ───────────────────────────────── */}
@@ -516,25 +490,71 @@ function useFlash(_key: string) {
 
 function PostGame() {
   const s = useSpeedRuntime();
-  const durationMs = Math.max(1000, (s.endedAt ?? Date.now()) - s.startedAt);
-  const qpm = Math.round(((s.correct + s.wrong) / durationMs) * 60_000);
+  const sessions = useLiveQuery(() => db().gameSessions.toArray(), []) ?? [];
+  const streak = useMemo(() => {
+    const activeDays = new Set(sessions.map((sess) => dateKey(sess.createdAt)));
+    activeDays.add(dateKey());
+    return currentStreak(activeDays);
+  }, [sessions]);
 
+  const accuracy =
+    s.correct + s.wrong > 0
+      ? Math.round((s.correct / (s.correct + s.wrong)) * 100)
+      : 0;
   return (
-    <div className="min-h-dvh pt-20 flex flex-col items-center justify-center">
-      <SessionEnd
-        show
-        score={s.score}
-        correct={s.correct}
-        total={s.correct + s.wrong}
-        wrong={s.wrong}
-        masteredCount={s.correct}
-        missedItems={s.missedItems}
-        durationMs={durationMs}
-        isSpeedMode={true}
-        qpm={qpm}
-        hasNextBlock={true}
-        onNextBlock={() => s.start(s.config.mode)}
-      />
+    <div className="min-h-dvh pt-28 px-6 pb-16 flex items-center justify-center">
+      <AnimatePresence>
+        <motion.div
+          initial={{ opacity: 0, y: 24, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={spring.soft}
+          className="glass-strong rounded-3xl p-10 max-w-md w-full text-center"
+        >
+          <div className="flex items-center justify-center gap-2">
+            <Badge tone="cyan">Run complete</Badge>
+            <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-mono tracking-wider bg-amber-500/15 border border-amber-500/30 text-amber-300">
+              🔥 {streak} {streak === 1 ? "day streak" : "day streak"}
+            </span>
+          </div>
+          <div className="mt-4 font-display text-6xl text-white tracking-tight text-glow-violet">
+            {s.score}
+            <span className="text-[color:var(--muted)] text-xl font-mono ml-1">pts</span>
+          </div>
+          <div className="mt-2 text-white/55 text-sm">
+            {s.correct} right · {s.wrong} wrong · {accuracy}% accuracy
+          </div>
+          <div className="mt-8 grid grid-cols-3 gap-3 font-mono text-[11px] uppercase tracking-wider text-white/55">
+            <Stat label="Best ×" value={`×${s.bestCombo}`} />
+            <Stat
+              label="QPM"
+              value={String(
+                Math.round(((s.correct + s.wrong) / Math.max(1, (s.endedAt ?? 0) - s.startedAt)) * 60_000),
+              )}
+            />
+            <Stat
+              label="Time"
+              value={`${Math.round(((s.endedAt ?? 0) - s.startedAt) / 100) / 10}s`}
+            />
+          </div>
+          <div className="mt-8 flex gap-3 justify-center">
+            <Button onClick={() => s.start(s.config.mode)}>Run again</Button>
+            <Button variant="secondary" onClick={() => s.reset()}>
+              Change mode
+            </Button>
+          </div>
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="glass rounded-xl py-3">
+      <div className="font-display text-base text-white normal-case tracking-tight">
+        {value}
+      </div>
+      <div className="mt-1 text-[10px]">{label}</div>
     </div>
   );
 }
