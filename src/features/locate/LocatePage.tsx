@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useCallback, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useCallback, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { COUNTRIES, COUNTRY_BY_ISO3, pickRandomCountries } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
 import { getPref, setPref } from "@/lib/db/repo";
+import { useLocateSound } from "@/hooks/useLocateSound";
+import { GlobeFeedbackToast, type GlobeToast } from "@/components/ui/GlobeFeedbackToast";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
@@ -77,10 +79,17 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 
   const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
 
+  // Find-mode: ephemeral centered toast (replaces bottom FeedbackBar)
+  const [findToast, setFindToast] = useState<GlobeToast | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { playCorrect, playWrong, unlock } = useLocateSound();
+
   // Start / restart session logic
   const startSession = useCallback(
     (c: ContinentChoice, sMode: SubMode, findLength: SessionMode) => {
       setLastWrongIso3(null); // Reset differential feedback state
+      setFindToast(null);
       if (sMode === "find" && findLength === "complete") {
         const all = selectAllForContinent(c === "All" ? null : c);
         void findSession.start({ allCountries: all, subMode: sMode });
@@ -160,8 +169,20 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               sub === "find"
                 ? (iso3) => {
                     if (current && s.answerState === "idle") {
+                      unlock(); // Unlock audio context on first user gesture
                       const isCorrect = iso3 === current.iso3;
-                      if (!isCorrect) setLastWrongIso3(iso3);
+                      if (!isCorrect) {
+                        setLastWrongIso3(iso3);
+                        playWrong();
+                        const wrongCountry = COUNTRY_BY_ISO3.get(iso3);
+                        setFindToast({ kind: "wrong", name: current.name, wrongName: wrongCountry?.name });
+                      } else {
+                        playCorrect();
+                        setFindToast({ kind: "correct", name: current.name });
+                      }
+                      // Auto-dismiss toast
+                      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+                      toastTimerRef.current = setTimeout(() => setFindToast(null), isCorrect ? 1100 : 2600);
                       s.submit(isCorrect);
                     }
                   }
@@ -252,6 +273,11 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
             />
           </div>
 
+          {/* Find-mode: centered ripple feedback toast (replaces bottom bar) */}
+          {sub === "find" && (
+            <GlobeFeedbackToast toast={findToast} />
+          )}
+
           {/* Answer Controls & Surface */}
           <div className="absolute bottom-8 inset-x-0 z-30 px-4">
             {sub === "name" ? (
@@ -276,21 +302,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                   hideNext
                 />
               )
-            ) : (
-              <FeedbackBar
-                show={s.answerState !== "idle"}
-                state={(s.answerState === "idle" ? "correct" : s.answerState) as "correct" | "wrong" | "revealed"}
-                title={current.name}
-                subtitle={
-                  s.answerState === "wrong" && lastWrongIso3 && COUNTRY_BY_ISO3.get(lastWrongIso3)
-                    ? `You clicked ${COUNTRY_BY_ISO3.get(lastWrongIso3)!.name}, correct was ${current.name}`
-                    : `Capital: ${current.capital ?? "—"}`
-                }
-                onNext={() => s.next()}
-                onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                hideNext
-              />
-            )}
+            ) : null}
           </div>
         </>
       )}

@@ -800,14 +800,11 @@ export default function Globe3D({
     if (effWrong) {
       const c = countryByIso3.get(effWrong);
       if (c) {
-        res.push({
-          lat: c.coordinates[0],
-          lng: c.coordinates[1],
-          maxR: 8,
-          propagationSpeed: 4,
-          repeatPeriod: 900,
-          color: COLOR_WRONG,
-        });
+        // Three red rings — staggered for dramatic shockwave
+        res.push(
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 5, propagationSpeed: 5, repeatPeriod: 700, color: COLOR_WRONG },
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 9, propagationSpeed: 3.5, repeatPeriod: 800, color: COLOR_WRONG },
+        );
       }
     }
     const target = effReveal ?? effHighlight;
@@ -815,14 +812,12 @@ export default function Globe3D({
       const c = countryByIso3.get(target);
       if (c) {
         const isReveal = target === effReveal;
-        res.push({
-          lat: c.coordinates[0],
-          lng: c.coordinates[1],
-          maxR: isReveal ? 8 : 6,
-          propagationSpeed: isReveal ? 4 : 3,
-          repeatPeriod: isReveal ? 900 : 1200,
-          color: COLOR_HIGHLIGHT,
-        });
+        // Three green rings — cascading shockwave
+        res.push(
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 4, propagationSpeed: 6, repeatPeriod: isReveal ? 700 : 1000, color: COLOR_HIGHLIGHT },
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 8, propagationSpeed: 4, repeatPeriod: isReveal ? 800 : 1100, color: COLOR_HIGHLIGHT },
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 13, propagationSpeed: 2.5, repeatPeriod: isReveal ? 900 : 1200, color: COLOR_HIGHLIGHT },
+        );
       }
     }
     return res;

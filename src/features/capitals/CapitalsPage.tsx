@@ -1,6 +1,6 @@
-import { lazy, Suspense, useEffect, useMemo, useState, useCallback } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
-import { COUNTRIES } from "@/lib/countries";
+import { COUNTRIES, COUNTRY_BY_ISO3 } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -19,6 +19,8 @@ import {
 import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
 import { getPref, setPref } from "@/lib/db/repo";
+import { useLocateSound } from "@/hooks/useLocateSound";
+import { GlobeFeedbackToast, type GlobeToast } from "@/components/ui/GlobeFeedbackToast";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
@@ -37,6 +39,10 @@ export default function CapitalsPage() {
   const [sub, setSub] = useState<SubMode>("countryToCap");
   const [continent, setContinent] = useContinentPref();
   const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
+  const [locatorToast, setLocatorToast] = useState<GlobeToast | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { playCorrect, playWrong, unlock } = useLocateSound();
+
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
 
@@ -54,6 +60,7 @@ export default function CapitalsPage() {
   // Restart on format changes
   useEffect(() => {
     setLastWrongIso3(null);
+    setLocatorToast(null);
     void s.start({ continent: continent === "All" ? undefined : continent, subMode: sub });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continent, sub]);
@@ -77,14 +84,6 @@ export default function CapitalsPage() {
   );
 
   const valid = current && current.capital;
-
-  const pov = useMemo(() => {
-    if (activeSub !== "locator" || !current) return undefined;
-    if (s.answerState === "idle") {
-      return { lat: current.coordinates[0], lng: current.coordinates[1] };
-    }
-    return undefined;
-  }, [activeSub, s.answerState, current?.iso3, current?.coordinates]);
 
   /** Unified Top Toolbar (Responsive Left/Right Split) */
   const Toolbar = (
@@ -116,12 +115,31 @@ export default function CapitalsPage() {
               wrongIso3={s.answerState === "wrong" ? lastWrongIso3 : null}
               onCountryClick={(iso3) => {
                 if (current && s.answerState === "idle") {
+                  unlock();
                   const isCorrect = iso3 === current.iso3;
-                  if (!isCorrect) setLastWrongIso3(iso3);
+                  if (!isCorrect) {
+                    setLastWrongIso3(iso3);
+                    playWrong();
+                    const wrongCountry = COUNTRY_BY_ISO3.get(iso3);
+                    setLocatorToast({
+                      kind: "wrong",
+                      name: current.name,
+                      subtitle: current.capital ? `Capital: ${current.capital}` : undefined,
+                      wrongName: wrongCountry?.name,
+                    });
+                  } else {
+                    playCorrect();
+                    setLocatorToast({
+                      kind: "correct",
+                      name: current.name,
+                      subtitle: current.capital ? `Capital: ${current.capital}` : undefined,
+                    });
+                  }
+                  if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+                  toastTimerRef.current = setTimeout(() => setLocatorToast(null), isCorrect ? 1100 : 2600);
                   s.submit(isCorrect);
                 }
               }}
-              pointOfView={pov}
               disableHoverLabel
               questionKey={current?.iso3 ?? null}
               activeContinent={continent === "All" ? null : continent}
@@ -145,19 +163,8 @@ export default function CapitalsPage() {
               />
             </div>
             
-            <div className="absolute bottom-8 inset-x-0 z-30 pointer-events-none">
-              <div className="pointer-events-auto">
-                <FeedbackBar
-                  show={s.answerState !== "idle"}
-                  state={s.answerState as "correct" | "wrong" | "revealed"}
-                  title={`${current.name} — ${current.capital}`}
-                  subtitle={`Capital of ${current.name}`}
-                  onNext={() => s.next()}
-                  onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                  hideNext
-                />
-              </div>
-            </div>
+            {/* Centered ripple HUD feedback toast */}
+            <GlobeFeedbackToast toast={locatorToast} />
           </>
         )}
         <SessionEnd
