@@ -141,13 +141,10 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
       unlock();
       if (isCorrect) {
         playCorrect();
-        setFindToast({ kind: "correct", name: country.name });
       } else {
         playWrong();
-        setFindToast({ kind: "wrong", name: country.name });
       }
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = setTimeout(() => setFindToast(null), 1200);
+      setFindToast(null); // The correct/wrong badge appears directly in 3D over the exact country
       s.submit(isCorrect);
     },
     [playCorrect, playWrong, unlock, s],
@@ -182,15 +179,16 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                       if (!isCorrect) {
                         setLastWrongIso3(iso3);
                         playWrong();
-                        const wrongCountry = COUNTRY_BY_ISO3.get(iso3);
-                        setFindToast({ kind: "wrong", name: current.name, wrongName: wrongCountry?.name });
+                        setFindToast(null); // No redundant banner under "Find x", 3D badge is placed directly on clicked country
                       } else {
                         playCorrect();
                         setFindToast({ kind: "correct", name: current.name });
                       }
                       // Auto-dismiss toast snappy and visual
                       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-                      toastTimerRef.current = setTimeout(() => setFindToast(null), 1200);
+                      if (isCorrect) {
+                        toastTimerRef.current = setTimeout(() => setFindToast(null), 1200);
+                      }
                       s.submit(isCorrect);
                     }
                   }
@@ -199,6 +197,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
             disableHoverLabel
             questionKey={current?.iso3 ?? null}
             activeContinent={continent === "All" ? null : continent}
+            autoRotateSpeed={sub === "name" ? 0.05 : undefined}
           />
         </Suspense>
       </div>

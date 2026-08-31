@@ -58,6 +58,8 @@ interface Globe3DProps {
   disableMicrostates?: boolean;
   /** Control auto-rotation of the globe (set false for regional focus). */
   autoRotate?: boolean;
+  /** Speed of the ambient auto-rotation (default 0.35). Lower = slower drift. */
+  autoRotateSpeed?: number;
   /**
    * Optional secondary polygon overlay (e.g. Spain CCAA / province features).
    * Rendered as react-globe.gl `customPolygonsData` — completely independent
@@ -159,6 +161,7 @@ export default function Globe3D({
   disableWorldPolygons = false,
   disableMicrostates = false,
   autoRotate,
+  autoRotateSpeed,
   overlayPolygons,
   overlayCapColor,
   overlaySideColor,
@@ -742,7 +745,7 @@ export default function Globe3D({
       controls.autoRotate = false;
     } else {
       controls.autoRotate = true;
-      controls.autoRotateSpeed = effectiveQuality === "medium" ? 0.18 : 0.35;
+      controls.autoRotateSpeed = autoRotateSpeed ?? (effectiveQuality === "medium" ? 0.18 : 0.35);
     }
 
     if (pointOfView) {

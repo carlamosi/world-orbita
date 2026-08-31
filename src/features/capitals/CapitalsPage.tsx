@@ -120,13 +120,7 @@ export default function CapitalsPage() {
                   if (!isCorrect) {
                     setLastWrongIso3(iso3);
                     playWrong();
-                    const wrongCountry = COUNTRY_BY_ISO3.get(iso3);
-                    setLocatorToast({
-                      kind: "wrong",
-                      name: current.name,
-                      subtitle: current.capital ? `Capital: ${current.capital}` : undefined,
-                      wrongName: wrongCountry?.name,
-                    });
+                    setLocatorToast(null); // No redundant banner under prompt, 3D spatial pill shows on the clicked country
                   } else {
                     playCorrect();
                     setLocatorToast({
@@ -136,7 +130,9 @@ export default function CapitalsPage() {
                     });
                   }
                   if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-                  toastTimerRef.current = setTimeout(() => setLocatorToast(null), 1200);
+                  if (isCorrect) {
+                    toastTimerRef.current = setTimeout(() => setLocatorToast(null), 1200);
+                  }
                   s.submit(isCorrect);
                 }
               }}
