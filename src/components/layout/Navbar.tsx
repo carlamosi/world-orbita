@@ -68,16 +68,16 @@ export function Navbar() {
             Orbita
           </span>
         </Link>
-        <div className="ml-2 flex items-center gap-1 overflow-x-auto no-scrollbar">
+        <div className="ml-2 flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
           {/* Due Today — always first, prominent */}
           <Link
             to="/review"
             className={cn(
-              "relative flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-full transition-colors",
+              "relative inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[13px] rounded-full transition-colors shrink-0",
               pathname.startsWith("/review") ? "text-white" : "text-white/55 hover:text-white",
             )}
           >
-            Due Today
+            <span>Due Today</span>
             {dueCount > 0 && (
               <motion.span
                 key={dueCount}
@@ -91,7 +91,7 @@ export function Navbar() {
             {pathname.startsWith("/review") && (
               <motion.span
                 layoutId="nav-active"
-                className="absolute inset-0 -z-10 rounded-full bg-white/8 border border-white/10 shadow-[0_0_24px_-6px_color-mix(in_oklab,var(--cyan)_60%,transparent)]"
+                className="absolute inset-0 -z-10 rounded-full bg-white/8 border border-white/10 shadow-[0_0_12px_rgba(0,212,255,0.25),0_0_24px_rgba(0,212,255,0.15)]"
                 transition={{ type: "spring", stiffness: 320, damping: 28 }}
               />
             )}
@@ -104,15 +104,15 @@ export function Navbar() {
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  "relative px-3 py-1.5 text-[13px] rounded-full transition-colors",
+                  "relative inline-flex items-center justify-center px-3 py-1.5 text-[13px] rounded-full transition-colors shrink-0",
                   active ? "text-white" : "text-white/55 hover:text-white",
                 )}
               >
-                {item.label}
+                <span>{item.label}</span>
                 {active && (
                   <motion.span
                     layoutId="nav-active"
-                    className="absolute inset-0 -z-10 rounded-full bg-white/8 border border-white/10 shadow-[0_0_24px_-6px_color-mix(in_oklab,var(--cyan)_60%,transparent)]"
+                    className="absolute inset-0 -z-10 rounded-full bg-white/8 border border-white/10 shadow-[0_0_12px_rgba(0,212,255,0.25),0_0_24px_rgba(0,212,255,0.15)]"
                     transition={{ type: "spring", stiffness: 320, damping: 28 }}
                   />
                 )}

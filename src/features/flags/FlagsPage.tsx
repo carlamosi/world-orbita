@@ -196,6 +196,13 @@ function FlagToCountry({
   disabled: boolean;
   onPick: (iso3: string) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Reset selected option when question/target changes
+  useEffect(() => {
+    setSelectedId(null);
+  }, [target.iso3]);
+
   return (
     <div className="w-full grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-6 lg:gap-8 items-stretch">
       {/* Left: Floating Flag */}
@@ -216,28 +223,87 @@ function FlagToCountry({
 
       {/* Right: Answer Stack */}
       <div className="flex flex-col justify-center gap-3 w-full">
-        {options.map((o, i) => (
-          <button
-            key={o.iso3}
-            onClick={() => onPick(o.iso3)}
-            disabled={disabled}
-            className={cn(
-              "group relative flex items-center gap-4 w-full px-4 py-3.5 rounded-2xl glass text-left transition-all duration-200",
-              "hover:border-white/20 hover:bg-white/10 hover:-translate-y-0.5 hover:shadow-[0_20px_40px_-20px_rgba(0,0,0,0.5)]",
-              "disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:bg-white/5 disabled:hover:border-white/10",
-              "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
-            )}
-          >
-            {/* Integrated Number Badge */}
-            <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-xl bg-white/5 border border-white/10 text-white/50 font-mono text-xs group-hover:text-white/90 group-hover:border-white/20 transition-colors">
-              {i + 1}
-            </div>
-            
-            <div className="font-display text-lg md:text-xl text-white tracking-tight truncate pr-2">
-              {o.name}
-            </div>
-          </button>
-        ))}
+        {options.map((o, i) => {
+          const isSelected = selectedId === o.iso3;
+          const isTarget = o.iso3 === target.iso3;
+          const showFeedback = disabled && selectedId !== null;
+          const isCorrectChoice = showFeedback && isTarget;
+          const isWrongChoice = showFeedback && isSelected && !isTarget;
+
+          return (
+            <motion.button
+              key={o.iso3}
+              onClick={() => {
+                setSelectedId(o.iso3);
+                onPick(o.iso3);
+              }}
+              disabled={disabled}
+              animate={
+                isCorrectChoice
+                  ? { scale: [1, 1.02, 1] }
+                  : isWrongChoice
+                  ? { x: [0, -3.5, 3.5, -2, 2, 0] }
+                  : {}
+              }
+              transition={{ duration: 0.2 }}
+              className={cn(
+                "group relative flex items-center justify-between gap-4 w-full px-4 py-3.5 rounded-2xl glass text-left transition-all duration-200",
+                !showFeedback && [
+                  "hover:border-white/20 hover:bg-white/10 hover:-translate-y-0.5 hover:shadow-[0_20px_40px_-20px_rgba(0,0,0,0.5)]",
+                  "disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:bg-white/5 disabled:hover:border-white/10",
+                ],
+                isCorrectChoice &&
+                  "border-emerald-500/80 bg-emerald-950/40 text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.25)]",
+                isWrongChoice &&
+                  "border-rose-500/80 bg-rose-950/40 text-rose-100 shadow-[0_0_20px_rgba(244,63,94,0.25)]",
+                showFeedback && !isCorrectChoice && !isWrongChoice && "opacity-40",
+                "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
+              )}
+            >
+              <div className="flex items-center gap-4 min-w-0">
+                {/* Integrated Number Badge */}
+                <div
+                  className={cn(
+                    "shrink-0 flex items-center justify-center w-8 h-8 rounded-xl font-mono text-xs transition-colors",
+                    isCorrectChoice
+                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      : isWrongChoice
+                      ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                      : "bg-white/5 border border-white/10 text-white/50 group-hover:text-white/90 group-hover:border-white/20",
+                  )}
+                >
+                  {i + 1}
+                </div>
+
+                <div className="font-display text-lg md:text-xl text-white tracking-tight truncate pr-2">
+                  {o.name}
+                </div>
+              </div>
+
+              {/* Feedback status indicator icons */}
+              {isCorrectChoice && (
+                <motion.div
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.18 }}
+                  className="shrink-0 size-6 rounded-full bg-emerald-500/20 border border-emerald-500/60 text-emerald-400 flex items-center justify-center"
+                >
+                  <span className="text-sm font-bold leading-none">✓</span>
+                </motion.div>
+              )}
+              {isWrongChoice && (
+                <motion.div
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.18 }}
+                  className="shrink-0 size-6 rounded-full bg-rose-500/20 border border-rose-500/60 text-rose-400 flex items-center justify-center"
+                >
+                  <span className="text-xs font-bold leading-none">✕</span>
+                </motion.div>
+              )}
+            </motion.button>
+          );
+        })}
       </div>
     </div>
   );

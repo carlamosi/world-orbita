@@ -649,11 +649,26 @@ function EasyOptions({
   disabled?: boolean;
   onPick: (id: string) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Reset selected option when target changes
+  useEffect(() => {
+    setSelectedId(null);
+  }, [targetId]);
+
   const hotkeyItems = useMemo(
     () => options.map((o) => ({ id: o.id })),
     [options],
   );
-  useAnswerHotkeys(hotkeyItems, onPick);
+  const onPickById = useCallback(
+    (id: string) => {
+      if (disabled) return;
+      setSelectedId(id);
+      onPick(id);
+    },
+    [disabled, onPick],
+  );
+  useAnswerHotkeys(hotkeyItems, onPickById);
 
   return (
     <motion.div
@@ -665,40 +680,95 @@ function EasyOptions({
       {options.map((o, i) => {
         const text = (labelKey === "capital" ? o.capital : o.name) ?? o.name;
         const flagSrc = showFlags ? getSpainFlagUrl(o.flagCode) : undefined;
+        const isSelected = selectedId === o.id;
+        const isTarget = o.id === targetId;
+        const showFeedback = disabled && selectedId !== null;
+        const isCorrectChoice = showFeedback && isTarget;
+        const isWrongChoice = showFeedback && isSelected && !isTarget;
+
         return (
-          <button
+          <motion.button
             key={o.id}
             type="button"
             disabled={disabled}
-            onClick={() => onPick(o.id)}
+            onClick={() => {
+              setSelectedId(o.id);
+              onPick(o.id);
+            }}
+            animate={
+              isCorrectChoice
+                ? { scale: [1, 1.02, 1] }
+                : isWrongChoice
+                ? { x: [0, -3.5, 3.5, -2, 2, 0] }
+                : {}
+            }
+            transition={{ duration: 0.2 }}
             className={cn(
               "glass rounded-2xl px-5 py-4 text-left transition-all duration-200 cursor-pointer select-none",
-              "hover:bg-white/[0.08] hover:border-white/25 hover:-translate-y-0.5 hover:shadow-lg",
-              "active:scale-[0.98]",
-              "disabled:pointer-events-none disabled:opacity-75",
+              !showFeedback && [
+                "hover:bg-white/[0.08] hover:border-white/25 hover:-translate-y-0.5 hover:shadow-lg",
+                "disabled:pointer-events-none disabled:opacity-75",
+              ],
+              isCorrectChoice &&
+                "border-emerald-500/80 bg-emerald-950/40 text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.25)]",
+              isWrongChoice &&
+                "border-rose-500/80 bg-rose-950/40 text-rose-100 shadow-[0_0_20px_rgba(244,63,94,0.25)]",
+              showFeedback && !isCorrectChoice && !isWrongChoice && "opacity-40",
               "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
             )}
           >
             <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">
+              <div className="min-w-0 flex-1">
+                <div
+                  className={cn(
+                    "font-mono text-[10px] uppercase tracking-[0.25em] transition-colors",
+                    isCorrectChoice
+                      ? "text-emerald-400/80"
+                      : isWrongChoice
+                      ? "text-rose-400/80"
+                      : "text-white/40",
+                  )}
+                >
                   {i + 1}
                 </div>
-                <div className="font-display text-lg text-white tracking-tight">
+                <div className="font-display text-lg text-white tracking-tight truncate">
                   {text}
                 </div>
               </div>
-              {flagSrc && (
-                <div className="w-10 h-7 rounded-sm shrink-0 overflow-hidden border border-white/15 shadow-md">
-                  <img
-                    src={flagSrc}
-                    alt={o.name}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              )}
+
+              <div className="flex items-center gap-2 shrink-0">
+                {isCorrectChoice && (
+                  <motion.div
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.18 }}
+                    className="size-6 rounded-full bg-emerald-500/20 border border-emerald-500/60 text-emerald-400 flex items-center justify-center"
+                  >
+                    <span className="text-sm font-bold leading-none">✓</span>
+                  </motion.div>
+                )}
+                {isWrongChoice && (
+                  <motion.div
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.18 }}
+                    className="size-6 rounded-full bg-rose-500/20 border border-rose-500/60 text-rose-400 flex items-center justify-center"
+                  >
+                    <span className="text-xs font-bold leading-none">✕</span>
+                  </motion.div>
+                )}
+                {flagSrc && (
+                  <div className="w-10 h-7 rounded-sm shrink-0 overflow-hidden border border-white/15 shadow-md">
+                    <img
+                      src={flagSrc}
+                      alt={o.name}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
-          </button>
+          </motion.button>
         );
       })}
       <input type="hidden" data-target={targetId} />

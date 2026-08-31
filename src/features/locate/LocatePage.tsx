@@ -284,16 +284,17 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 
           {/* Answer Controls & Surface */}
           <div className="absolute bottom-8 inset-x-0 z-30 px-4">
-            {sub === "name" && s.answerState === "idle" ? (
+            {sub === "name" ? (
               difficulty === "easy" ? (
                 <EasyOptions
                   options={nameOptions}
                   targetIso3={current.iso3}
+                  disabled={s.answerState !== "idle"}
                   onPick={(iso3) => handleNameSubmit(iso3 === current.iso3, current)}
                 />
-              ) : (
+              ) : s.answerState === "idle" ? (
                 <HardInput target={current} onSubmit={(ok) => handleNameSubmit(ok, current)} />
-              )
+              ) : null
             ) : null}
           </div>
         </>
@@ -319,17 +320,33 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 function EasyOptions({
   options,
   targetIso3,
+  disabled = false,
   onPick,
 }: {
   options: Country[];
   targetIso3: string;
+  disabled?: boolean;
   onPick: (iso3: string) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Reset selection on question change
+  useEffect(() => {
+    setSelectedId(null);
+  }, [targetIso3]);
+
   const hotkeyItems = useMemo(
     () => options.map((o) => ({ id: o.iso3 })),
     [options],
   );
-  const onPickById = useCallback((id: string) => onPick(id), [onPick]);
+  const onPickById = useCallback(
+    (id: string) => {
+      if (disabled) return;
+      setSelectedId(id);
+      onPick(id);
+    },
+    [disabled, onPick],
+  );
   useAnswerHotkeys(hotkeyItems, onPickById);
 
   return (
@@ -339,27 +356,89 @@ function EasyOptions({
       transition={spring.soft}
       className="max-w-2xl mx-auto grid grid-cols-2 gap-3 pointer-events-auto"
     >
-      {options.map((o, i) => (
-        <button
-          key={o.iso3}
-          onClick={() => onPick(o.iso3)}
-          className={cn(
-            "glass rounded-2xl px-5 py-4 text-left transition-all duration-200",
-            "hover:border-white/25 hover:-translate-y-0.5 hover:shadow-[0_20px_60px_-25px_color-mix(in_oklab,var(--violet)_55%,transparent)]",
-            "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
-          )}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">
-                {i + 1}
+      {options.map((o, i) => {
+        const isSelected = selectedId === o.iso3;
+        const isTarget = o.iso3 === targetIso3;
+        const showFeedback = disabled && selectedId !== null;
+        const isCorrectChoice = showFeedback && isTarget;
+        const isWrongChoice = showFeedback && isSelected && !isTarget;
+
+        return (
+          <motion.button
+            key={o.iso3}
+            disabled={disabled}
+            onClick={() => {
+              setSelectedId(o.iso3);
+              onPick(o.iso3);
+            }}
+            animate={
+              isCorrectChoice
+                ? { scale: [1, 1.02, 1] }
+                : isWrongChoice
+                ? { x: [0, -3.5, 3.5, -2, 2, 0] }
+                : {}
+            }
+            transition={{ duration: 0.2 }}
+            className={cn(
+              "glass rounded-2xl px-5 py-4 text-left transition-all duration-200 cursor-pointer select-none",
+              !showFeedback && [
+                "hover:border-white/25 hover:-translate-y-0.5 hover:shadow-[0_20px_60px_-25px_color-mix(in_oklab,var(--violet)_55%,transparent)]",
+                "disabled:pointer-events-none disabled:opacity-75",
+              ],
+              isCorrectChoice &&
+                "border-emerald-500/80 bg-emerald-950/40 text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.25)]",
+              isWrongChoice &&
+                "border-rose-500/80 bg-rose-950/40 text-rose-100 shadow-[0_0_20px_rgba(244,63,94,0.25)]",
+              showFeedback && !isCorrectChoice && !isWrongChoice && "opacity-40",
+              "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
+            )}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div
+                  className={cn(
+                    "font-mono text-[10px] uppercase tracking-[0.25em] transition-colors",
+                    isCorrectChoice
+                      ? "text-emerald-400/80"
+                      : isWrongChoice
+                      ? "text-rose-400/80"
+                      : "text-white/40",
+                  )}
+                >
+                  {i + 1}
+                </div>
+                <div className="font-display text-lg text-white tracking-tight truncate">
+                  {o.name}
+                </div>
               </div>
-              <div className="font-display text-lg text-white tracking-tight">{o.name}</div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {isCorrectChoice && (
+                  <motion.div
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.18 }}
+                    className="size-6 rounded-full bg-emerald-500/20 border border-emerald-500/60 text-emerald-400 flex items-center justify-center"
+                  >
+                    <span className="text-sm font-bold leading-none">✓</span>
+                  </motion.div>
+                )}
+                {isWrongChoice && (
+                  <motion.div
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.18 }}
+                    className="size-6 rounded-full bg-rose-500/20 border border-rose-500/60 text-rose-400 flex items-center justify-center"
+                  >
+                    <span className="text-xs font-bold leading-none">✕</span>
+                  </motion.div>
+                )}
+                <FlagImage iso2={o.iso2} alt={o.name} className="w-12 h-8 shrink-0" />
+              </div>
             </div>
-            <FlagImage iso2={o.iso2} alt={o.name} className="w-12 h-8 shrink-0" />
-          </div>
-        </button>
-      ))}
+          </motion.button>
+        );
+      })}
       <input type="hidden" data-target={targetIso3} />
     </motion.div>
   );
