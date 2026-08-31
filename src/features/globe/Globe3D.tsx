@@ -504,6 +504,23 @@ export default function Globe3D({
         return { lat: c.coordinates[0], lng: c.coordinates[1], altitude, key: `reveal:${effReveal}`, duration: 1600 };
       }
     }
+    if (effHighlight) {
+      const f = featureByIso3.get(effHighlight);
+      if (f) {
+        const [clng, clat] = f.properties.centroid;
+        const span = f.properties.angularSpan ?? 5;
+        const frameAlt = Math.max(0.35, Math.min(1.6, Math.max(span, 1.5) / 24));
+        const liveAlt = ref.current ? ref.current.pointOfView().altitude : frameAlt;
+        const altitude = Math.max(frameAlt, Math.min(liveAlt, 1.6));
+        return { lat: clat, lng: clng, altitude, key: `highlight:${effHighlight}`, duration: 800 };
+      }
+      const c = countryByIso3.get(effHighlight);
+      if (c) {
+        const liveAlt = ref.current ? ref.current.pointOfView().altitude : 1.4;
+        const altitude = Math.min(Math.max(liveAlt, 0.8), 1.6);
+        return { lat: c.coordinates[0], lng: c.coordinates[1], altitude, key: `highlight:${effHighlight}`, duration: 800 };
+      }
+    }
     if (effFocus) {
       const f = featureByIso3.get(effFocus);
       if (f) {
@@ -834,6 +851,7 @@ export default function Globe3D({
     id: string;
     iso3: string;
     name: string;
+    capital?: string | null;
     lat: number;
     lng: number;
     kind: "wrong" | "correct";
@@ -855,7 +873,6 @@ export default function Globe3D({
           const fid = op.properties?.id ?? op.id ?? "";
           if (fid === effWrong) {
             name = op.properties?.name ?? fid;
-            // compute simple centroid from first polygon ring
             try {
               const geom = op.geometry;
               if (geom) {
@@ -888,14 +905,16 @@ export default function Globe3D({
       const f = featureByIso3.get(effReveal);
       const c = countryByIso3.get(effReveal);
       let name = f?.properties.name ?? c?.name ?? effReveal;
+      let capital = c?.capital ?? null;
       let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
       let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
 
       if (!f && !c && overlayPolygons) {
-        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
+        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string; capital?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
           const fid = op.properties?.id ?? op.id ?? "";
           if (fid === effReveal) {
             name = op.properties?.name ?? fid;
+            capital = op.properties?.capital ?? null;
             try {
               const geom = op.geometry;
               if (geom) {
@@ -921,19 +940,21 @@ export default function Globe3D({
         }
       }
 
-      pills.push({ id: `reveal-${effReveal}`, iso3: effReveal, name, lat, lng, kind: "correct" });
+      pills.push({ id: `reveal-${effReveal}`, iso3: effReveal, name, capital, lat, lng, kind: "correct" });
     } else if (effHighlight && effHighlight !== effWrong) {
       const f = featureByIso3.get(effHighlight);
       const c = countryByIso3.get(effHighlight);
       let name = f?.properties.name ?? c?.name ?? effHighlight;
+      let capital = c?.capital ?? null;
       let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
       let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
 
       if (!f && !c && overlayPolygons) {
-        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
+        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string; capital?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
           const fid = op.properties?.id ?? op.id ?? "";
           if (fid === effHighlight) {
             name = op.properties?.name ?? fid;
+            capital = op.properties?.capital ?? null;
             try {
               const geom = op.geometry;
               if (geom) {
@@ -959,7 +980,7 @@ export default function Globe3D({
         }
       }
 
-      pills.push({ id: `highlight-${effHighlight}`, iso3: effHighlight, name, lat, lng, kind: "correct" });
+      pills.push({ id: `highlight-${effHighlight}`, iso3: effHighlight, name, capital, lat, lng, kind: "correct" });
     }
 
     return pills;
@@ -971,7 +992,9 @@ export default function Globe3D({
     el.style.pointerEvents = "none";
     el.style.userSelect = "none";
     el.style.transform = "translate(-50%, -100%)";
-    el.style.transition = "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease";
+    el.style.transition = "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease";
+
+    const isReducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
     if (p.kind === "wrong") {
       el.innerHTML = `
@@ -982,59 +1005,67 @@ export default function Globe3D({
           padding: 6px 14px;
           background: rgba(15, 6, 10, 0.92);
           border: 1.5px solid rgba(244, 63, 94, 0.9);
-          box-shadow: 0 0 16px rgba(244, 63, 94, 0.5), 0 4px 12px rgba(0,0,0,0.6);
+          box-shadow: 0 0 16px rgba(244, 63, 94, 0.45), 0 4px 12px rgba(0,0,0,0.6);
           border-radius: 9999px;
           color: #fff;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 13px;
+          font-size: 12px;
           font-weight: 700;
           letter-spacing: 0.02em;
           backdrop-filter: blur(12px);
           white-space: nowrap;
-          animation: floatPill 2s ease-in-out infinite;
+          ${isReducedMotion ? "" : "animation: wrongShake 0.2s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;"}
         ">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:rgba(244,63,94,0.3);border-radius:50%;color:#fb7185;font-size:11px;font-weight:900;">
             ✕
           </span>
-          <span style="color:#fecdd3;">${p.name}</span>
+          <span style="color:#fecdd3;text-transform:uppercase;">${p.name}</span>
         </div>
         <style>
-          @keyframes floatPill {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-4px); }
+          @keyframes wrongShake {
+            0%, 100% { transform: translate3d(0, 0, 0); }
+            20%, 60% { transform: translate3d(-3.5px, 0, 0); }
+            40%, 80% { transform: translate3d(3.5px, 0, 0); }
           }
         </style>
       `;
-    } else if (p.id.startsWith("reveal-")) {
-      // On mistake / reveal: highlight the true target location in green 3D badge as well
+    } else {
+      // Correct or Reveal: compact, premium 2-line label anchored to country
+      const capitalLine = p.capital
+        ? `<div style="font-size:10px;font-weight:500;color:rgba(255,255,255,0.7);letter-spacing:0.02em;margin-top:1px;">Capital · <span style="color:#a7f3d0;font-weight:600;">${p.capital}</span></div>`
+        : "";
+
       el.innerHTML = `
         <div style="
           display: inline-flex;
-          align-items: center;
-          gap: 6px;
+          flex-direction: column;
+          align-items: flex-start;
           padding: 6px 14px;
           background: rgba(4, 18, 12, 0.92);
-          border: 1.5px solid rgba(16, 185, 129, 0.9);
-          box-shadow: 0 0 16px rgba(16, 185, 129, 0.5), 0 4px 12px rgba(0,0,0,0.6);
-          border-radius: 9999px;
+          border: 1.5px solid rgba(16, 185, 129, 0.85);
+          box-shadow: 0 0 18px rgba(16, 185, 129, 0.4), 0 4px 14px rgba(0,0,0,0.6);
+          border-radius: 12px;
           color: #fff;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 13px;
-          font-weight: 700;
-          letter-spacing: 0.02em;
           backdrop-filter: blur(12px);
           white-space: nowrap;
-          animation: floatPill 2s ease-in-out infinite;
+          ${isReducedMotion ? "" : "animation: correctPop 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;"}
         ">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:rgba(16,185,129,0.3);border-radius:50%;color:#6ee7b7;font-size:11px;font-weight:900;">
-            ✓
-          </span>
-          <span style="color:#a7f3d0;">${p.name}</span>
+          <div style="display:inline-flex;align-items:center;gap:6px;">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;background:rgba(16,185,129,0.3);border-radius:50%;color:#6ee7b7;font-size:10px;font-weight:900;">
+              ✓
+            </span>
+            <span style="color:#6ee7b7;font-size:12px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;">${p.name}</span>
+          </div>
+          ${capitalLine}
         </div>
+        <style>
+          @keyframes correctPop {
+            0% { transform: scale(0.92); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+          }
+        </style>
       `;
-    } else {
-      // Normal correct answer without reveal – keep minimal
-      el.style.display = "none";
     }
     return el;
   }, []);

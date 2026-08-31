@@ -39,8 +39,6 @@ export default function CapitalsPage() {
   const [sub, setSub] = useState<SubMode>("countryToCap");
   const [continent, setContinent] = useContinentPref();
   const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
-  const [locatorToast, setLocatorToast] = useState<GlobeToast | null>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { playCorrect, playWrong, unlock } = useLocateSound();
 
   const current = s.queue[s.index] ?? null;
@@ -60,7 +58,6 @@ export default function CapitalsPage() {
   // Restart on format changes
   useEffect(() => {
     setLastWrongIso3(null);
-    setLocatorToast(null);
     void s.start({ continent: continent === "All" ? undefined : continent, subMode: sub });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continent, sub]);
@@ -101,6 +98,15 @@ export default function CapitalsPage() {
     </div>
   );
 
+  const [delayedReveal, setDelayedReveal] = useState(false);
+  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear timers on unmount or question change
+  useEffect(() => {
+    setDelayedReveal(false);
+    if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
+  }, [current?.iso3]);
+
   if (activeSub === "locator") {
     return (
       <div className="relative min-h-dvh pt-20">
@@ -110,7 +116,9 @@ export default function CapitalsPage() {
               countries={COUNTRIES}
               highlightIso3={s.answerState === "correct" ? current?.iso3 : null}
               revealIso3={
-                s.answerState === "wrong" || s.answerState === "revealed" ? current?.iso3 : null
+                (s.answerState === "wrong" && delayedReveal) || s.answerState === "revealed"
+                  ? current?.iso3
+                  : null
               }
               wrongIso3={s.answerState === "wrong" ? lastWrongIso3 : null}
               onCountryClick={(iso3) => {
@@ -119,21 +127,20 @@ export default function CapitalsPage() {
                   const isCorrect = iso3 === current.iso3;
                   if (!isCorrect) {
                     setLastWrongIso3(iso3);
+                    setDelayedReveal(false);
                     playWrong();
-                    setLocatorToast(null); // No redundant banner under prompt, 3D spatial pill shows on the clicked country
+                    // Phase 1: User error state immediately on clicked country
+                    s.submit(false);
+                    // Phase 2: After 600ms, reveal correct country & capital
+                    if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
+                    revealTimerRef.current = setTimeout(() => {
+                      setDelayedReveal(true);
+                    }, 600);
                   } else {
+                    setDelayedReveal(false);
                     playCorrect();
-                    setLocatorToast({
-                      kind: "correct",
-                      name: current.name,
-                      subtitle: current.capital ? `Capital: ${current.capital}` : undefined,
-                    });
+                    s.submit(true);
                   }
-                  if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-                  if (isCorrect) {
-                    toastTimerRef.current = setTimeout(() => setLocatorToast(null), 1200);
-                  }
-                  s.submit(isCorrect);
                 }
               }}
               disableHoverLabel
@@ -143,25 +150,20 @@ export default function CapitalsPage() {
           </Suspense>
         </div>
         {!finished && current && (
-          <>
-            <div className="absolute top-20 inset-x-0 z-20 pointer-events-none flex flex-col items-center">
-              {Toolbar}
-              <PromptPill
-                keyId={`${sub}-${s.index}-${current.iso3}`}
-                index={s.index}
-                total={s.queue.length}
-                title={
-                  <>
-                    Find the country whose capital is{" "}
-                    <span className="text-glow-cyan">{current.capital}</span>
-                  </>
-                }
-              />
-            </div>
-            
-            {/* Centered ripple HUD feedback toast */}
-            <GlobeFeedbackToast toast={locatorToast} />
-          </>
+          <div className="absolute top-20 inset-x-0 z-20 pointer-events-none flex flex-col items-center">
+            {Toolbar}
+            <PromptPill
+              keyId={`${sub}-${s.index}-${current.iso3}`}
+              index={s.index}
+              total={s.queue.length}
+              title={
+                <>
+                  Find the country whose capital is{" "}
+                  <span className="text-glow-cyan">{current.capital}</span>
+                </>
+              }
+            />
+          </div>
         )}
         <SessionEnd
           show={finished}
