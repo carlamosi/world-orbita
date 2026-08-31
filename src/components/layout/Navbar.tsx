@@ -51,7 +51,8 @@ function OrbitalLogo() {
 }
 
 export function Navbar() {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const location = useRouterState({ select: (s) => s.location });
+  const pathname = location.pathname;
   const dueCount = useDueTodayCount();
 
   return (
@@ -98,7 +99,16 @@ export function Navbar() {
           </Link>
 
           {NAV.map((item) => {
-            const active = pathname.startsWith(item.to);
+            const isSpain = pathname.startsWith("/spain");
+            const searchSkill = (location.search as { skill?: string })?.skill;
+            const active =
+              pathname.startsWith(item.to) ||
+              (isSpain &&
+                ((item.to === "/flags" && searchSkill === "flags") ||
+                  (item.to === "/capitals" && searchSkill === "capitals") ||
+                  (item.to === "/locate" &&
+                    (!searchSkill || searchSkill === "locate" || searchSkill === "name"))));
+
             return (
               <Link
                 key={item.to}

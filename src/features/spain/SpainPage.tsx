@@ -201,6 +201,7 @@ export default function SpainPage() {
   const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
   const [lastWrongId, setLastWrongId] = useState<string | null>(null);
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
+  const [selectedFlagOptionId, setSelectedFlagOptionId] = useState<string | null>(null);
   const [locateToast, setLocateToast] = useState<GlobeToast | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { playCorrect, playWrong, unlock } = useLocateSound();
@@ -223,6 +224,11 @@ export default function SpainPage() {
   const s = activeStore;
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
+
+  // Reset selected flag option on question change
+  useEffect(() => {
+    setSelectedFlagOptionId(null);
+  }, [current?.id]);
 
   const activeDataset = useMemo(() => {
     if (skill === "flags") return SPAIN_CCAA;
@@ -414,7 +420,6 @@ export default function SpainPage() {
                 isSpainActive={true}
                 spainSkill={skill}
               />
-              <ModeDropdown options={SKILL_OPTIONS} value={skill} onChange={setSkill} />
               {skill !== "flags" && (
                 <ModeDropdown options={LEVEL_OPTIONS} value={level} onChange={setLevel} />
               )}
@@ -428,7 +433,7 @@ export default function SpainPage() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {skill !== "locate" && (
+              {skill !== "locate" && skill !== "capitals" && (
                 <ModeDropdown
                   options={DIFFICULTY_OPTIONS}
                   value={difficulty}
@@ -439,7 +444,7 @@ export default function SpainPage() {
           </div>
 
           {/* ================================================================
-              FLAGS MODE: 2-column card layout, no globe, no flags on choices
+              FLAGS MODE: 2-column layout matching world Flags FlagToCountry
           ================================================================ */}
           {skill === "flags" && (
             <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-5xl gap-6 z-20">
@@ -450,7 +455,8 @@ export default function SpainPage() {
                 title={promptTitle ?? ""}
               />
 
-              <div className="w-full grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-6 lg:gap-8 items-center mt-4">
+              <div className="w-full grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-6 lg:gap-8 items-stretch mt-4">
+                {/* Left: Floating Flag */}
                 <motion.div
                   key={current.id}
                   initial={{ opacity: 0, scale: 0.92, y: 16 }}
@@ -473,37 +479,98 @@ export default function SpainPage() {
                   )}
                 </motion.div>
 
-                <div className="flex flex-col justify-center gap-3">
-                  {s.answerState === "idle" ? (
-                    difficulty === "easy" ? (
-                      <EasyOptions
-                        options={easyOptions}
-                        targetId={current.id}
-                        labelKey="name"
-                        showFlags={false}
-                        disabled={s.answerState !== "idle"}
-                        onPick={(id) => s.submit(id === current.id)}
-                      />
-                    ) : (
-                      <HardInput
-                        target={current}
-                        matchTarget={current.name}
-                        placeholder="Type the autonomous community name…"
-                        onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
-                      />
-                    )
-                  ) : (
-                    <div className="max-w-2xl mx-auto w-full">
-                      <FeedbackBar
-                        show
-                        state={s.answerState as "correct" | "wrong" | "revealed"}
-                        title={current.name}
-                        subtitle={current.capital ? `Capital: ${current.capital}` : undefined}
-                        onNext={() => s.next()}
-                        onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                        hideNext
-                      />
+                {/* Right: Answer Stack */}
+                <div className="flex flex-col justify-center gap-3 w-full">
+                  {difficulty === "easy" ? (
+                    <div className="flex flex-col justify-center gap-3 w-full">
+                      {easyOptions.map((o, i) => {
+                        const isSelected = selectedFlagOptionId === o.id;
+                        const isTarget = o.id === current.id;
+                        const showFeedback = s.answerState !== "idle" && selectedFlagOptionId !== null;
+                        const isCorrectChoice = showFeedback && isTarget;
+                        const isWrongChoice = showFeedback && isSelected && !isTarget;
+
+                        return (
+                          <motion.button
+                            key={o.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedFlagOptionId(o.id);
+                              s.submit(o.id === current.id);
+                            }}
+                            disabled={s.answerState !== "idle"}
+                            animate={
+                              isCorrectChoice
+                                ? { scale: [1, 1.02, 1] }
+                                : isWrongChoice
+                                ? { x: [0, -3.5, 3.5, -2, 2, 0] }
+                                : {}
+                            }
+                            transition={{ duration: 0.2 }}
+                            className={cn(
+                              "group relative flex items-center justify-between gap-4 w-full px-4 py-3.5 rounded-2xl glass text-left transition-all duration-200 cursor-pointer select-none",
+                              !showFeedback && [
+                                "hover:border-white/20 hover:bg-white/10 hover:-translate-y-0.5 hover:shadow-[0_20px_40px_-20px_rgba(0,0,0,0.5)]",
+                                "disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:bg-white/5 disabled:hover:border-white/10",
+                              ],
+                              isCorrectChoice &&
+                                "border-emerald-500/80 bg-emerald-950/40 text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.25)]",
+                              isWrongChoice &&
+                                "border-rose-500/80 bg-rose-950/40 text-rose-100 shadow-[0_0_20px_rgba(244,63,94,0.25)]",
+                              showFeedback && !isCorrectChoice && !isWrongChoice && "opacity-40",
+                              "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
+                            )}
+                          >
+                            <div className="flex items-center gap-4 min-w-0">
+                              <div
+                                className={cn(
+                                  "shrink-0 flex items-center justify-center w-8 h-8 rounded-xl font-mono text-xs transition-colors",
+                                  isCorrectChoice
+                                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                                    : isWrongChoice
+                                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                    : "bg-white/5 border border-white/10 text-white/50 group-hover:text-white/90 group-hover:border-white/20",
+                                )}
+                              >
+                                {i + 1}
+                              </div>
+                              <div className="font-display text-lg md:text-xl text-white tracking-tight truncate pr-2">
+                                {o.name}
+                              </div>
+                            </div>
+
+                            {/* Feedback status indicator icons */}
+                            {isCorrectChoice && (
+                              <motion.div
+                                initial={{ scale: 0.5, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                transition={{ duration: 0.18 }}
+                                className="shrink-0 size-6 rounded-full bg-emerald-500/20 border border-emerald-500/60 text-emerald-400 flex items-center justify-center"
+                              >
+                                <span className="text-sm font-bold leading-none">✓</span>
+                              </motion.div>
+                            )}
+                            {isWrongChoice && (
+                              <motion.div
+                                initial={{ scale: 0.5, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                transition={{ duration: 0.18 }}
+                                className="shrink-0 size-6 rounded-full bg-rose-500/20 border border-rose-500/60 text-rose-400 flex items-center justify-center"
+                              >
+                                <span className="text-xs font-bold leading-none">✕</span>
+                              </motion.div>
+                            )}
+                          </motion.button>
+                        );
+                      })}
                     </div>
+                  ) : (
+                    <HardInput
+                      target={current}
+                      matchTarget={current.name}
+                      placeholder="Type the autonomous community name…"
+                      onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                    />
                   )}
                 </div>
               </div>
@@ -511,7 +578,7 @@ export default function SpainPage() {
           )}
 
           {/* ================================================================
-              CAPITALS MODE: Clean card layout, no globe
+              CAPITALS MODE: Hard mode only (typing the capital)
           ================================================================ */}
           {skill === "capitals" && (
             <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-3xl gap-6 z-20">
@@ -524,27 +591,14 @@ export default function SpainPage() {
 
               <div className="w-full flex flex-col items-center mt-6">
                 {s.answerState === "idle" ? (
-                  difficulty === "easy" ? (
-                    <div className="w-full">
-                      <EasyOptions
-                        options={easyOptions}
-                        targetId={current.id}
-                        labelKey="capital"
-                        showFlags={false}
-                        disabled={s.answerState !== "idle"}
-                        onPick={(id) => s.submit(id === current.id)}
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-full max-w-lg">
-                      <HardInput
-                        target={current}
-                        matchTarget={current.capital ?? ""}
-                        placeholder="Type the capital city…"
-                        onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
-                      />
-                    </div>
-                  )
+                  <div className="w-full max-w-lg">
+                    <HardInput
+                      target={current}
+                      matchTarget={current.capital ?? ""}
+                      placeholder="Type the capital city…"
+                      onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                    />
+                  </div>
                 ) : (
                   <div className="w-full max-w-2xl">
                     <FeedbackBar

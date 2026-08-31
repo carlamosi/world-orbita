@@ -149,21 +149,6 @@ export default function FlagsPage() {
                   )}
                 </div>
               </div>
-
-              {/* Feedback bar */}
-              <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
-                <div className="pointer-events-auto">
-                  <FeedbackBar
-                    show={s.answerState !== "idle"}
-                    state={s.answerState as "correct" | "wrong" | "revealed"}
-                    title={current?.name ?? ""}
-                    subtitle={`Capital: ${current?.capital ?? "—"}`}
-                    onNext={() => s.next()}
-                    onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                    hideNext
-                  />
-                </div>
-              </div>
             </>
           )}
         </>
