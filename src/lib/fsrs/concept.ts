@@ -1,4 +1,4 @@
-﻿import type { GeoDomain } from "@/types/geo";
+import type { GeoDomain } from "@/types/geo";
 
 export interface ConceptKey {
   domain?: GeoDomain;
@@ -25,10 +25,23 @@ export function formatConceptId({
   skill,
   subMode,
 }: ConceptKey): string {
-  const sm = subMode || "default";
+  // BUG-15 FIX: never silently fall back to "default" — that produces conceptIds
+  // that don't match any persisted DB row (v9 schema uses e.g. "countryToCap", "find").
+  // Throw in dev to surface miscalls early; in prod omit subMode only for non-world domains.
   if (domain === "world") {
-    return `${entityId}:${skill}:${sm}`;
+    if (!subMode) {
+      if (process.env.NODE_ENV !== "production") {
+        throw new Error(
+          `formatConceptId: subMode is required for world domain (entityId=${entityId}, skill=${skill}). ` +
+          `Valid subModes: "find" | "name" | "countryToCap" | "capToCountry" | "flagToCountry"`
+        );
+      }
+      // In production fall back gracefully to skill name to avoid crashes
+      return `${entityId}:${skill}:${skill}`;
+    }
+    return `${entityId}:${skill}:${subMode}`;
   }
+  const sm = subMode ?? skill;
   return `${domain}:${entityId}:${skill}:${sm}`;
 }
 

@@ -99,12 +99,20 @@ export async function selectMixedQuestions(
   const concepts = await db().concept_progress.where("skill").anyOf(skills as string[]).toArray();
   const now = Date.now();
   
-  const merged = new Map<string, { r: number; lastSeenAt: number }>();
+  const merged = new Map<string, { r: number; count: number; lastSeenAt: number }>();
   for (const c of concepts) {
     const r = getRetrievability(c, now);
     const cur = merged.get(c.iso3);
-    if (!cur || r < cur.r) {
-      merged.set(c.iso3, { r, lastSeenAt: c.fsrs_last_review || 0 });
+    if (!cur) {
+      // BUG-07 FIX: accumulate a running average instead of keeping only the MIN.
+      // MIN caused countries with one weak skill to be over-weighted like unknown countries.
+      merged.set(c.iso3, { r, count: 1, lastSeenAt: c.fsrs_last_review || 0 });
+    } else {
+      merged.set(c.iso3, {
+        r: (cur.r * cur.count + r) / (cur.count + 1),
+        count: cur.count + 1,
+        lastSeenAt: Math.max(cur.lastSeenAt, c.fsrs_last_review || 0),
+      });
     }
   }
 

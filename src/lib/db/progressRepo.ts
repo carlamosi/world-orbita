@@ -88,7 +88,8 @@ export async function recordConceptAttempt(
     // 4. Add to sync outbox
     await db().outbox.bulkAdd([
       {
-        op_id: crypto.randomUUID(),
+        // BUG-09 FIX: derive op_id deterministically so retried calls don't produce duplicate outbox entries
+        op_id: historyRow.op_id + ":cp",
         entity: "concept_progress",
         op: "upsert",
         payload: conceptPayload,
