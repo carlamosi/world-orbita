@@ -8,6 +8,7 @@ import { rowToCard, cardToRowUpdates, processReview } from "@/lib/fsrs/adapter";
 import { recordConceptAttempt, getConceptProgress } from "@/lib/db/progressRepo";
 import { State } from "ts-fsrs";
 import type { MissedItem } from "@/features/engine/useSession";
+import { playAnswerSound } from "@/lib/audio";
 
 /**
  * Speed Runtime — decoupled from the turn-based session engine.
@@ -218,6 +219,7 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
     const item = s.queue[s.index];
     if (!item) return;
     const isCorrect = item.country.iso3 === iso3;
+    playAnswerSound(isCorrect);
     const responseMs = Math.max(0, Date.now() - item.shownAt);
     const now = Date.now();
     

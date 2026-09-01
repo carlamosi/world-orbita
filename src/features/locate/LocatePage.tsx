@@ -292,9 +292,14 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                   disabled={s.answerState !== "idle"}
                   onPick={(iso3) => handleNameSubmit(iso3 === current.iso3, current)}
                 />
-              ) : s.answerState === "idle" ? (
-                <HardInput target={current} onSubmit={(ok) => handleNameSubmit(ok, current)} />
-              ) : null
+              ) : (
+                <HardInput
+                  target={current}
+                  answerState={s.answerState}
+                  correctAnswer={current.name}
+                  onSubmit={(ok) => handleNameSubmit(ok, current)}
+                />
+              )
             ) : null}
           </div>
         </>

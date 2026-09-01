@@ -6,7 +6,6 @@ import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import { PromptPill } from "@/features/engine/PromptPill";
-import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { HardInput } from "@/features/engine/HardInput";
 import { Button } from "@/components/ui/orbita-button";
@@ -206,24 +205,12 @@ export default function CapitalsPage() {
                 <HardInput
                   target={current}
                   matchTarget={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
+                  correctAnswer={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
+                  answerState={s.answerState}
                   onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
                   placeholder={activeSub === "countryToCap" ? "Type the capital…" : "Type the country…"}
                 />
               </div>
-            </div>
-          </div>
-
-          <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
-            <div className="pointer-events-auto">
-              <FeedbackBar
-                show={s.answerState !== "idle"}
-                state={s.answerState as "correct" | "wrong" | "revealed"}
-                title={`${current.name} — ${current.capital}`}
-                subtitle={`Capital of ${current.name}`}
-                onNext={() => s.next()}
-                onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                hideNext
-              />
             </div>
           </div>
         </>

@@ -143,6 +143,7 @@ export default function FlagsPage() {
                     current ? (
                       <FlagToType
                         target={current}
+                        answerState={s.answerState}
                         onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
                       />
                     ) : null
@@ -296,9 +297,11 @@ function FlagToCountry({
 
 function FlagToType({
   target,
+  answerState = "idle",
   onSubmit,
 }: {
   target: Country;
+  answerState?: "idle" | "correct" | "wrong" | "revealed";
   onSubmit: (ok: boolean) => void;
 }) {
   return (
@@ -317,7 +320,13 @@ function FlagToType({
         />
       </motion.div>
       <div className="w-full max-w-md mx-auto">
-        <HardInput target={target} onSubmit={onSubmit} placeholder="Type the country…" />
+        <HardInput
+          target={target}
+          answerState={answerState}
+          correctAnswer={target.name}
+          onSubmit={onSubmit}
+          placeholder="Type the country…"
+        />
       </div>
     </div>
   );

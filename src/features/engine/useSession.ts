@@ -7,6 +7,7 @@ import { rowToCard, cardToRowUpdates, processReview, getFsrsParameters } from "@
 import { recordConceptAttempt } from "@/lib/db/progressRepo";
 import { db, type ConceptProgressRow, type GameMode, type Skill } from "@/lib/db/orbita-db";
 import { recordSessionEnd } from "@/lib/db/repo";
+import { playAnswerSound } from "@/lib/audio";
 import { State, ConvertStepUnitToMinutes } from "ts-fsrs";
 import { formatConceptId, parseConceptId } from "@/lib/fsrs/concept";
 
@@ -350,6 +351,7 @@ export function createSessionStore<TItem = Country>({
     submit(isCorrect, submitOpts) {
       const s = get();
       if (s.answerState !== "idle") return;
+      playAnswerSound(isCorrect);
       const target = s.queue[s.index];
       const targetConcept = s.conceptQueue[s.index];
       if (!target) return;
