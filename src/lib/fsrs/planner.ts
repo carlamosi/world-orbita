@@ -97,6 +97,7 @@ export function generateDueTodayQueue(
   bucketRelearning.sort(byOverdue);
   bucketLearning.sort(byOverdue);
   bucketReview.sort(byOverdue);
+  bucketNew.sort((a, b) => a.conceptId.localeCompare(b.conceptId));
 
   const rawQueue = [
     ...bucketRelearning,
