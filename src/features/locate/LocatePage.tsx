@@ -6,7 +6,6 @@ import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import { PromptPill } from "@/features/engine/PromptPill";
-import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { FlagImage } from "@/components/ui/FlagImage";
@@ -21,8 +20,6 @@ import { cn } from "@/lib/utils";
 import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
 import { getPref, setPref } from "@/lib/db/repo";
-import { useLocateSound } from "@/hooks/useLocateSound";
-import { GlobeFeedbackToast, type GlobeToast } from "@/components/ui/GlobeFeedbackToast";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
@@ -79,17 +76,10 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 
   const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
 
-  // Find-mode: ephemeral centered toast (replaces bottom FeedbackBar)
-  const [findToast, setFindToast] = useState<GlobeToast | null>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const { playCorrect, playWrong, unlock } = useLocateSound();
-
   // Start / restart session logic
   const startSession = useCallback(
     (c: ContinentChoice, sMode: SubMode, findLength: SessionMode) => {
       setLastWrongIso3(null); // Reset differential feedback state
-      setFindToast(null);
       if (sMode === "find" && findLength === "complete") {
         const all = selectAllForContinent(c === "All" ? null : c);
         void findSession.start({ allCountries: all, subMode: sMode });
@@ -137,17 +127,10 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
   }, [current, sub, difficulty, continent]);
 
   const handleNameSubmit = useCallback(
-    (isCorrect: boolean, country: Country) => {
-      unlock();
-      if (isCorrect) {
-        playCorrect();
-      } else {
-        playWrong();
-      }
-      setFindToast(null); // The correct/wrong badge appears directly in 3D over the exact country
+    (isCorrect: boolean, _country: Country) => {
       s.submit(isCorrect);
     },
-    [playCorrect, playWrong, unlock, s],
+    [s],
   );
 
   return (
@@ -174,20 +157,9 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               sub === "find"
                 ? (iso3) => {
                     if (current && s.answerState === "idle") {
-                      unlock(); // Unlock audio context on first user gesture
                       const isCorrect = iso3 === current.iso3;
                       if (!isCorrect) {
                         setLastWrongIso3(iso3);
-                        playWrong();
-                        setFindToast(null); // No redundant banner under "Find x", 3D badge is placed directly on clicked country
-                      } else {
-                        playCorrect();
-                        setFindToast({ kind: "correct", name: current.name });
-                      }
-                      // Auto-dismiss toast snappy and visual
-                      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-                      if (isCorrect) {
-                        toastTimerRef.current = setTimeout(() => setFindToast(null), 1200);
                       }
                       s.submit(isCorrect);
                     }
@@ -278,9 +250,6 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               }
             />
           </div>
-
-          {/* Centered ripple HUD feedback toast */}
-          <GlobeFeedbackToast toast={findToast} />
 
           {/* Answer Controls & Surface */}
           <div className="absolute bottom-8 inset-x-0 z-30 px-4">

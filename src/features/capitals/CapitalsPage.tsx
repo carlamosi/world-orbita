@@ -18,8 +18,6 @@ import {
 import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
 import { getPref, setPref } from "@/lib/db/repo";
-import { useLocateSound } from "@/hooks/useLocateSound";
-import { GlobeFeedbackToast, type GlobeToast } from "@/components/ui/GlobeFeedbackToast";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
@@ -38,7 +36,6 @@ export default function CapitalsPage() {
   const [sub, setSub] = useState<SubMode>("countryToCap");
   const [continent, setContinent] = useContinentPref();
   const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
-  const { playCorrect, playWrong, unlock } = useLocateSound();
 
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
@@ -97,15 +94,6 @@ export default function CapitalsPage() {
     </div>
   );
 
-  const [delayedReveal, setDelayedReveal] = useState(false);
-  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Clear timers on unmount or question change
-  useEffect(() => {
-    setDelayedReveal(false);
-    if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
-  }, [current?.iso3]);
-
   if (activeSub === "locator") {
     return (
       <div className="relative min-h-dvh pt-20">
@@ -115,31 +103,18 @@ export default function CapitalsPage() {
               countries={COUNTRIES}
               highlightIso3={s.answerState === "correct" ? current?.iso3 : null}
               revealIso3={
-                (s.answerState === "wrong" && delayedReveal) || s.answerState === "revealed"
+                s.answerState === "wrong" || s.answerState === "revealed"
                   ? current?.iso3
                   : null
               }
               wrongIso3={s.answerState === "wrong" ? lastWrongIso3 : null}
               onCountryClick={(iso3) => {
                 if (current && s.answerState === "idle") {
-                  unlock();
                   const isCorrect = iso3 === current.iso3;
                   if (!isCorrect) {
                     setLastWrongIso3(iso3);
-                    setDelayedReveal(false);
-                    playWrong();
-                    // Phase 1: User error state immediately on clicked country
-                    s.submit(false);
-                    // Phase 2: After 600ms, reveal correct country & capital
-                    if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
-                    revealTimerRef.current = setTimeout(() => {
-                      setDelayedReveal(true);
-                    }, 600);
-                  } else {
-                    setDelayedReveal(false);
-                    playCorrect();
-                    s.submit(true);
                   }
+                  s.submit(isCorrect);
                 }
               }}
               disableHoverLabel
