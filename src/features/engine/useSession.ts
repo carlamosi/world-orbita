@@ -437,11 +437,18 @@ export function createSessionStore<TItem = Country>({
         const rawTarget = target as unknown as SessionItemLike;
         const targetId = resolveId(target);
         const conceptSkill = skill;
+        const subModeMap: Record<string, string> = {
+          capital: "countryToCap",
+          flag: "flagToCountry",
+          location: "find",
+          name: "name",
+        };
+        const defaultSubMode = subModeMap[conceptSkill] ?? conceptSkill;
         const conceptId = formatConceptId({
           domain: domain as any,
           entityId: targetId,
           skill: conceptSkill,
-          subMode: "default",
+          subMode: defaultSubMode,
         });
         effectiveConcept = {
           conceptId,
