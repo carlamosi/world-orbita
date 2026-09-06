@@ -85,10 +85,10 @@ export async function recordConceptAttempt(
       answeredAt: historyRow.answeredAt,
     };
 
-    // 4. Add to sync outbox
-    await db().outbox.bulkAdd([
+    // 4. Add to sync outbox (using bulkPut to avoid ConstraintError on unique op_id index)
+    await db().outbox.bulkPut([
       {
-        op_id: crypto.randomUUID(),
+        op_id: historyRow.op_id + ":cp",
         entity: "concept_progress",
         op: "upsert",
         payload: conceptPayload,

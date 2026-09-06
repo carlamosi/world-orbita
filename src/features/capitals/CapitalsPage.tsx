@@ -6,7 +6,6 @@ import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import { PromptPill } from "@/features/engine/PromptPill";
-import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { HardInput } from "@/features/engine/HardInput";
 import { Button } from "@/components/ui/orbita-button";
@@ -19,8 +18,6 @@ import {
 import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
 import { getPref, setPref } from "@/lib/db/repo";
-import { useLocateSound } from "@/hooks/useLocateSound";
-import { GlobeFeedbackToast, type GlobeToast } from "@/components/ui/GlobeFeedbackToast";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
@@ -39,7 +36,6 @@ export default function CapitalsPage() {
   const [sub, setSub] = useState<SubMode>("countryToCap");
   const [continent, setContinent] = useContinentPref();
   const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
-  const { playCorrect, playWrong, unlock } = useLocateSound();
 
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
@@ -98,15 +94,6 @@ export default function CapitalsPage() {
     </div>
   );
 
-  const [delayedReveal, setDelayedReveal] = useState(false);
-  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Clear timers on unmount or question change
-  useEffect(() => {
-    setDelayedReveal(false);
-    if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
-  }, [current?.iso3]);
-
   if (activeSub === "locator") {
     return (
       <div className="relative min-h-dvh pt-20">
@@ -116,31 +103,18 @@ export default function CapitalsPage() {
               countries={COUNTRIES}
               highlightIso3={s.answerState === "correct" ? current?.iso3 : null}
               revealIso3={
-                (s.answerState === "wrong" && delayedReveal) || s.answerState === "revealed"
+                s.answerState === "wrong" || s.answerState === "revealed"
                   ? current?.iso3
                   : null
               }
               wrongIso3={s.answerState === "wrong" ? lastWrongIso3 : null}
               onCountryClick={(iso3) => {
                 if (current && s.answerState === "idle") {
-                  unlock();
                   const isCorrect = iso3 === current.iso3;
                   if (!isCorrect) {
                     setLastWrongIso3(iso3);
-                    setDelayedReveal(false);
-                    playWrong();
-                    // Phase 1: User error state immediately on clicked country
-                    s.submit(false);
-                    // Phase 2: After 600ms, reveal correct country & capital
-                    if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
-                    revealTimerRef.current = setTimeout(() => {
-                      setDelayedReveal(true);
-                    }, 600);
-                  } else {
-                    setDelayedReveal(false);
-                    playCorrect();
-                    s.submit(true);
                   }
+                  s.submit(isCorrect);
                 }
               }}
               disableHoverLabel
@@ -206,24 +180,12 @@ export default function CapitalsPage() {
                 <HardInput
                   target={current}
                   matchTarget={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
+                  correctAnswer={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
+                  answerState={s.answerState}
                   onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
                   placeholder={activeSub === "countryToCap" ? "Type the capital…" : "Type the country…"}
                 />
               </div>
-            </div>
-          </div>
-
-          <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
-            <div className="pointer-events-auto">
-              <FeedbackBar
-                show={s.answerState !== "idle"}
-                state={s.answerState as "correct" | "wrong" | "revealed"}
-                title={`${current.name} — ${current.capital}`}
-                subtitle={`Capital of ${current.name}`}
-                onNext={() => s.next()}
-                onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                hideNext
-              />
             </div>
           </div>
         </>

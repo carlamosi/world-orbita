@@ -905,16 +905,14 @@ export default function Globe3D({
       const f = featureByIso3.get(effReveal);
       const c = countryByIso3.get(effReveal);
       let name = f?.properties.name ?? c?.name ?? effReveal;
-      let capital = c?.capital ?? null;
       let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
       let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
 
       if (!f && !c && overlayPolygons) {
-        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string; capital?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
+        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
           const fid = op.properties?.id ?? op.id ?? "";
           if (fid === effReveal) {
             name = op.properties?.name ?? fid;
-            capital = op.properties?.capital ?? null;
             try {
               const geom = op.geometry;
               if (geom) {
@@ -940,51 +938,11 @@ export default function Globe3D({
         }
       }
 
-      pills.push({ id: `reveal-${effReveal}`, iso3: effReveal, name, capital, lat, lng, kind: "correct" });
-    } else if (effHighlight && effHighlight !== effWrong) {
-      const f = featureByIso3.get(effHighlight);
-      const c = countryByIso3.get(effHighlight);
-      let name = f?.properties.name ?? c?.name ?? effHighlight;
-      let capital = c?.capital ?? null;
-      let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
-      let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
-
-      if (!f && !c && overlayPolygons) {
-        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string; capital?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
-          const fid = op.properties?.id ?? op.id ?? "";
-          if (fid === effHighlight) {
-            name = op.properties?.name ?? fid;
-            capital = op.properties?.capital ?? null;
-            try {
-              const geom = op.geometry;
-              if (geom) {
-                const ring = geom.type === "Polygon"
-                  ? (geom.coordinates as number[][][])[0]
-                  : (geom.coordinates as number[][][][])[0]?.[0];
-                if (ring && ring.length > 0) {
-                  let sumLng = 0;
-                  let sumLat = 0;
-                  for (const pt of ring) {
-                    sumLng += pt[0] ?? 0;
-                    sumLat += pt[1] ?? 0;
-                  }
-                  lng = sumLng / ring.length;
-                  lat = sumLat / ring.length;
-                }
-              }
-            } catch {
-              // fallback
-            }
-            break;
-          }
-        }
-      }
-
-      pills.push({ id: `highlight-${effHighlight}`, iso3: effHighlight, name, capital, lat, lng, kind: "correct" });
+      pills.push({ id: `reveal-${effReveal}`, iso3: effReveal, name, lat, lng, kind: "correct" });
     }
 
     return pills;
-  }, [effWrong, effReveal, effHighlight, featureByIso3, countryByIso3, overlayPolygons]);
+  }, [effWrong, effReveal, featureByIso3, countryByIso3, overlayPolygons]);
 
   const htmlElementFn = useCallback((d: object) => {
     const p = d as SpatialPill;
@@ -1030,34 +988,27 @@ export default function Globe3D({
         </style>
       `;
     } else {
-      // Correct or Reveal: compact, premium 2-line label anchored to country
-      const capitalLine = p.capital
-        ? `<div style="font-size:10px;font-weight:500;color:rgba(255,255,255,0.7);letter-spacing:0.02em;margin-top:1px;">Capital · <span style="color:#a7f3d0;font-weight:600;">${p.capital}</span></div>`
-        : "";
-
+      // Reveal correct country: clean, single-line badge with ONLY the country name
       el.innerHTML = `
         <div style="
           display: inline-flex;
-          flex-direction: column;
-          align-items: flex-start;
+          align-items: center;
+          gap: 6px;
           padding: 6px 14px;
           background: rgba(4, 18, 12, 0.92);
           border: 1.5px solid rgba(16, 185, 129, 0.85);
           box-shadow: 0 0 18px rgba(16, 185, 129, 0.4), 0 4px 14px rgba(0,0,0,0.6);
-          border-radius: 12px;
+          border-radius: 9999px;
           color: #fff;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
           backdrop-filter: blur(12px);
           white-space: nowrap;
           ${isReducedMotion ? "" : "animation: correctPop 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;"}
         ">
-          <div style="display:inline-flex;align-items:center;gap:6px;">
-            <span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;background:rgba(16,185,129,0.3);border-radius:50%;color:#6ee7b7;font-size:10px;font-weight:900;">
-              ✓
-            </span>
-            <span style="color:#6ee7b7;font-size:12px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;">${p.name}</span>
-          </div>
-          ${capitalLine}
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;background:rgba(16,185,129,0.3);border-radius:50%;color:#6ee7b7;font-size:10px;font-weight:900;">
+            ✓
+          </span>
+          <span style="color:#6ee7b7;font-size:12px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;">${p.name}</span>
         </div>
         <style>
           @keyframes correctPop {

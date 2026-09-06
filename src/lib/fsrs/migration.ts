@@ -26,7 +26,16 @@ export async function seedFsrsFromSm2(): Promise<void> {
       const stat = skills[skill];
       if (!stat) continue;
       
-      const conceptId = `${iso3}:${skill}`;
+      // BUG-04 FIX: use canonical 3-part conceptId matching v9 schema.
+      // v9 migration renamed all "FRA:capital" → "FRA:capital:countryToCap" etc.
+      const subModeMap: Record<string, string> = {
+        capital: "countryToCap",
+        flag: "flagToCountry",
+        location: "find",
+        name: "name",
+      };
+      const subMode = subModeMap[skill] ?? skill;
+      const conceptId = `${iso3}:${skill}:${subMode}`;
       const fsrs = createNewCard();
       fsrs.reps = stat.timesRight + stat.timesWrong;
       
@@ -102,6 +111,7 @@ export async function migrateCustomFsrsToOfficial(): Promise<void> {
         fsrs_state: numericState,
         fsrs_elapsed_days: row.fsrs_elapsed_days ?? 0,
         fsrs_scheduled_days: row.fsrs_scheduled_days ?? 0,
+        updated_at: Date.now(), // BUG-20 FIX: bump so sync workers detect this migration
         dirty: 1 // Trigger sync
       });
     }

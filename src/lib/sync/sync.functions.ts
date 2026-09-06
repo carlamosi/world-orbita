@@ -4,7 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { PullResult, PushResult } from "./types";
 
 const MutationSchema = z.object({
-  op_id: z.string().uuid(),
+  op_id: z.string().min(1),
   entity: z.enum([
     "sessions_log",
     "country_progress",
@@ -28,7 +28,7 @@ const PushSchema = z.object({
 // We return a JSON string and parse on the client.
 const _syncPush = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => PushSchema.parse(d))
+  .validator((d: unknown) => PushSchema.parse(d))
   .handler(async ({ data, context }): Promise<string> => {
     const { supabase } = context;
     const { data: out, error } = await supabase.rpc("sync_push", {
@@ -45,7 +45,7 @@ const PullSchema = z.object({
 
 const _syncPull = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => PullSchema.parse(d))
+  .validator((d: unknown) => PullSchema.parse(d))
   .handler(async ({ data, context }): Promise<string> => {
     const { supabase } = context;
     const { data: out, error } = await supabase.rpc("sync_pull", {

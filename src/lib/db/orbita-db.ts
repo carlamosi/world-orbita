@@ -1,7 +1,11 @@
 import Dexie, { type Table } from "dexie";
 import { ensureDb, getDbSync } from "./dbProvider";
 import { State } from "ts-fsrs";
-import type { Grade } from "../fsrs/engine"; // ORBITA legacy grade 0-3 for UI display
+// BUG-01 FIX: Grade was imported from the legacy engine.ts (0-indexed: 0=Again)
+// which conflicts with ts-fsrs Rating (1-indexed: 1=Again). Store grade as
+// plain number to accept both legacy values and ts-fsrs Grade without mismatch.
+// engine.ts is now unreferenced and can be deleted.
+type Grade = number;
 
 /**
  * ORBITA local-first store (Dexie v3 with sync support).
@@ -314,6 +318,7 @@ export class OrbitaDB extends Dexie {
       
       const history = await tx.table<QuestionHistoryRow>("question_history").toArray();
       const hUpdates = [];
+      const hDeletes: string[] = [];
       for (const h of history) {
         const parts = h.conceptId.split(":");
         if (parts.length === 2) {
@@ -325,12 +330,17 @@ export class OrbitaDB extends Dexie {
           else if (skill === "location") newSubMode = "find";
           
           if (newSubMode) {
-            hUpdates.push({ ...h, conceptId: `${h.conceptId}:${newSubMode}` });
+            // Use a new op_id for the renamed row so it is a clean new record
+            const newOpId = h.op_id + ":v9";
+            hUpdates.push({ ...h, op_id: newOpId, conceptId: `${h.conceptId}:${newSubMode}` });
+            hDeletes.push(h.op_id); // remove old 2-part row to prevent double-counting
           }
         }
       }
       if (hUpdates.length > 0) {
         await tx.table("question_history").bulkPut(hUpdates);
+        // BUG-08 FIX: delete old 2-part rows to prevent duplicate analytics
+        await tx.table("question_history").bulkDelete(hDeletes);
       }
     });
   }

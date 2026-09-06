@@ -13,7 +13,7 @@ const FAST_MS = 4_000;          // ≤ 4s → "fast & confident"
 const NORMAL_MS = 12_000;       // ≤ 12s → "normal"
 
 export interface SrsState {
-  /** Easiness factor (SM-2), clamped to [1.3, 2.8]. */
+  /** Easiness factor (SM-2), clamped to [1.3, 2.5]. */
   ef: number;
   /** Successful repetitions in a row. Reset to 0 on lapse. */
   reps: number;
@@ -58,7 +58,7 @@ export function updateSrs(
   // EF update (SM-2): ef' = ef + (0.1 - (5-q)*(0.08 + (5-q)*0.02))
   let ef = base.ef + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
   if (ef < 1.3) ef = 1.3;
-  if (ef > 2.8) ef = 2.8;
+  if (ef > 2.5) ef = 2.5; // BUG-13 FIX: standard SM-2 cap is 2.5, not 2.8
 
   let reps: number;
   let interval: number;

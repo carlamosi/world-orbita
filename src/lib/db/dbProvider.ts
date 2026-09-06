@@ -80,7 +80,11 @@ async function mergeLocalIntoUserDb(local: OrbitaDB, target: OrbitaDB) {
     local.gameSessions.toArray().catch(() => []),
   ]);
   const targetCount = await target.countryProgress.count().catch(() => 0);
-  if (targetCount > 0) return;
+  // Also check FSRS concept_progress for the bail-out — if the user already
+  // has per-user FSRS data we don't want to overwrite it.
+  const targetFsrsCount = await target.concept_progress.count().catch(() => 0);
+  if (targetCount > 0 || targetFsrsCount > 0) return;
+
   const { getClientId, newOpId } = await import("@/lib/sync/clientId");
   const cid = getClientId();
   const now = Date.now();
@@ -88,6 +92,16 @@ async function mergeLocalIntoUserDb(local: OrbitaDB, target: OrbitaDB) {
   if (progress.length) await target.countryProgress.bulkPut(progress).catch(() => {});
   if (unlocks.length) await target.unlocks.bulkPut(unlocks).catch(() => {});
   if (sessions.length) await target.gameSessions.bulkPut(sessions).catch(() => {});
+
+  // --- BUG-10 FIX: copy FSRS tables so spaced-repetition progress survives login ---
+  const [concepts, history, dailySummaries] = await Promise.all([
+    local.concept_progress.toArray().catch(() => []),
+    local.question_history.toArray().catch(() => []),
+    local.daily_summary.toArray().catch(() => []),
+  ]);
+  if (concepts.length) await target.concept_progress.bulkPut(concepts).catch(() => {});
+  if (history.length) await target.question_history.bulkPut(history).catch(() => {});
+  if (dailySummaries.length) await target.daily_summary.bulkPut(dailySummaries).catch(() => {});
 
   const rows = [
     ...progress.map((r) => ({
@@ -115,6 +129,32 @@ async function mergeLocalIntoUserDb(local: OrbitaDB, target: OrbitaDB) {
         progress: u.progress,
         unlocked_at: u.unlockedAt ? new Date(u.unlockedAt).toISOString() : null,
         client_id: cid,
+      },
+      created_at: now,
+      attempts: 0,
+      next_attempt_at: now,
+      status: "pending" as const,
+    })),
+    // Queue FSRS concept_progress for cloud sync
+    ...concepts.map((c) => ({
+      op_id: newOpId(),
+      entity: "concept_progress" as const,
+      op: "upsert" as const,
+      payload: {
+        conceptId: c.conceptId,
+        iso3: c.iso3,
+        skill: c.skill,
+        fsrs_state: c.fsrs_state,
+        fsrs_stability: c.fsrs_stability,
+        fsrs_difficulty: c.fsrs_difficulty,
+        fsrs_due: c.fsrs_due,
+        fsrs_reps: c.fsrs_reps,
+        fsrs_lapses: c.fsrs_lapses,
+        fsrs_last_review: c.fsrs_last_review,
+        fsrs_elapsed_days: c.fsrs_elapsed_days ?? 0,
+        fsrs_scheduled_days: c.fsrs_scheduled_days ?? 0,
+        version: c.version,
+        updated_at: c.updated_at,
       },
       created_at: now,
       attempts: 0,

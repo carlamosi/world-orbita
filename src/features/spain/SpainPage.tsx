@@ -42,8 +42,6 @@ import {
   getSpainFlagUrl,
 } from "@/lib/spain";
 import { useSearch } from "@tanstack/react-router";
-import { useLocateSound } from "@/hooks/useLocateSound";
-import { GlobeFeedbackToast, type GlobeToast } from "@/components/ui/GlobeFeedbackToast";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
@@ -202,9 +200,6 @@ export default function SpainPage() {
   const [lastWrongId, setLastWrongId] = useState<string | null>(null);
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
   const [selectedFlagOptionId, setSelectedFlagOptionId] = useState<string | null>(null);
-  const [locateToast, setLocateToast] = useState<GlobeToast | null>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { playCorrect, playWrong, unlock } = useLocateSound();
 
   const ccaaFind = useCCAAFindSession();
   const provinceFind = useProvinceFindSession();
@@ -288,30 +283,17 @@ export default function SpainPage() {
     (d: object) => {
       if (skill !== "locate") return;
       if (!current || s.answerState !== "idle") return;
-      unlock();
       const f = d as { properties?: { id?: string } };
       const clickedId = f.properties?.id ?? "";
       const isCorrect = clickedId === current.id;
       if (!isCorrect) {
         setLastWrongId(clickedId);
-        playWrong();
-        setLocateToast(null); // 3D badge shown directly on clicked region — no duplicate text
       } else {
         setLastWrongId(null);
-        playCorrect();
-        setLocateToast({
-          kind: "correct",
-          name: current.name,
-          subtitle: current.capital ? `Capital: ${current.capital}` : undefined,
-        });
-      }
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      if (isCorrect) {
-        toastTimerRef.current = setTimeout(() => setLocateToast(null), 1200);
       }
       s.submit(isCorrect);
     },
-    [skill, current, s, unlock, playCorrect, playWrong],
+    [skill, current, s],
   );
 
   const handleOverlayHover = useCallback(
@@ -629,9 +611,6 @@ export default function SpainPage() {
                   title={promptTitle ?? ""}
                 />
               </div>
-
-              {/* Centered ripple HUD feedback toast for locate mode */}
-              <GlobeFeedbackToast toast={locateToast} />
 
               <div className="absolute bottom-8 inset-x-0 z-30 px-4">
                 {skill === "locate" ? null : s.answerState === "idle" ? (

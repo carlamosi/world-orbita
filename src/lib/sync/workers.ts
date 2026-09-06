@@ -74,8 +74,11 @@ export async function runPushOnce() {
     }));
     try {
       const result = await syncPush({ data: { mutations } });
-      const acceptedSet = new Set(result.accepted);
-      const rejectedMap = new Map(result.rejected.map((r) => [r.op_id, r.reason]));
+      const accepted = Array.isArray(result?.accepted) ? result.accepted : [];
+      const rejected = Array.isArray(result?.rejected) ? result.rejected : [];
+      const canonical = Array.isArray(result?.canonical) ? result.canonical : [];
+      const acceptedSet = new Set(accepted);
+      const rejectedMap = new Map(rejected.map((r) => [r.op_id, r.reason]));
       for (const r of due) {
         if (acceptedSet.has(r.op_id)) {
           await db().outbox.delete(r.id!);
@@ -101,7 +104,7 @@ export async function runPushOnce() {
         }
       }
       // apply canonical patches from server (conflict resolution)
-      for (const c of result.canonical) {
+      for (const c of canonical) {
         const row = (c as Record<string, unknown>).payload as Record<string, unknown> | undefined;
         if (!row) continue;
         try {
@@ -195,7 +198,7 @@ async function runPullOnce() {
   try {
     const cursors = await getCursors();
     const result = await syncPull({ data: { cursors } });
-    for (const [entity, payload] of Object.entries(result)) {
+    for (const [entity, payload] of Object.entries(result ?? {})) {
       if (!payload) continue;
       const rows = payload.rows ?? [];
       if (entity === "country_progress") {

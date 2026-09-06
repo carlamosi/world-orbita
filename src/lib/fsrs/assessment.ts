@@ -131,14 +131,14 @@ export function assess(attempt: QuestionAttempt): AssessmentResult {
   if (!validationResult.correct) {
     // Definitively wrong — unambiguous memory failure
     outcome = "again";
-  } else if (validationResult.softCorrect || hintsUsed > 0 || speed === "slow" || speed === "very_slow") {
-    // Functionally correct but not exact — partial recall, or hesitant, or assisted
+  } else if (validationResult.softCorrect || hintsUsed > 0 || speed === "very_slow") {
+    // Functionally correct but not exact — partial recall, or severe hesitation (>15s), or assisted
     outcome = "hard";
   } else if (speed === "very_fast") {
     // Clean correct answer, instant recall
     outcome = "easy";
   } else {
-    // Clean correct answer, normal recall
+    // Clean correct answer, normal recall (including normal thinking/typing speed)
     outcome = "good";
   }
 

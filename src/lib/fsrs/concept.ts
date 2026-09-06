@@ -1,4 +1,4 @@
-﻿import type { GeoDomain } from "@/types/geo";
+import type { GeoDomain } from "@/types/geo";
 
 export interface ConceptKey {
   domain?: GeoDomain;
@@ -25,10 +25,17 @@ export function formatConceptId({
   skill,
   subMode,
 }: ConceptKey): string {
-  const sm = subMode || "default";
   if (domain === "world") {
+    const subModeMap: Record<string, string> = {
+      capital: "countryToCap",
+      flag: "flagToCountry",
+      location: "find",
+      name: "name",
+    };
+    const sm = subMode && subMode !== "default" ? subMode : (subModeMap[skill] ?? skill);
     return `${entityId}:${skill}:${sm}`;
   }
+  const sm = subMode ?? skill;
   return `${domain}:${entityId}:${skill}:${sm}`;
 }
 

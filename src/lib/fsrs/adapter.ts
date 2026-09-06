@@ -125,6 +125,11 @@ export function rowToCard(row: ConceptProgressRow): Card {
   card.elapsed_days = row.fsrs_elapsed_days ?? 0;
   card.scheduled_days = row.fsrs_scheduled_days ?? 0;
 
+  // Defensive fallback: if a card is marked as Review but has 0/null stability, reset to minimal viable stability
+  if (card.state === State.Review && (!card.stability || card.stability <= 0)) {
+    card.stability = 1;
+  }
+
   if (row.fsrs_last_review && row.fsrs_last_review > 0) {
     card.last_review = new Date(row.fsrs_last_review);
   }
