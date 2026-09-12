@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSyncStore } from "@/lib/sync/useSyncStore";
 import { forceSync, forceFullResync, clearDeadLetter } from "@/lib/sync/workers";
-import { db } from "@/lib/db/orbita-db";
+import { db, type OutboxRow } from "@/lib/db/orbita-db";
 
 export const Route = createFileRoute("/_authenticated/account/sync")({
   head: () => ({ meta: [{ title: "Sync · Orbita" }] }),
@@ -21,6 +21,7 @@ function SyncPage() {
   const { status, queued, lastPushAt, lastPullAt, lastError } = useSyncStore();
   const [cursors, setCursors] = useState<Record<string, string>>({});
   const [dead, setDead] = useState<number>(0);
+  const [failedItems, setFailedItems] = useState<OutboxRow[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,9 +31,14 @@ function SyncPage() {
         const all = await db().sync_meta.toArray();
         for (const row of all) c[row.key] = row.value;
         const d = await db().outbox.where("status").equals("dead").count();
+        // Show pending items that have errors (retried at least once)
+        const failed = await db()
+          .outbox.filter((r) => r.status !== "dead" && r.attempts > 0 && !!r.last_error)
+          .toArray();
         if (!cancelled) {
           setCursors(c);
           setDead(d);
+          setFailedItems(failed);
         }
       } catch {
         // ignore
@@ -64,7 +70,7 @@ function SyncPage() {
 
       <div className="mt-6 flex flex-wrap gap-2">
         <button
-          onClick={forceSync}
+          onClick={() => void forceSync()}
           className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-500 to-cyan-500 px-4 py-2 text-xs font-semibold text-white"
         >
           Force sync now
@@ -85,7 +91,27 @@ function SyncPage() {
         )}
       </div>
 
-      <section className="mt-8 glass rounded-2xl p-5">
+      {failedItems.length > 0 && (
+        <section className="mt-6 glass rounded-2xl p-5">
+          <h2 className="text-sm uppercase tracking-wider text-white/50">
+            Retrying ({failedItems.length})
+          </h2>
+          <ul className="mt-3 space-y-2 text-[11px] font-mono">
+            {failedItems.map((item) => (
+              <li key={item.op_id} className="flex flex-col gap-0.5">
+                <span className="text-white/70">
+                  [{item.entity}] attempt {item.attempts}/{10}
+                </span>
+                {item.last_error && (
+                  <span className="text-rose-300/80 truncate">{item.last_error}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="mt-6 glass rounded-2xl p-5">
         <h2 className="text-sm uppercase tracking-wider text-white/50">Cursors</h2>
         <ul className="mt-3 space-y-1 text-[11px] text-white/70 font-mono">
           {Object.entries(cursors).length === 0 && (

@@ -358,7 +358,16 @@ function onOffline() {
   useSyncStore.getState().setStatus("offline");
 }
 
-export function forceSync() {
+export async function forceSync() {
+  // Reset backoff on all pending items so they are immediately eligible.
+  try {
+    await db()
+      .outbox.where("status")
+      .equals("pending")
+      .modify({ next_attempt_at: 0 } as Partial<import("../db/orbita-db").OutboxRow>);
+  } catch {
+    // ignore
+  }
   void runPullOnce();
   void runPushOnce();
 }
