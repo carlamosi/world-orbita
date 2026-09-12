@@ -86,9 +86,12 @@ export async function recordConceptAttempt(
     };
 
     // 4. Add to sync outbox (using bulkPut to avoid ConstraintError on unique op_id index)
+    // IMPORTANT: op_id MUST be a plain UUID — the RPC casts it with ::uuid server-side.
+    //            concept_progress gets its own fresh UUID (never suffix an existing UUID).
+    const cpOpId = crypto.randomUUID();
     await db().outbox.bulkPut([
       {
-        op_id: historyRow.op_id + ":cp",
+        op_id: cpOpId,
         entity: "concept_progress",
         op: "upsert",
         payload: conceptPayload,

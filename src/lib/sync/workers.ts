@@ -58,6 +58,25 @@ async function recoverInFlight() {
   }
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Delete any outbox items whose op_id is not a valid UUID.
+ * The sync_push RPC casts op_id with ::uuid — any non-UUID string throws
+ * "invalid input syntax for type uuid" and gets permanently rejected.
+ * Old versions of the code appended ":cp" to UUIDs for concept_progress items,
+ * producing malformed op_ids that can never succeed.
+ */
+async function purgeBrokenOpIds() {
+  try {
+    await db()
+      .outbox.filter((r) => !UUID_RE.test(r.op_id))
+      .delete();
+  } catch {
+    // ignore — non-critical
+  }
+}
+
 export async function runPushOnce() {
   if (pushing) return;
   if (!useSyncStore.getState().signedIn) return;
@@ -335,9 +354,9 @@ export function startSyncWorkers() {
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
   }
-  // Recover any items stuck in "in_flight" from a previous crash/refresh,
-  // then start the first push cycle.
-  recoverInFlight().then(() => {
+  // On startup: purge permanently-broken op_ids, reset in_flight items,
+  // then run first push/pull cycle.
+  Promise.all([purgeBrokenOpIds(), recoverInFlight()]).then(() => {
     void runPullOnce();
     void runPushOnce();
   });
