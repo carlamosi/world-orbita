@@ -34,10 +34,27 @@ function backoff(attempts: number): number {
 
 async function refreshQueued() {
   try {
-    const n = await db().outbox.where("status").notEqual("dead").count();
+    // Count only "pending" items — in_flight are mid-push (not stuck), dead are exhausted.
+    const n = await db().outbox.where("status").equals("pending").count();
     useSyncStore.getState().setQueued(n);
   } catch {
     // ignore
+  }
+}
+
+/**
+ * On startup, reset any `in_flight` items back to `pending`.
+ * These are items that were mid-push when the app was closed or crashed.
+ * Without this, they remain stuck forever since runPushOnce only picks up `pending` items.
+ */
+async function recoverInFlight() {
+  try {
+    await db()
+      .outbox.where("status")
+      .equals("in_flight")
+      .modify({ status: "pending", next_attempt_at: 0 } as Partial<import("../db/orbita-db").OutboxRow>);
+  } catch {
+    // ignore — non-critical
   }
 }
 
@@ -304,8 +321,12 @@ export function startSyncWorkers() {
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
   }
-  void runPullOnce();
-  void runPushOnce();
+  // Recover any items stuck in "in_flight" from a previous crash/refresh,
+  // then start the first push cycle.
+  recoverInFlight().then(() => {
+    void runPullOnce();
+    void runPushOnce();
+  });
 }
 
 export function stopSyncWorkers() {
@@ -353,6 +374,16 @@ export async function forceFullResync() {
   }
   void runPullOnce();
   void runPushOnce();
+}
+
+/** Clear all dead-letter outbox items (exhausted retries). */
+export async function clearDeadLetter() {
+  try {
+    await db().outbox.where("status").equals("dead").delete();
+    await refreshQueued();
+  } catch {
+    // ignore
+  }
 }
 
 export { refreshQueued };

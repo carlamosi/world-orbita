@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSyncStore } from "@/lib/sync/useSyncStore";
-import { forceSync, forceFullResync } from "@/lib/sync/workers";
+import { forceSync, forceFullResync, clearDeadLetter } from "@/lib/sync/workers";
 import { db } from "@/lib/db/orbita-db";
 
 export const Route = createFileRoute("/_authenticated/account/sync")({
@@ -75,6 +75,14 @@ function SyncPage() {
         >
           Force full resync
         </button>
+        {dead > 0 && (
+          <button
+            onClick={() => void clearDeadLetter()}
+            className="inline-flex items-center rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-medium text-rose-300 hover:bg-rose-500/20"
+          >
+            Clear {dead} dead-letter {dead === 1 ? "item" : "items"}
+          </button>
+        )}
       </div>
 
       <section className="mt-8 glass rounded-2xl p-5">
