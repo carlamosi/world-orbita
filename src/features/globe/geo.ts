@@ -70,13 +70,41 @@ interface TopoLike {
 
 let warnedMissing = false;
 
+/**
+ * Disputed / unrecognized territories in Natural Earth data that carry no
+ * official UN M49 id.  Kosovo uses the de-facto ISO3 "XKX" (World Bank, EU).
+ * N. Cyprus and Somaliland have no standardised code and are silently skipped.
+ */
+const NAME_TO_ISO3: Record<string, string> = {
+  Kosovo: "XKX",
+};
+
 function enrich(raw: FeatureCollection): CountryFeature[] {
   const out: CountryFeature[] = [];
   const missing: string[] = [];
   for (const f of raw.features) {
     if (!f.geometry) continue;
     if (f.geometry.type !== "Polygon" && f.geometry.type !== "MultiPolygon") continue;
-    const m49 = String(f.id ?? "").padStart(3, "0");
+
+    // Features with no id are disputed / unrecognised territories; try a
+    // name-based fallback before giving up.
+    if (f.id == null) {
+      const name = (f.properties as { name?: string })?.name ?? "";
+      const iso3 = NAME_TO_ISO3[name];
+      if (!iso3) continue; // silently skip (N. Cyprus, Somaliland, etc.)
+      const geom = f.geometry as CountryGeometry;
+      const centroid = computeCentroid(geom);
+      const angularSpan = computeAngularSpan(geom, centroid);
+      out.push({
+        type: "Feature",
+        id: iso3,
+        geometry: geom,
+        properties: { iso3, name, area: computeArea(geom), centroid, angularSpan },
+      });
+      continue;
+    }
+
+    const m49 = String(f.id).padStart(3, "0");
     const iso3 = M49_TO_ISO3[m49];
     if (!iso3) {
       missing.push(m49);
@@ -105,7 +133,6 @@ function enrich(raw: FeatureCollection): CountryFeature[] {
   }
   return out;
 }
-
 function topoToFeatures(topo: TopoLike): CountryFeature[] {
   const fc = feature(
     topo as unknown as Parameters<typeof feature>[0],
