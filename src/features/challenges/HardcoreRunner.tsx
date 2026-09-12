@@ -16,6 +16,7 @@ import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { Button } from "@/components/ui/orbita-button";
 import { Badge } from "@/components/ui/orbita-badge";
 import { spring } from "@/lib/motion";
+import { playAnswerSound } from "@/lib/audio";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
@@ -40,6 +41,8 @@ export function HardcoreRunner({
   const submitAnswer = useCallback(
     (isCorrect: boolean) => {
       if (answerState !== "idle" || !current) return;
+
+      playAnswerSound(isCorrect);
 
       const nextAnswerState = isCorrect ? "correct" : "wrong";
       setAnswerState(nextAnswerState);
