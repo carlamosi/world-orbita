@@ -96,25 +96,39 @@ export async function runPushOnce() {
       const canonical = Array.isArray(result?.canonical) ? result.canonical : [];
       const acceptedSet = new Set(accepted);
       const rejectedMap = new Map(rejected.map((r) => [r.op_id, r.reason]));
+      // op_ids that were rejected but the server returned a canonical resolution
+      const canonicalOpIds = new Set(
+        canonical.map((c) => String((c as Record<string, unknown>).op_id))
+      );
       for (const r of due) {
         if (acceptedSet.has(r.op_id)) {
+          // Server accepted — remove from queue
           await db().outbox.delete(r.id!);
         } else if (rejectedMap.has(r.op_id)) {
-          const reason = rejectedMap.get(r.op_id) ?? "rejected";
-          const attempts = r.attempts + 1;
-          if (attempts >= MAX_ATTEMPTS) {
-            await db().outbox.update(r.id!, {
-              status: "dead",
-              last_error: reason,
-              attempts,
-            } as Partial<typeof r>);
+          if (canonicalOpIds.has(r.op_id)) {
+            // Server rejected but provided the authoritative canonical state.
+            // The canonical will be applied below, resolving the conflict.
+            // Delete the outbox item — retrying it would loop forever on the same
+            // version conflict since the payload version is already stale.
+            await db().outbox.delete(r.id!);
           } else {
-            await db().outbox.update(r.id!, {
-              status: "pending",
-              attempts,
-              next_attempt_at: backoff(attempts),
-              last_error: reason,
-            } as Partial<typeof r>);
+            // Genuine rejection (e.g., validation error) — retry with backoff.
+            const reason = rejectedMap.get(r.op_id) ?? "rejected";
+            const attempts = r.attempts + 1;
+            if (attempts >= MAX_ATTEMPTS) {
+              await db().outbox.update(r.id!, {
+                status: "dead",
+                last_error: reason,
+                attempts,
+              } as Partial<typeof r>);
+            } else {
+              await db().outbox.update(r.id!, {
+                status: "pending",
+                attempts,
+                next_attempt_at: backoff(attempts),
+                last_error: reason,
+              } as Partial<typeof r>);
+            }
           }
         } else {
           await db().outbox.update(r.id!, { status: "pending" } as Partial<typeof r>);

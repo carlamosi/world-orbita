@@ -147,6 +147,15 @@ export function normalizeState(raw: unknown): State {
     return State.New;
   }
   if (typeof raw === "string") {
+    // Numeric string from Supabase TEXT column (e.g. "0", "1", "2", "3")
+    const asNum = Number(raw);
+    if (!isNaN(asNum) && Number.isInteger(asNum)) {
+      if (asNum === State.New || asNum === State.Learning || asNum === State.Review || asNum === State.Relearning) {
+        return asNum as State;
+      }
+      return State.New;
+    }
+    // Legacy string states from old engine
     const map: Record<string, State> = {
       new: State.New,
       learning: State.Learning,
