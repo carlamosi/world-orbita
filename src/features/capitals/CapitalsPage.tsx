@@ -144,7 +144,11 @@ export default function CapitalsPage() {
         {empty && (
           <div className="absolute top-20 inset-x-0 z-20 flex flex-col items-center px-4">
             {Toolbar}
-            <SessionEmpty onPractice={() => void s.startPractice()} />
+            <SessionEmpty
+              reason={s.emptyReason}
+              hasSeen={s.hasSeen}
+              onPractice={() => void s.startPractice()}
+            />
           </div>
         )}
         <SessionEnd
@@ -203,7 +207,11 @@ export default function CapitalsPage() {
         <>
           {Toolbar}
           <div className="w-full px-4 md:px-6 max-w-5xl">
-            <SessionEmpty onPractice={() => void s.startPractice()} />
+            <SessionEmpty
+              reason={s.emptyReason}
+              hasSeen={s.hasSeen}
+              onPractice={() => void s.startPractice()}
+            />
           </div>
         </>
       )}

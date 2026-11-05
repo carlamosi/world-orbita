@@ -157,7 +157,11 @@ export default function FlagsPage() {
         <>
           {toolbar}
           <div className="w-full px-4 md:px-6 max-w-5xl">
-            <SessionEmpty onPractice={() => void s.startPractice()} />
+            <SessionEmpty
+              reason={s.emptyReason}
+              hasSeen={s.hasSeen}
+              onPractice={() => void s.startPractice()}
+            />
           </div>
         </>
       )}

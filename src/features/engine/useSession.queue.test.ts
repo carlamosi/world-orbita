@@ -45,6 +45,7 @@ vi.mock("@/lib/audio", () => ({ playAnswerSound: vi.fn() }));
 
 import { buildPairs, createSessionStore } from "@/features/engine/useSession";
 import { SPAIN_CCAA, SPAIN_PROVINCES } from "@/lib/spain";
+import { COUNTRIES } from "@/lib/countries";
 import type { SpainEntity } from "@/lib/spain/types";
 import { parseConceptId } from "@/lib/fsrs/concept";
 import { getRetrievability } from "@/lib/fsrs/adapter";
@@ -261,7 +262,8 @@ function learningRow(conceptId: string, entityId: string, dueInMs: number): Conc
   } as ConceptProgressRow;
 }
 
-const todayKey = () => newCardsKey(Date.now());
+/** Today's counter key; the default bucket is Spain provinces location:find. */
+const todayKey = (bucket = "spain:location:find") => newCardsKey(bucket, Date.now());
 
 describe("new cards under a daily cap and empty state (FSRS-2)", () => {
   beforeEach(() => {
@@ -308,9 +310,69 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
     const s = store.getState();
 
     expect(s.status).toBe("empty");
+    expect(s.emptyReason).toBe("limit");
+    expect(s.hasSeen).toBe(true);
     expect(s.queue).toEqual([]);
     expect(s.pairs).toEqual([]);
     expect(s.loading).toBe(false);
+  });
+
+  it("every entity seen, none due, budget left: empty with reason 'seenAll'", async () => {
+    for (const p of SPAIN_PROVINCES) rows.push(learningRow(findId(p.id), p.id, 10 * 60_000));
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    const s = store.getState();
+    expect(s.status).toBe("empty");
+    expect(s.emptyReason).toBe("seenAll");
+    expect(s.hasSeen).toBe(true);
+  });
+
+  it("a mixed session puts due rows first, then new seeds, up to sessionSize", async () => {
+    const due = SPAIN_PROVINCES.slice(0, 4);
+    for (const p of due) rows.push(row(findId(p.id), p.id, -1));
+
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    const s = store.getState();
+
+    expect(s.queue).toHaveLength(10);
+    expect(new Set(s.queue.slice(0, 4).map((e) => e.id))).toEqual(new Set(due.map((p) => p.id)));
+    for (const c of s.conceptQueue.slice(0, 4)) expect(c!.fsrs_state).toBe(State.Review);
+    for (const c of s.conceptQueue.slice(4)) expect(c!.fsrs_state).toBe(State.New);
+    expect(entityIds(s.conceptQueue)).toEqual(s.queue.map((e) => e.id));
+  });
+
+  it("grading a world location:find and a Spain find new card increments two different keys", async () => {
+    const world = createSessionStore({ mode: "find", skill: "location" });
+    await world.getState().start({ subMode: "find" });
+    expect(world.getState().conceptQueue[0]!.fsrs_state).toBe(State.New);
+    world.getState().submit(true);
+    await flush();
+
+    const spain = provinceStore();
+    await spain.getState().start({ subMode: "find" });
+    spain.getState().submit(true);
+    await flush();
+
+    expect(meta.get(todayKey("world:location:find"))).toBe("1");
+    expect(meta.get(todayKey("spain:location:find"))).toBe("1");
+  });
+
+  it("the cap used up for flag:flagToCountry does not block capital:countryToCap", async () => {
+    meta.set(todayKey("world:flag:flagToCountry"), String(MAX_NEW_PER_DAY));
+
+    const flags = createSessionStore({ mode: "flag", skill: "flag" });
+    await flags.getState().start({ subMode: "flagToCountry" });
+    expect(flags.getState().status).toBe("empty");
+    expect(flags.getState().emptyReason).toBe("limit");
+    expect(flags.getState().hasSeen).toBe(false);
+
+    const capitals = createSessionStore({ mode: "capital", skill: "capital" });
+    await capitals.getState().start({ subMode: "countryToCap" });
+    expect(capitals.getState().queue).toHaveLength(10);
+    expect(capitals.getState().status).toBe("active");
+    const ids = new Set(COUNTRIES.map((c) => c.iso3));
+    for (const e of capitals.getState().queue) expect(ids.has(e.iso3)).toBe(true);
   });
 
   it("grading a new concept increments today's counter once; grading a seen one does not", async () => {
@@ -392,7 +454,11 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
   it("the counter key uses the device's local day", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-11-05T23:30:00Z"));
-    expect(newCardsKey(Date.now(), "Europe/Madrid")).toBe("new_cards_2026-11-06");
-    expect(newCardsKey(Date.now(), "UTC")).toBe("new_cards_2026-11-05");
+    expect(newCardsKey("world:location:find", Date.now(), "Europe/Madrid")).toBe(
+      "new_cards_2026-11-06_world:location:find",
+    );
+    expect(newCardsKey("world:location:find", Date.now(), "UTC")).toBe(
+      "new_cards_2026-11-05_world:location:find",
+    );
   });
 });

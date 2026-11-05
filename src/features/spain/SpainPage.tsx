@@ -656,7 +656,11 @@ export default function SpainPage() {
               showGlobe && "absolute top-40 md:top-36 inset-x-0 mx-auto",
             )}
           >
-            <SessionEmpty onPractice={() => void s.startPractice()} />
+            <SessionEmpty
+              reason={s.emptyReason}
+              hasSeen={s.hasSeen}
+              onPractice={() => void s.startPractice()}
+            />
           </div>
         </>
       )}

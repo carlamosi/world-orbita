@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { SessionEmpty } from "./SessionEmpty";
 
@@ -12,25 +12,48 @@ describe("SessionEmpty", () => {
   afterEach(() => {
     act(() => root?.unmount());
     container?.remove();
+    root = null;
+    container = null;
   });
 
-  it("shows the caught-up copy and 'Practice anyway' calls onPractice", () => {
-    const onPractice = vi.fn();
+  function renderEmpty(props: ComponentProps<typeof SessionEmpty>) {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    act(() => root!.render(<SessionEmpty onPractice={onPractice} />));
-
-    expect(container.textContent).toContain("All caught up");
-    expect(container.textContent).toContain(
-      "Nothing is due and you've met today's new-card limit.",
-    );
-    expect(container.textContent).not.toContain("—");
-    const button = [...container.querySelectorAll("button")].find(
+    act(() => root!.render(<SessionEmpty {...props} />));
+    const el = container;
+    const button = [...el.querySelectorAll("button")].find(
       (b) => b.textContent === "Practice anyway",
     );
+    return { text: el.textContent ?? "", button };
+  }
+
+  it("limit reached with seen cards: limit copy and 'Practice anyway' calls onPractice", () => {
+    const onPractice = vi.fn();
+    const { text, button } = renderEmpty({ reason: "limit", hasSeen: true, onPractice });
+
+    expect(text).toContain("All caught up");
+    expect(text).toContain("Nothing is due and you've met today's new-card limit.");
+    expect(text).not.toContain("—");
     expect(button).toBeDefined();
     act(() => button!.click());
     expect(onPractice).toHaveBeenCalledTimes(1);
+  });
+
+  it("everything seen and nothing due: come-back-later copy with the practice button", () => {
+    const { text, button } = renderEmpty({ reason: "seenAll", hasSeen: true, onPractice: vi.fn() });
+
+    expect(text).toContain("All caught up");
+    expect(text).toContain("You've seen everything here and nothing is due yet. Come back later.");
+    expect(text).not.toContain("—");
+    expect(button).toBeDefined();
+  });
+
+  it("hides 'Practice anyway' when there is nothing seen to practise", () => {
+    const { text, button } = renderEmpty({ reason: "limit", hasSeen: false, onPractice: vi.fn() });
+
+    expect(text).toContain("Come back tomorrow for new cards.");
+    expect(text).not.toContain("—");
+    expect(button).toBeUndefined();
   });
 });

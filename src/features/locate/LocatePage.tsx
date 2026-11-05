@@ -280,7 +280,11 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
         <>
           {toolbar}
           <div className="absolute top-40 md:top-36 inset-x-0 z-20 px-4">
-            <SessionEmpty onPractice={() => void s.startPractice()} />
+            <SessionEmpty
+              reason={s.emptyReason}
+              hasSeen={s.hasSeen}
+              onPractice={() => void s.startPractice()}
+            />
           </div>
         </>
       )}
