@@ -8,9 +8,18 @@ const recorded: { conceptId: string; correct: boolean }[] = [];
 // Each Dexie read takes the next gate (if any) and waits on it, so tests can
 // control the order in which concurrent reads resolve.
 const gates: Promise<void>[] = [];
+// In-memory sync_meta (key/value), as in orbita-db.ts.
+const meta = new Map<string, string>();
 
 vi.mock("@/lib/db/orbita-db", () => ({
   db: () => ({
+    sync_meta: {
+      get: async (key: string) => (meta.has(key) ? { key, value: meta.get(key)! } : undefined),
+      put: async (r: { key: string; value: string }) => {
+        meta.set(r.key, r.value);
+        return r.key;
+      },
+    },
     concept_progress: {
       where: (field: string) => ({
         equals: (v: string) => ({
@@ -38,6 +47,8 @@ import { buildPairs, createSessionStore } from "@/features/engine/useSession";
 import { SPAIN_CCAA, SPAIN_PROVINCES } from "@/lib/spain";
 import type { SpainEntity } from "@/lib/spain/types";
 import { parseConceptId } from "@/lib/fsrs/concept";
+import { getRetrievability } from "@/lib/fsrs/adapter";
+import { MAX_NEW_PER_DAY, newCardsKey } from "@/features/engine/newCardLimit";
 
 const DAY = 86_400_000;
 function row(conceptId: string, entityId: string, dueOffsetDays: number): ConceptProgressRow {
@@ -82,6 +93,7 @@ describe("session queue pairs (FSRS-3, BUG-02)", () => {
     rows.length = 0;
     recorded.length = 0;
     gates.length = 0;
+    meta.clear();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -232,5 +244,155 @@ describe("session queue pairs (FSRS-3, BUG-02)", () => {
     await flush();
     expect(recorded).toHaveLength(1);
     expect(recorded[0]!.conceptId.endsWith(":B")).toBe(true);
+  });
+});
+
+function learningRow(conceptId: string, entityId: string, dueInMs: number): ConceptProgressRow {
+  const now = Date.now();
+  return {
+    ...row(conceptId, entityId, 0),
+    fsrs_state: State.Learning as unknown as ConceptProgressRow["fsrs_state"],
+    fsrs_stability: 1,
+    fsrs_difficulty: 5,
+    fsrs_due: now + dueInMs,
+    fsrs_reps: 1,
+    fsrs_last_review: now,
+    updated_at: now,
+  } as ConceptProgressRow;
+}
+
+const todayKey = () => newCardsKey(Date.now());
+
+describe("new cards under a daily cap and empty state (FSRS-2)", () => {
+  beforeEach(() => {
+    rows.length = 0;
+    recorded.length = 0;
+    gates.length = 0;
+    meta.clear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("10 rows in Learning due in 10 min: the queue is filled with new concepts up to sessionSize", async () => {
+    const seen = SPAIN_PROVINCES.slice(0, 10);
+    for (const p of seen) rows.push(learningRow(findId(p.id), p.id, 10 * 60_000));
+
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    const s = store.getState();
+
+    expect(s.queue).toHaveLength(10);
+    const seenIds = new Set(seen.map((p) => p.id));
+    for (const e of s.queue) expect(seenIds.has(e.id)).toBe(false);
+    expect(entityIds(s.conceptQueue)).toEqual(s.queue.map((e) => e.id));
+    for (const c of s.conceptQueue) expect(c!.fsrs_state).toBe(State.New);
+    expect(s.status).not.toBe("empty");
+  });
+
+  it("new concepts only fill what today's cap leaves", async () => {
+    meta.set(todayKey(), String(MAX_NEW_PER_DAY - 3));
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    expect(store.getState().queue).toHaveLength(3);
+  });
+
+  it("daily cap exhausted and nothing due: status is 'empty' and the queue is []", async () => {
+    meta.set(todayKey(), String(MAX_NEW_PER_DAY));
+    for (const p of SPAIN_PROVINCES.slice(0, 10)) {
+      rows.push(learningRow(findId(p.id), p.id, 10 * 60_000));
+    }
+
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    const s = store.getState();
+
+    expect(s.status).toBe("empty");
+    expect(s.queue).toEqual([]);
+    expect(s.pairs).toEqual([]);
+    expect(s.loading).toBe(false);
+  });
+
+  it("grading a new concept increments today's counter once; grading a seen one does not", async () => {
+    const [p1] = SPAIN_PROVINCES;
+    rows.push(row(findId(p1!.id), p1!.id, -1)); // seen and due: planner puts it first
+
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    let s = store.getState();
+    expect(s.queue[0]!.id).toBe(p1!.id);
+
+    // Seen concept: no increment.
+    s.submit(true);
+    await flush();
+    expect(meta.get(todayKey())).toBeUndefined();
+
+    // New concept: one increment, even though the wrong answer re-queues it.
+    store.getState().next();
+    s = store.getState();
+    expect(s.conceptQueue[s.index]!.fsrs_state).toBe(State.New);
+    const newId = s.conceptQueue[s.index]!.conceptId;
+    s.submit(false);
+    await flush();
+    expect(meta.get(todayKey())).toBe("1");
+
+    // Answering the re-queued retry of the same concept does not count again.
+    const after = store.getState();
+    const retryIdx = after.conceptQueue.findIndex(
+      (c, i) => i > after.index && c!.conceptId === newId,
+    );
+    expect(retryIdx).toBeGreaterThan(0);
+    store.setState({ index: retryIdx, answerState: "idle" });
+    store.getState().submit(true);
+    await flush();
+    expect(meta.get(todayKey())).toBe("1");
+  });
+
+  it("startPractice() returns only seen concepts, lowest retrievability first", async () => {
+    meta.set(todayKey(), String(MAX_NEW_PER_DAY));
+    const now = Date.now();
+    // Review rows not yet due, with different stability: lower stability = lower R.
+    const stab = [20, 2, 50, 8];
+    SPAIN_PROVINCES.slice(0, 4).forEach((p, i) => {
+      rows.push({
+        ...row(findId(p.id), p.id, 3),
+        fsrs_stability: stab[i]!,
+        fsrs_last_review: now - 2 * DAY,
+      } as ConceptProgressRow);
+    });
+    // A persisted row still in New must not be practised.
+    const p5 = SPAIN_PROVINCES[4]!;
+    rows.push({
+      ...row(findId(p5.id), p5.id, 0),
+      fsrs_state: State.New as unknown as ConceptProgressRow["fsrs_state"],
+    } as ConceptProgressRow);
+
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    expect(store.getState().status).toBe("empty");
+
+    await store.getState().startPractice();
+    const s = store.getState();
+    const expected = rows
+      .filter((r) => (r.fsrs_state as unknown) !== State.New)
+      .sort((a, b) => getRetrievability(a) - getRetrievability(b))
+      .map((r) => parseConceptId(r.conceptId).entityId);
+
+    expect(expected).toHaveLength(4);
+    expect(s.status).not.toBe("empty");
+    expect(entityIds(s.conceptQueue)).toEqual(expected);
+    expect(s.queue.map((e) => e.id)).toEqual(expected);
+
+    // Practice grades are recorded normally.
+    s.submit(true);
+    await flush();
+    expect(recorded[0]?.conceptId).toBe(findId(expected[0]!));
+  });
+
+  it("the counter key uses the device's local day", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-05T23:30:00Z"));
+    expect(newCardsKey(Date.now(), "Europe/Madrid")).toBe("new_cards_2026-11-06");
+    expect(newCardsKey(Date.now(), "UTC")).toBe("new_cards_2026-11-05");
   });
 });

@@ -5,6 +5,7 @@ import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
+import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { HardInput } from "@/features/engine/HardInput";
@@ -39,6 +40,7 @@ export default function CapitalsPage() {
 
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
+  const empty = !finished && s.status === "empty";
 
   // activeSub is always the chosen sub-mode (mixed removed)
   const activeSub = sub;
@@ -139,6 +141,12 @@ export default function CapitalsPage() {
             />
           </div>
         )}
+        {empty && (
+          <div className="absolute top-20 inset-x-0 z-20 flex flex-col items-center px-4">
+            {Toolbar}
+            <SessionEmpty onPractice={() => void s.startPractice()} />
+          </div>
+        )}
         <SessionEnd
           show={finished}
           score={s.score}
@@ -187,6 +195,15 @@ export default function CapitalsPage() {
                 />
               </div>
             </div>
+          </div>
+        </>
+      )}
+
+      {empty && (
+        <>
+          {Toolbar}
+          <div className="w-full px-4 md:px-6 max-w-5xl">
+            <SessionEmpty onPractice={() => void s.startPractice()} />
           </div>
         </>
       )}

@@ -5,6 +5,7 @@ import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
+import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
@@ -36,6 +37,7 @@ export default function FlagsPage() {
   const [continent, setContinent] = useContinentPref();
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
+  const empty = !finished && s.status === "empty";
 
   // Persist sub-mode preference
   useEffect(() => {
@@ -92,6 +94,13 @@ export default function FlagsPage() {
   );
   useAnswerHotkeys(hotkeyItems, onHotkey);
 
+  const toolbar = (
+    <div className="w-full max-w-5xl mx-auto px-4 md:px-6 mb-4 z-20 flex items-center justify-between gap-4">
+      <RegionSelect value={continent} onChangeContinent={restartWithContinent} spainSkill="flags" />
+      <ModeDropdown options={SUB_MODE_OPTIONS} value={sub} onChange={setSub} />
+    </div>
+  );
+
   return (
     <div className="relative min-h-dvh pt-20 flex flex-col items-center">
       {!finished && (current || s.loading) && (
@@ -103,18 +112,7 @@ export default function FlagsPage() {
           ) : (
             <>
               {/* Minimized HUD Toolbar */}
-              <div className="w-full max-w-5xl mx-auto px-4 md:px-6 mb-4 z-20 flex items-center justify-between gap-4">
-                <RegionSelect
-                  value={continent}
-                  onChangeContinent={restartWithContinent}
-                  spainSkill="flags"
-                />
-                <ModeDropdown
-                  options={SUB_MODE_OPTIONS}
-                  value={sub}
-                  onChange={setSub}
-                />
-              </div>
+              {toolbar}
 
               {/* Gameplay Content Area */}
               <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-5xl gap-6 md:gap-8">
@@ -152,6 +150,15 @@ export default function FlagsPage() {
               </div>
             </>
           )}
+        </>
+      )}
+
+      {empty && (
+        <>
+          {toolbar}
+          <div className="w-full px-4 md:px-6 max-w-5xl">
+            <SessionEmpty onPractice={() => void s.startPractice()} />
+          </div>
         </>
       )}
 
