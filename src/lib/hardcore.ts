@@ -142,23 +142,29 @@ export async function saveHardcoreProgress(state: HardcoreExamState): Promise<vo
     const { data: userRes } = await supabase.auth.getUser();
     if (userRes.user) {
       const id = `${userRes.user.id}_${state.continent}`;
-      await supabase.from("hardcore_exam_progress").upsert({
-        id,
-        user_id: userRes.user.id,
-        continent: state.continent,
-        current_index: state.currentIndex,
-        total_questions: state.totalQuestions,
-        score: state.score,
-        correct: state.correct,
-        wrong: state.wrong,
-        best_combo: state.bestCombo,
-        combo: state.combo,
-        queue: state.queue as any,
-        answers: state.answers as any,
-        started_at: new Date(state.startedAt).toISOString(),
-        updated_at: new Date(state.updatedAt).toISOString(),
-        completed_at: state.completedAt ? new Date(state.completedAt).toISOString() : null,
-      });
+      // v2 PK is (user_id, id). This table goes through PostgREST, not
+      // sync_push, so its timestamps stay ISO.
+      const { error } = await supabase.from("hardcore_exam_progress").upsert(
+        {
+          id,
+          user_id: userRes.user.id,
+          continent: state.continent,
+          current_index: state.currentIndex,
+          total_questions: state.totalQuestions,
+          score: state.score,
+          correct: state.correct,
+          wrong: state.wrong,
+          best_combo: state.bestCombo,
+          combo: state.combo,
+          queue: state.queue as any,
+          answers: state.answers as any,
+          started_at: new Date(state.startedAt).toISOString(),
+          updated_at: new Date(state.updatedAt).toISOString(),
+          completed_at: state.completedAt ? new Date(state.completedAt).toISOString() : null,
+        },
+        { onConflict: "user_id,id" },
+      );
+      if (error) console.warn("[hardcore] cloud sync failed", error.message);
     }
   } catch (e) {
     console.warn("[hardcore] cloud sync failed", e);

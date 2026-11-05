@@ -13,6 +13,12 @@ import { evaluateUnlocks, type UnlockEvalInput } from "@/lib/unlocks";
 import { dateKey } from "@/lib/streak";
 import { enqueue } from "@/lib/sync/queue";
 import { newOpId } from "@/lib/sync/clientId";
+import {
+  countryProgressPayload,
+  dailyStreakPayload,
+  sessionsLogPayload,
+  unlockPayload,
+} from "@/lib/sync/payloads";
 
 /* ───────────────────────── country progress ───────────────────────── */
 
@@ -76,12 +82,7 @@ export async function updateSkillProgress(
       enqueue({
         entity: "country_progress",
         op: "upsert",
-        payload: {
-          country_code: row.iso3,
-          skills: row.skills,
-          skill_versions: row.skill_versions ?? {},
-          last_seen_at: new Date(row.lastSeenAt).toISOString(),
-        },
+        payload: countryProgressPayload(row),
       });
     }
   } catch (e) {
@@ -148,31 +149,14 @@ export async function recordSessionEnd(row: Omit<GameSessionRow, "id">) {
       op_id,
       entity: "sessions_log",
       op: "insert",
-      payload: {
-        mode: row.mode,
-        skill: row.skill,
-        score: row.score,
-        total_questions: row.totalQuestions,
-        correct: row.correct,
-        wrong: row.wrong,
-        best_combo: row.bestCombo,
-        duration_ms: row.durationMs,
-        period_key: row.periodKey,
-        meta: row.meta,
-        started_at: new Date(row.createdAt - row.durationMs).toISOString(),
-        ended_at: new Date(row.createdAt).toISOString(),
-      },
+      payload: sessionsLogPayload(row),
     });
     const deltas = await reEvaluateUnlocks();
     for (const u of deltas) {
       enqueue({
         entity: "unlocks",
         op: "upsert",
-        payload: {
-          key: u.key,
-          progress: u.progress,
-          unlocked_at: u.unlockedAt ? new Date(u.unlockedAt).toISOString() : null,
-        },
+        payload: unlockPayload(u),
       });
     }
     // Daily streak signal
@@ -180,11 +164,7 @@ export async function recordSessionEnd(row: Omit<GameSessionRow, "id">) {
     enqueue({
       entity: "daily_streak",
       op: "upsert",
-      payload: {
-        date_key: k,
-        count: 1,
-        last_active_at: new Date(row.createdAt).toISOString(),
-      },
+      payload: dailyStreakPayload(k, row.createdAt),
     });
   } catch (e) {
     console.warn("[orbita-db] recordSessionEnd failed", e);

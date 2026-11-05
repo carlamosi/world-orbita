@@ -2,9 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { PullResult, PushResult } from "./types";
+import { OpIdSchema } from "./opId";
 
 const MutationSchema = z.object({
-  op_id: z.string().min(1),
+  // The worker marks non-UUID op_ids dead locally and never sends them.
+  op_id: OpIdSchema,
   entity: z.enum([
     "sessions_log",
     "country_progress",

@@ -1,6 +1,7 @@
 import { db } from "./orbita-db";
-import type { ConceptProgressRow, QuestionHistoryRow } from "./orbita-db";
+import type { ConceptProgressRow, OutboxRow, QuestionHistoryRow } from "./orbita-db";
 import { currentDbName } from "./dbProvider";
+import { conceptProgressPayload, questionHistoryPayload } from "@/lib/sync/payloads";
 
 /** Extract Supabase user id from the active Dexie DB name (`orbita-${id}`). */
 function activeUserId(): string | null {
@@ -56,42 +57,17 @@ export async function recordConceptAttempt(
     
     // 3. Build wire-safe payloads: strip Dexie-internal fields (dirty, user_id).
     //    The RPC enforces user scoping via auth.uid() server-side.
-    const conceptPayload: Record<string, unknown> = {
-      conceptId: progressRow.conceptId,
-      iso3: progressRow.iso3,
-      skill: progressRow.skill,
-      fsrs_state: progressRow.fsrs_state,
-      fsrs_stability: progressRow.fsrs_stability,
-      fsrs_difficulty: progressRow.fsrs_difficulty,
-      fsrs_due: progressRow.fsrs_due,
-      fsrs_reps: progressRow.fsrs_reps,
-      fsrs_lapses: progressRow.fsrs_lapses,
-      fsrs_last_review: progressRow.fsrs_last_review,
-      fsrs_elapsed_days: progressRow.fsrs_elapsed_days ?? 0,
-      fsrs_scheduled_days: progressRow.fsrs_scheduled_days ?? 0,
-      version: progressRow.version,
-      updated_at: progressRow.updated_at,
-    };
-    const historyPayload: Record<string, unknown> = {
-      op_id: historyRow.op_id,
-      conceptId: historyRow.conceptId,
-      sessionId: historyRow.sessionId,
-      grade: historyRow.grade,
-      mode: historyRow.mode,
-      direction: historyRow.direction,
-      fsrs_log: historyRow.fsrs_log,
-      responseMs: historyRow.responseMs,
-      correct: historyRow.correct,
-      answeredAt: historyRow.answeredAt,
-    };
+    //    conceptPayload is null for a never-reviewed row (not queued; see payloads.ts).
+    const conceptPayload = conceptProgressPayload(progressRow);
+    const historyPayload: Record<string, unknown> = questionHistoryPayload(historyRow);
 
     // 4. Add to sync outbox (using bulkPut to avoid ConstraintError on unique op_id index)
     // IMPORTANT: op_id MUST be a plain UUID — the RPC casts it with ::uuid server-side.
     //            concept_progress gets its own fresh UUID (never suffix an existing UUID).
-    const cpOpId = crypto.randomUUID();
-    await db().outbox.bulkPut([
-      {
-        op_id: cpOpId,
+    const outboxRows: OutboxRow[] = [];
+    if (conceptPayload) {
+      outboxRows.push({
+        op_id: crypto.randomUUID(),
         entity: "concept_progress",
         op: "upsert",
         payload: conceptPayload,
@@ -99,17 +75,18 @@ export async function recordConceptAttempt(
         attempts: 0,
         next_attempt_at: 0,
         status: "pending",
-      },
-      {
-        op_id: historyRow.op_id, // reuse the same op_id as the history row for idempotency
-        entity: "question_history",
-        op: "insert",
-        payload: historyPayload,
-        created_at: now,
-        attempts: 0,
-        next_attempt_at: 0,
-        status: "pending",
-      }
-    ]);
+      });
+    }
+    outboxRows.push({
+      op_id: historyRow.op_id, // reuse the same op_id as the history row for idempotency
+      entity: "question_history",
+      op: "insert",
+      payload: historyPayload,
+      created_at: now,
+      attempts: 0,
+      next_attempt_at: 0,
+      status: "pending",
+    });
+    await db().outbox.bulkPut(outboxRows);
   });
 }
