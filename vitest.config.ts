@@ -16,7 +16,7 @@ export default defineConfig({
     dedupe: ["react", "react-dom"],
   },
   test: {
-    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    include: ["src/**/*.{test,spec}.{ts,tsx}", "supabase/**/*.{test,spec}.ts"],
     exclude: ["tests/**", "node_modules/**"],
   },
 });
