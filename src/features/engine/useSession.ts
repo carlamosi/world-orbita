@@ -44,7 +44,47 @@ export interface SessionItemLike {
   continent?: string;
 }
 
+/**
+ * One session slot: the item shown and the concept that its answer grades.
+ * `conceptId` always equals `concept.conceptId`.
+ */
+export interface SessionPair<TItem> {
+  item: TItem;
+  conceptId: string;
+  concept: ConceptProgressRow;
+}
+
+/**
+ * Builds session slots from planned concepts. A concept whose item cannot be
+ * resolved is dropped together with its slot, so items and concepts can never
+ * shift against each other.
+ */
+export function buildPairs<TItem>(
+  planned: readonly (ConceptProgressRow | null | undefined)[],
+  lookup: (concept: ConceptProgressRow) => TItem | undefined,
+): SessionPair<TItem>[] {
+  const pairs: SessionPair<TItem>[] = [];
+  for (const concept of planned) {
+    if (!concept) continue;
+    const item = lookup(concept);
+    if (item === undefined) continue;
+    pairs.push({ item, conceptId: concept.conceptId, concept });
+  }
+  return pairs;
+}
+
+/** `queue` and `conceptQueue` are always derived from `pairs`, never built on their own. */
+function fromPairs<TItem>(pairs: SessionPair<TItem>[]) {
+  return {
+    pairs,
+    queue: pairs.map((p) => p.item),
+    conceptQueue: pairs.map((p) => p.concept),
+  };
+}
+
 export interface SessionState<TItem = Country> {
+  /** Source of truth for the session order. `queue` and `conceptQueue` mirror it. */
+  pairs: SessionPair<TItem>[];
   queue: TItem[];
   conceptQueue: (ConceptProgressRow | null)[];
   index: number;
@@ -127,7 +167,25 @@ export function createSessionStore<TItem = Country>({
     return raw.id ?? raw.iso3 ?? raw.name;
   });
 
+  const itemMap = new Map<string, TItem>();
+  for (const item of activeDataset) {
+    const raw = item as unknown as SessionItemLike;
+    itemMap.set(resolveId(item), item);
+    if (raw.iso3) itemMap.set(raw.iso3, item);
+  }
+  const lookupItem = (c: ConceptProgressRow): TItem | undefined =>
+    itemMap.get(parseConceptId(c.conceptId).entityId) ?? itemMap.get(c.iso3);
+
+  /** Same keys `lookupItem` resolves by, applied to one item. */
+  const conceptMatchesItem = (c: ConceptProgressRow, item: TItem): boolean => {
+    const raw = item as unknown as SessionItemLike;
+    const keys = new Set([resolveId(item), raw.iso3].filter(Boolean));
+    return keys.has(parseConceptId(c.conceptId).entityId) || keys.has(c.iso3);
+  };
+  let mismatchLogged = false;
+
   return create<SessionState<TItem>>((set, get) => ({
+    pairs: [],
     queue: [],
     conceptQueue: [],
     index: 0,
@@ -154,8 +212,7 @@ export function createSessionStore<TItem = Country>({
     async start(opts) {
       set({
         loading: true,
-        queue: [],
-        conceptQueue: [],
+        ...fromPairs<TItem>([]),
         index: 0,
         score: 0,
         combo: 0,
@@ -172,32 +229,15 @@ export function createSessionStore<TItem = Country>({
         inSessionRetries: new Map(),
       });
 
-      let q: TItem[] = [];
-      let cq: (ConceptProgressRow | null)[] = [];
-
-      const itemMap = new Map<string, TItem>();
-      for (const item of activeDataset) {
-        const raw = item as unknown as SessionItemLike;
-        const id = resolveId(item);
-        itemMap.set(id, item);
-        if (raw.iso3) itemMap.set(raw.iso3, item);
-      }
+      let pairs: SessionPair<TItem>[] = [];
 
       if (opts?.conceptRows && opts.conceptRows.length > 0) {
         // Due Today / pre-built mode: skip the planner, use the caller's queue directly.
-        cq = opts.conceptRows;
-        const rows: TItem[] = [];
-        for (const c of opts.conceptRows) {
-          if (!c) continue;
-          const parsed = parseConceptId(c.conceptId);
-          const found = itemMap.get(parsed.entityId) ?? itemMap.get(c.iso3);
-          if (found) rows.push(found);
-        }
-        q = rows;
+        pairs = buildPairs(opts.conceptRows, lookupItem);
       } else if ((opts?.items && opts.items.length > 0) || (opts?.allCountries && opts.allCountries.length > 0)) {
         // Complete mode: use the pre-built shuffled array directly.
         const source = (opts.items ?? opts.allCountries)!;
-        q = [...source];
+        const q = [...source];
         for (let i = q.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [q[i], q[j]] = [q[j]!, q[i]!];
@@ -214,7 +254,8 @@ export function createSessionStore<TItem = Country>({
         if (skill === "location") defaultSubMode = "find";
         const sm = opts?.subMode && opts.subMode !== "mixed" ? opts.subMode : defaultSubMode;
 
-        cq = q.map((item) => {
+        // Each item gets its concept here, so the pair is formed at construction.
+        pairs = q.map((item): SessionPair<TItem> => {
           const raw = item as unknown as SessionItemLike;
           const entityId = resolveId(item);
           const conceptId = formatConceptId({
@@ -224,8 +265,8 @@ export function createSessionStore<TItem = Country>({
             subMode: sm || "default",
           });
           const existing = dbConceptMap.get(conceptId);
-          if (existing) return existing;
-          return {
+          if (existing) return { item, conceptId, concept: existing };
+          const concept: ConceptProgressRow = {
             conceptId,
             iso3: raw.iso3 ?? entityId,
             skill,
@@ -240,6 +281,7 @@ export function createSessionStore<TItem = Country>({
             version: 1,
             dirty: 0,
           };
+          return { item, conceptId, concept };
         });
       } else {
         // FSRS session planner
@@ -253,7 +295,7 @@ export function createSessionStore<TItem = Country>({
           // World domain: either legacy (no domain prefix) or explicitly world:
           pool = pool.filter(c => !c.conceptId.includes(":") || !c.conceptId.startsWith("spain:"));
         }
-        
+
         if (opts?.continent && opts.continent !== "All") {
           const validIds = new Set(
             activeDataset
@@ -269,7 +311,11 @@ export function createSessionStore<TItem = Country>({
         if (opts?.subMode && opts.subMode !== "mixed") {
           pool = pool.filter(c => c.conceptId.endsWith(`:${opts.subMode}`));
         }
-        
+
+        // Keep only concepts of the active dataset. Domain and subMode alone are
+        // not enough: Spain CCAA and provinces share both.
+        pool = pool.filter((c) => lookupItem(c) !== undefined);
+
         // If there are not enough concepts seeded yet (e.g. fresh install), create dummy ones
         if (pool.length < questions) {
           const used = new Set(pool.map(c => parseConceptId(c.conceptId).entityId));
@@ -288,7 +334,7 @@ export function createSessionStore<TItem = Country>({
               if (skill === "flag") defaultSubMode = "flagToCountry";
               if (skill === "name") defaultSubMode = "name";
               if (skill === "location") defaultSubMode = "find";
-              
+
               const sm = (opts?.subMode && opts.subMode !== "mixed") ? opts.subMode : defaultSubMode;
               const newConceptId = formatConceptId({
                 domain: domain as any,
@@ -296,7 +342,7 @@ export function createSessionStore<TItem = Country>({
                 skill,
                 subMode: sm || "default",
               });
-              
+
               pool.push({
                 conceptId: newConceptId,
                 iso3: raw.iso3 ?? entityId,
@@ -316,22 +362,14 @@ export function createSessionStore<TItem = Country>({
             }
           }
         }
-        
+
         const plannedConcepts = generateSessionQueue(pool, undefined, { sessionSize: questions });
-        const plannedItems: TItem[] = [];
-        for (const c of plannedConcepts) {
-          const parsed = parseConceptId(c.conceptId);
-          const found = itemMap.get(parsed.entityId) ?? itemMap.get(c.iso3);
-          if (found) plannedItems.push(found);
-        }
-        q = plannedItems;
-        cq = plannedConcepts;
+        pairs = buildPairs(plannedConcepts, lookupItem);
       }
 
       const now = Date.now();
       set({
-        queue: q,
-        conceptQueue: cq,
+        ...fromPairs(pairs),
         index: 0,
         score: 0,
         combo: 0,
@@ -352,9 +390,21 @@ export function createSessionStore<TItem = Country>({
       const s = get();
       if (s.answerState !== "idle") return;
       playAnswerSound(isCorrect);
-      const target = s.queue[s.index];
-      const targetConcept = s.conceptQueue[s.index];
-      if (!target) return;
+      const pair = s.pairs[s.index];
+      if (!pair) return;
+      const target = pair.item;
+      const targetConcept = pair.concept;
+
+      // Never write a grade to a concept other than the one shown.
+      const gradeable = conceptMatchesItem(targetConcept, target);
+      if (!gradeable) {
+        const msg = `Session pair mismatch: item ${resolveId(target)} vs concept ${targetConcept.conceptId}`;
+        if (import.meta.env.DEV) throw new Error(msg);
+        if (!mismatchLogged) {
+          mismatchLogged = true;
+          console.error(`${msg}. Skipping FSRS grade.`);
+        }
+      }
 
       const responseMs = Math.max(0, Date.now() - (s.questionStartedAt || Date.now()));
 
@@ -467,7 +517,7 @@ export function createSessionStore<TItem = Country>({
         };
       }
 
-      if (effectiveConcept && !s.fsrsUpdatedIds.has(effectiveConcept.conceptId)) {
+      if (gradeable && effectiveConcept && !s.fsrsUpdatedIds.has(effectiveConcept.conceptId)) {
         const now = Date.now();
 
         // Use the concept's own skill (critical for Due Today mixed sessions)
@@ -517,9 +567,9 @@ export function createSessionStore<TItem = Country>({
         updates.fsrsUpdatedIds = nextFsrsUpdatedIds;
 
         // Optimistic row update at the current index position
-        const baseConceptQueue = [...s.conceptQueue];
-        baseConceptQueue[s.index] = updatedProgressRow;
-        updates.conceptQueue = baseConceptQueue;
+        const basePairs = [...s.pairs];
+        basePairs[s.index] = { ...pair, concept: updatedProgressRow };
+        Object.assign(updates, fromPairs(basePairs));
       }
 
       // 3. Desirable-difficulty re-queue for incorrect answers.
@@ -554,15 +604,10 @@ export function createSessionStore<TItem = Country>({
           // Clamp to the end of the queue (splice inserts before that index)
           const insertAt = Math.min(s.index + 1 + offset, s.queue.length);
 
-          // Build new queues with the failed card re-inserted
-          const newQueue = [...(updates.queue ?? s.queue)];
-          const newConceptQueue = [...(updates.conceptQueue ?? s.conceptQueue)];
-
-          newQueue.splice(insertAt, 0, target);
-          newConceptQueue.splice(insertAt, 0, newConceptQueue[s.index] ?? null);
-
-          updates.queue = newQueue;
-          updates.conceptQueue = newConceptQueue;
+          // Re-insert the failed slot (item and its possibly updated concept together)
+          const newPairs = [...(updates.pairs ?? s.pairs)];
+          newPairs.splice(insertAt, 0, newPairs[s.index]!);
+          Object.assign(updates, fromPairs(newPairs));
 
           // Record the retry count
           const nextRetries = new Map(s.inSessionRetries);
