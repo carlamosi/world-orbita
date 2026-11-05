@@ -410,6 +410,78 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
     expect(meta.get(todayKey())).toBe("1");
   });
 
+  describe("only planner sessions spend the new-card cap", () => {
+    const ccaaStore = () =>
+      createSessionStore<SpainEntity>({
+        mode: "find",
+        skill: "location",
+        domain: "spain",
+        dataset: SPAIN_CCAA,
+        getId: (e) => e.id,
+      });
+
+    it("grading New cards in a Complete session does not increment the counter", async () => {
+      const store = ccaaStore();
+      await store.getState().start({ items: [...SPAIN_CCAA], subMode: "find" });
+      expect(store.getState().countsTowardNewCap).toBe(false);
+      expect(store.getState().conceptQueue[0]!.fsrs_state).toBe(State.New);
+      store.getState().submit(true);
+      await flush();
+      expect(recorded).toHaveLength(1);
+      expect(meta.get(todayKey())).toBeUndefined();
+    });
+
+    it("grading a New card in a planner session increments the counter", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      expect(store.getState().countsTowardNewCap).toBe(true);
+      store.getState().submit(true);
+      await flush();
+      expect(meta.get(todayKey())).toBe("1");
+    });
+
+    it("grading in a Review (conceptRows) session does not increment the counter", async () => {
+      const store = provinceStore();
+      const [p1] = SPAIN_PROVINCES;
+      const newRow = { ...row(findId(p1!.id), p1!.id, -1), fsrs_state: State.New } as unknown as ConceptProgressRow;
+      await store.getState().start({ conceptRows: [newRow] });
+      expect(store.getState().countsTowardNewCap).toBe(false);
+      store.getState().submit(true);
+      await flush();
+      expect(meta.get(todayKey())).toBeUndefined();
+    });
+
+    it("grading in startPractice() does not increment the counter, and the flag resets after a planner start", async () => {
+      const [p1] = SPAIN_PROVINCES;
+      rows.push(row(findId(p1!.id), p1!.id, 3));
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      expect(store.getState().countsTowardNewCap).toBe(true);
+      await store.getState().startPractice();
+      expect(store.getState().countsTowardNewCap).toBe(false);
+      store.getState().submit(true);
+      await flush();
+      expect(meta.get(todayKey())).toBeUndefined();
+    });
+
+    it("a graded Complete CCAA session still leaves new province cards on offer", async () => {
+      const ccaa = ccaaStore();
+      await ccaa.getState().start({ items: [...SPAIN_CCAA], subMode: "find" });
+      for (let i = 0; i < SPAIN_CCAA.length; i++) {
+        ccaa.getState().submit(true);
+        await flush();
+        ccaa.getState().next();
+      }
+      expect(meta.get(todayKey())).toBeUndefined();
+
+      const provinces = provinceStore();
+      await provinces.getState().start({ subMode: "find" });
+      expect(provinces.getState().status).toBe("active");
+      expect(provinces.getState().queue.length).toBeGreaterThan(0);
+      expect(provinces.getState().conceptQueue[0]!.fsrs_state).toBe(State.New);
+    });
+  });
+
   it("startPractice() returns only seen concepts, lowest retrievability first", async () => {
     meta.set(todayKey(), String(MAX_NEW_PER_DAY));
     const now = Date.now();

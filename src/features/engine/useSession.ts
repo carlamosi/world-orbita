@@ -133,6 +133,11 @@ export interface SessionState<TItem = Country> {
   emptyReason: EmptyReason | null;
   /** The filtered pool has at least one already-seen concept, so startPractice() has work. */
   hasSeen: boolean;
+  /**
+   * True only for planner-built sessions: their first grades of New cards use up
+   * the daily new-card cap. Complete, Review and Practice sessions never do.
+   */
+  countsTowardNewCap: boolean;
   /** Epoch ms when the current question became visible. */
   questionStartedAt: number;
 
@@ -348,6 +353,7 @@ export function createSessionStore<TItem = Country>({
     status: "loading",
     emptyReason: null,
     hasSeen: false,
+    countsTowardNewCap: false,
     ...fromPairs<TItem>([]),
     index: 0,
     score: 0,
@@ -415,6 +421,7 @@ export function createSessionStore<TItem = Country>({
     status: "idle",
     emptyReason: null,
     hasSeen: false,
+    countsTowardNewCap: false,
     questionStartedAt: 0,
     fsrsUpdatedIds: new Set(),
     inSessionRetries: new Map(),
@@ -430,6 +437,8 @@ export function createSessionStore<TItem = Country>({
 
       let pairs: SessionPair<TItem>[] = [];
       let info: { hasSeen?: boolean; emptyReason?: EmptyReason } = {};
+      // Only the planner branch spends the daily new-card cap.
+      let countsTowardNewCap = false;
 
       if (opts?.conceptRows && opts.conceptRows.length > 0) {
         // Due Today / pre-built mode: skip the planner, use the caller's queue directly.
@@ -484,6 +493,7 @@ export function createSessionStore<TItem = Country>({
         // up to the session size, within today's new-card limit.
         const plannerOpts: PlannerOpts = { continent: opts?.continent, subMode: opts?.subMode };
         lastPlannerOpts = plannerOpts;
+        countsTowardNewCap = true;
         const allConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
         if (gen !== startGen) return;
         const pool = filterPool(allConcepts, plannerOpts);
@@ -506,7 +516,7 @@ export function createSessionStore<TItem = Country>({
         };
       }
 
-      set(readyState(pairs, info));
+      set({ ...readyState(pairs, info), countsTowardNewCap });
     },
 
     async startPractice() {
@@ -701,10 +711,10 @@ export function createSessionStore<TItem = Country>({
           answeredAt: now,
         }).catch(console.error);
 
-        // First grade of a new concept uses up one of today's new cards.
+        // First grade of a new concept in a planner session uses up one of today's new cards.
         // The bucket comes from the graded concept's own id, so mixed-subMode seeds
         // and Due Today rows count against their real domain:skill:subMode.
-        if (wasNew) {
+        if (wasNew && s.countsTowardNewCap) {
           const bucket = newCardBucket(effectiveConcept.conceptId);
           incrementNewCardsToday(bucket, now).catch(console.error);
         }

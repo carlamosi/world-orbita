@@ -502,7 +502,8 @@ export default function ReviewPage() {
   }
 
   /* ─── Empty state ─── */
-  if (loadState === "empty") {
+  // Also when every row of the batch failed lookup: the store is empty, not the queue.
+  if (loadState === "empty" || s.status === "empty") {
     return (
       <div className="relative min-h-dvh pt-24 pb-12 flex flex-col items-center justify-center px-4">
         <div className="absolute top-24 z-20 flex justify-center w-full">
