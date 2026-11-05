@@ -5,14 +5,20 @@ import type { ConceptProgressRow } from "@/lib/db/orbita-db";
 // In-memory stand-in for Dexie (fake-indexeddb is not installed).
 const rows: ConceptProgressRow[] = [];
 const recorded: { conceptId: string; correct: boolean }[] = [];
+// Each Dexie read takes the next gate (if any) and waits on it, so tests can
+// control the order in which concurrent reads resolve.
+const gates: Promise<void>[] = [];
 
 vi.mock("@/lib/db/orbita-db", () => ({
   db: () => ({
     concept_progress: {
       where: (field: string) => ({
         equals: (v: string) => ({
-          toArray: async () =>
-            rows.filter((r) => (r as unknown as Record<string, unknown>)[field] === v),
+          toArray: async () => {
+            const gate = gates.shift();
+            if (gate) await gate;
+            return rows.filter((r) => (r as unknown as Record<string, unknown>)[field] === v);
+          },
         }),
       }),
     },
@@ -75,6 +81,7 @@ describe("session queue pairs (FSRS-3, BUG-02)", () => {
   beforeEach(() => {
     rows.length = 0;
     recorded.length = 0;
+    gates.length = 0;
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -198,5 +205,32 @@ describe("session queue pairs (FSRS-3, BUG-02)", () => {
       expect(recorded).toEqual([]);
       expect(err).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("a stale concurrent start() is ignored: the later call's session wins and grades go to its concept", async () => {
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    gates.push(new Promise<void>((r) => (releaseA = r)));
+    gates.push(new Promise<void>((r) => (releaseB = r)));
+
+    const store = provinceStore();
+    const a = store.getState().start({ subMode: "A" });
+    const b = store.getState().start({ subMode: "B" });
+
+    // B's read resolves first, then A's (A is the older, stale call).
+    releaseB();
+    await b;
+    releaseA();
+    await a;
+
+    const s = store.getState();
+    expect(s.loading).toBe(false);
+    expect(s.queue.length).toBeGreaterThan(0);
+    for (const c of s.conceptQueue) expect(c!.conceptId.endsWith(":B")).toBe(true);
+
+    store.getState().submit(true);
+    await flush();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.conceptId.endsWith(":B")).toBe(true);
   });
 });

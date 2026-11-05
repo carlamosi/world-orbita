@@ -183,6 +183,8 @@ export function createSessionStore<TItem = Country>({
     return keys.has(parseConceptId(c.conceptId).entityId) || keys.has(c.iso3);
   };
   let mismatchLogged = false;
+  /** Bumped by every start(); a start that is no longer the latest must not touch the store. */
+  let startGen = 0;
 
   return create<SessionState<TItem>>((set, get) => ({
     pairs: [],
@@ -210,6 +212,7 @@ export function createSessionStore<TItem = Country>({
     },
 
     async start(opts) {
+      const gen = ++startGen;
       set({
         loading: true,
         ...fromPairs<TItem>([]),
@@ -245,6 +248,7 @@ export function createSessionStore<TItem = Country>({
 
         // Populate cq with existing FSRS progress rows from DB, or initialize State.New
         const allDbConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
+        if (gen !== startGen) return;
         const dbConceptMap = new Map(allDbConcepts.map((c) => [c.conceptId, c]));
 
         let defaultSubMode = "";
@@ -286,6 +290,7 @@ export function createSessionStore<TItem = Country>({
       } else {
         // FSRS session planner
         const allConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
+        if (gen !== startGen) return;
         let pool = allConcepts;
 
         // Filter pool by domain if specified
