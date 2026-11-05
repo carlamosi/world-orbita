@@ -65,6 +65,8 @@ export interface ConceptProgressRow {
   fsrs_last_review: number;
   fsrs_elapsed_days?: number;
   fsrs_scheduled_days?: number;
+  /** ts-fsrs short-term step index (FSRS-1). Optional: older rows lack it. */
+  fsrs_learning_steps?: number;
   updated_at: number;
   version: number;
   dirty: 0 | 1;
