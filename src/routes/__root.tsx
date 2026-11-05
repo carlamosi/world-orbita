@@ -139,6 +139,15 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+// One-time local wipe for the v2 schema. Started at module load (client only)
+// so the IndexedDB delete requests are queued before any DB is opened; the
+// effect below awaits it before the sync workers start or swap() runs.
+// runSchemaEpochReset never throws and is a no-op on the server.
+const schemaEpochReady: Promise<void> =
+  typeof window === "undefined"
+    ? Promise.resolve()
+    : import("@/lib/db/schemaEpoch").then(({ runSchemaEpochReset }) => runSchemaEpochReset());
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
@@ -147,15 +156,19 @@ function RootComponent() {
   useEffect(() => {
     let mounted = true;
     let unsubscribeAuth: (() => void) | null = null;
-    void import("@/lib/sync/workers").then(({ startSyncWorkers }) => {
+    void schemaEpochReady.then(() => {
       if (!mounted) return;
-      startSyncWorkers();
+      void import("@/lib/sync/workers").then(({ startSyncWorkers }) => {
+        if (!mounted) return;
+        startSyncWorkers();
+      });
     });
     void Promise.all([
+      schemaEpochReady,
       import("@/integrations/supabase/client"),
       import("@/lib/db/dbProvider"),
       import("@/lib/sync/useSyncStore"),
-    ]).then(([{ supabase }, { swap, getCurrent }, { useSyncStore }]) => {
+    ]).then(([, { supabase }, { swap, getCurrent }, { useSyncStore }]) => {
       if (!mounted) return;
 
       const runMigration = async (uid: string) => {
