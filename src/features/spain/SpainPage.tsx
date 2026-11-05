@@ -24,6 +24,7 @@ import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { SessionEnd } from "@/features/engine/SessionEnd";
+import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
@@ -219,6 +220,7 @@ export default function SpainPage() {
   const s = activeStore;
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
+  const empty = !finished && s.status === "empty";
 
   // Reset selected flag option on question change
   useEffect(() => {
@@ -336,6 +338,37 @@ export default function SpainPage() {
 
   const showGlobe = skill === "locate" || skill === "name";
 
+  const toolbar = (
+    <div
+      className={cn(
+        "z-40 px-4 md:px-6 flex items-center justify-between flex-wrap gap-2 pointer-events-auto",
+        !showGlobe
+          ? "w-full max-w-5xl mx-auto mb-4"
+          : "absolute top-24 inset-x-0 max-w-5xl mx-auto",
+      )}
+    >
+      <div className="flex items-center gap-2 flex-wrap">
+        <RegionSelect isSpainActive={true} spainSkill={skill} />
+        {skill !== "flags" && (
+          <ModeDropdown options={LEVEL_OPTIONS} value={level} onChange={setLevel} />
+        )}
+        {skill !== "flags" && level === "provinces" && (
+          <SessionLengthSelect
+            value={sessionMode}
+            onChange={setSessionMode}
+            continentCount={activeDataset.length}
+            continent="Spain"
+          />
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        {skill !== "locate" && skill !== "capitals" && (
+          <ModeDropdown options={DIFFICULTY_OPTIONS} value={difficulty} onChange={setDifficulty} />
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="relative min-h-dvh pt-20 flex flex-col items-center">
       {/* 3D Globe: rendered ONLY for Locate and Name modes */}
@@ -389,41 +422,7 @@ export default function SpainPage() {
       {!finished && current && (
         <>
           {/* Top HUD with high z-index (z-40) so dropdowns are never overlapped */}
-          <div
-            className={cn(
-              "z-40 px-4 md:px-6 flex items-center justify-between flex-wrap gap-2 pointer-events-auto",
-              !showGlobe
-                ? "w-full max-w-5xl mx-auto mb-4"
-                : "absolute top-24 inset-x-0 max-w-5xl mx-auto",
-            )}
-          >
-            <div className="flex items-center gap-2 flex-wrap">
-              <RegionSelect
-                isSpainActive={true}
-                spainSkill={skill}
-              />
-              {skill !== "flags" && (
-                <ModeDropdown options={LEVEL_OPTIONS} value={level} onChange={setLevel} />
-              )}
-              {skill !== "flags" && level === "provinces" && (
-                <SessionLengthSelect
-                  value={sessionMode}
-                  onChange={setSessionMode}
-                  continentCount={activeDataset.length}
-                  continent="Spain"
-                />
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {skill !== "locate" && skill !== "capitals" && (
-                <ModeDropdown
-                  options={DIFFICULTY_OPTIONS}
-                  value={difficulty}
-                  onChange={setDifficulty}
-                />
-              )}
-            </div>
-          </div>
+          {toolbar}
 
           {/* ================================================================
               FLAGS MODE: 2-column layout matching world Flags FlagToCountry
@@ -645,6 +644,24 @@ export default function SpainPage() {
               </div>
             </>
           )}
+        </>
+      )}
+
+      {empty && (
+        <>
+          {toolbar}
+          <div
+            className={cn(
+              "z-20 w-full px-4 md:px-6 max-w-5xl",
+              showGlobe && "absolute top-40 md:top-36 inset-x-0 mx-auto",
+            )}
+          >
+            <SessionEmpty
+              reason={s.emptyReason}
+              hasSeen={s.hasSeen}
+              onPractice={() => void s.startPractice()}
+            />
+          </div>
         </>
       )}
 

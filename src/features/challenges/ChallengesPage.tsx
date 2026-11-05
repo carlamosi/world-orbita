@@ -29,7 +29,7 @@ import {
 } from "@/lib/hardcore";
 import { COUNTRIES } from "@/lib/countries";
 
-type Active = {
+export type Active = {
   set: ChallengeSet;
   index: number;
   correct: number;
@@ -364,7 +364,58 @@ function ChallengeCard({
   );
 }
 
-function ChallengeRunner({
+export function ChallengeRunner(props: {
+  active: Active;
+  setActive: (a: Active | null) => void;
+  onExit: () => void;
+}) {
+  // No hooks here: the end screen and the question view are separate
+  // components so neither ever calls hooks after an early return.
+  if (props.active.index >= props.active.set.items.length) {
+    return <ChallengeEnd active={props.active} onExit={props.onExit} />;
+  }
+  return <ChallengeQuestion {...props} />;
+}
+
+function ChallengeEnd({ active, onExit }: { active: Active; onExit: () => void }) {
+  // Fire recordSessionEnd exactly once when the challenge is truly done.
+  const recorded = useRef(false);
+  useEffect(() => {
+    if (recorded.current) return;
+    recorded.current = true;
+    const endedAt = Date.now();
+    recordSessionEnd({
+      mode: active.set.kind === "daily" ? "challenge_daily" : "challenge_weekly",
+      skill: "mixed",
+      score: active.score,
+      totalQuestions: active.set.items.length,
+      correct: active.correct,
+      wrong: active.wrong,
+      bestCombo: active.bestCombo,
+      durationMs: endedAt - active.startedAt,
+      createdAt: endedAt,
+      periodKey: active.set.periodKey,
+    });
+  }, [active]);
+
+  return (
+    <div className="relative min-h-dvh pt-20 flex flex-col items-center justify-center">
+      <SessionEnd
+        show
+        score={active.score}
+        correct={active.correct}
+        total={active.set.items.length}
+        wrong={active.wrong}
+        masteredCount={active.correct}
+        missedItems={active.missedItems}
+        hasNextBlock={false}
+        onReplay={onExit}
+      />
+    </div>
+  );
+}
+
+function ChallengeQuestion({
   active,
   setActive,
   onExit,
@@ -373,8 +424,6 @@ function ChallengeRunner({
   setActive: (a: Active | null) => void;
   onExit: () => void;
 }) {
-  const finished = active.index >= active.set.items.length;
-
   // Compose 4 options for the current item.
   const current = active.set.items[active.index];
   const options = useMemo(() => {
@@ -382,53 +431,6 @@ function ChallengeRunner({
     const others = pickRandomCountries(3, new Set([current.country.iso3]));
     return shuffle([current.country, ...others]);
   }, [current]);
-
-  // Keep a live ref to `active` so the finalization effect always reads the
-  // latest snapshot without adding `active` to its dep array (which would
-  // cause recordSessionEnd to fire on every state update after finishing).
-  const activeRef = useRef(active);
-  activeRef.current = active;
-
-  // Fire recordSessionEnd exactly once when the challenge is truly done.
-  const recorded = useRef(false);
-  useEffect(() => {
-    if (!finished || recorded.current) return;
-    // Wait one tick so the final setActive (answerState: "idle") has flushed.
-    const a = activeRef.current;
-    if (a.answerState !== "idle") return;
-    recorded.current = true;
-    const endedAt = Date.now();
-    recordSessionEnd({
-      mode: a.set.kind === "daily" ? "challenge_daily" : "challenge_weekly",
-      skill: "mixed",
-      score: a.score,
-      totalQuestions: a.set.items.length,
-      correct: a.correct,
-      wrong: a.wrong,
-      bestCombo: a.bestCombo,
-      durationMs: endedAt - a.startedAt,
-      createdAt: endedAt,
-      periodKey: a.set.periodKey,
-    });
-  }, [finished, active.answerState]);
-
-  if (finished) {
-    return (
-      <div className="relative min-h-dvh pt-20 flex flex-col items-center justify-center">
-        <SessionEnd
-          show
-          score={active.score}
-          correct={active.correct}
-          total={active.set.items.length}
-          wrong={active.wrong}
-          masteredCount={active.correct}
-          missedItems={active.missedItems}
-          hasNextBlock={false}
-          onReplay={onExit}
-        />
-      </div>
-    );
-  }
 
   const pick = useCallback(
     (iso3: string) => {

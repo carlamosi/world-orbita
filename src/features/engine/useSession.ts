@@ -3,13 +3,29 @@ import { COUNTRIES } from "@/lib/countries";
 import type { Country } from "@/types/country";
 import { generateSessionQueue } from "@/lib/fsrs/planner";
 import { assess } from "@/lib/fsrs/assessment";
-import { rowToCard, cardToRowUpdates, processReview, getFsrsParameters } from "@/lib/fsrs/adapter";
+import {
+  rowToCard,
+  cardToRowUpdates,
+  processReview,
+  getFsrsParameters,
+  getRetrievability,
+  normalizeState,
+} from "@/lib/fsrs/adapter";
 import { recordConceptAttempt } from "@/lib/db/progressRepo";
 import { db, type ConceptProgressRow, type GameMode, type Skill } from "@/lib/db/orbita-db";
 import { recordSessionEnd } from "@/lib/db/repo";
 import { playAnswerSound } from "@/lib/audio";
 import { State, ConvertStepUnitToMinutes } from "ts-fsrs";
 import { formatConceptId, parseConceptId } from "@/lib/fsrs/concept";
+import type { GeoDomain } from "@/types/geo";
+import {
+  MAX_NEW_PER_DAY,
+  incrementNewCardsToday,
+  newCardBucket,
+  readNewCardsToday,
+} from "./newCardLimit";
+
+export { MAX_NEW_PER_DAY };
 
 /**
  * Spacing by item-count: re-insert failed card after N other answered cards
@@ -22,6 +38,19 @@ function stepToQueueOffset(_stepUnit: string, remainingCards: number, countSpaci
 }
 
 export type AnswerState = "idle" | "correct" | "wrong" | "revealed";
+/**
+ * - `idle`: never started
+ * - `loading`: start() or startPractice() in progress
+ * - `active`: the queue has at least one item
+ * - `empty`: the queue came back empty (show SessionEmpty; see `emptyReason`)
+ */
+export type SessionStatus = "idle" | "loading" | "active" | "empty";
+/**
+ * Why a planner queue is empty:
+ * - `limit`: nothing is due and today's new-card limit for this bucket is used up
+ * - `seenAll`: nothing is due and every entity here already has a row (budget left)
+ */
+export type EmptyReason = "limit" | "seenAll";
 export const QUESTIONS_PER_SESSION = 10;
 
 export interface MissedItem {
@@ -44,7 +73,47 @@ export interface SessionItemLike {
   continent?: string;
 }
 
+/**
+ * One session slot: the item shown and the concept that its answer grades.
+ * `conceptId` always equals `concept.conceptId`.
+ */
+export interface SessionPair<TItem> {
+  item: TItem;
+  conceptId: string;
+  concept: ConceptProgressRow;
+}
+
+/**
+ * Builds session slots from planned concepts. A concept whose item cannot be
+ * resolved is dropped together with its slot, so items and concepts can never
+ * shift against each other.
+ */
+export function buildPairs<TItem>(
+  planned: readonly (ConceptProgressRow | null | undefined)[],
+  lookup: (concept: ConceptProgressRow) => TItem | undefined,
+): SessionPair<TItem>[] {
+  const pairs: SessionPair<TItem>[] = [];
+  for (const concept of planned) {
+    if (!concept) continue;
+    const item = lookup(concept);
+    if (item === undefined) continue;
+    pairs.push({ item, conceptId: concept.conceptId, concept });
+  }
+  return pairs;
+}
+
+/** `queue` and `conceptQueue` are always derived from `pairs`, never built on their own. */
+function fromPairs<TItem>(pairs: SessionPair<TItem>[]) {
+  return {
+    pairs,
+    queue: pairs.map((p) => p.item),
+    conceptQueue: pairs.map((p) => p.concept),
+  };
+}
+
 export interface SessionState<TItem = Country> {
+  /** Source of truth for the session order. `queue` and `conceptQueue` mirror it. */
+  pairs: SessionPair<TItem>[];
   queue: TItem[];
   conceptQueue: (ConceptProgressRow | null)[];
   index: number;
@@ -59,6 +128,16 @@ export interface SessionState<TItem = Country> {
   startedAt: number;
   endedAt: number | null;
   loading: boolean;
+  status: SessionStatus;
+  /** Set when `status` is `empty`. */
+  emptyReason: EmptyReason | null;
+  /** The filtered pool has at least one already-seen concept, so startPractice() has work. */
+  hasSeen: boolean;
+  /**
+   * True only for planner-built sessions: their first grades of New cards use up
+   * the daily new-card cap. Complete, Review and Practice sessions never do.
+   */
+  countsTowardNewCap: boolean;
   /** Epoch ms when the current question became visible. */
   questionStartedAt: number;
 
@@ -93,6 +172,11 @@ export interface SessionState<TItem = Country> {
     /** Pre-built FSRS rows — bypasses the planner entirely. */
     conceptRows?: ConceptProgressRow[];
   }): Promise<void>;
+  /**
+   * "Practice anyway": an early-review queue of already-seen concepts from the
+   * last planner start's filters, lowest retrievability first.
+   */
+  startPractice(): Promise<void>;
   submit(isCorrect: boolean, opts?: { retrievalMode?: "easy" | "hard" }): void;
   reveal(): void;
   next(): void;
@@ -127,7 +211,199 @@ export function createSessionStore<TItem = Country>({
     return raw.id ?? raw.iso3 ?? raw.name;
   });
 
+  const itemMap = new Map<string, TItem>();
+  for (const item of activeDataset) {
+    const raw = item as unknown as SessionItemLike;
+    itemMap.set(resolveId(item), item);
+    if (raw.iso3) itemMap.set(raw.iso3, item);
+  }
+  const lookupItem = (c: ConceptProgressRow): TItem | undefined =>
+    itemMap.get(parseConceptId(c.conceptId).entityId) ?? itemMap.get(c.iso3);
+
+  /** Same keys `lookupItem` resolves by, applied to one item. */
+  const conceptMatchesItem = (c: ConceptProgressRow, item: TItem): boolean => {
+    const raw = item as unknown as SessionItemLike;
+    const keys = new Set([resolveId(item), raw.iso3].filter(Boolean));
+    return keys.has(parseConceptId(c.conceptId).entityId) || keys.has(c.iso3);
+  };
+  const defaultSubModes: Partial<Record<Skill, string>> = {
+    capital: "countryToCap",
+    flag: "flagToCountry",
+    name: "name",
+    location: "find",
+  };
+  const defaultSubMode = defaultSubModes[skill] ?? "";
+
+  type PlannerOpts = { continent?: string; subMode?: string };
+  /** Filters of the last planner start(), reused by startPractice(). */
+  let lastPlannerOpts: PlannerOpts = {};
+
+  const inContinent = (item: TItem, continent: string | undefined) =>
+    !continent ||
+    continent === "All" ||
+    (item as unknown as SessionItemLike).continent === continent;
+
+  /** Persisted rows of this store's domain, continent, subMode and dataset. */
+  const filterPool = (
+    allConcepts: ConceptProgressRow[],
+    opts: PlannerOpts,
+  ): ConceptProgressRow[] => {
+    let pool = allConcepts;
+
+    // Filter pool by domain if specified
+    if (domain && domain !== "world") {
+      pool = pool.filter((c) => c.conceptId.startsWith(`${domain}:`));
+    } else if (domain === "world") {
+      // World domain: either legacy (no domain prefix) or explicitly world:
+      pool = pool.filter((c) => !c.conceptId.includes(":") || !c.conceptId.startsWith("spain:"));
+    }
+
+    if (opts.continent && opts.continent !== "All") {
+      const validIds = new Set(
+        activeDataset.filter((c) => inContinent(c, opts.continent)).map((c) => resolveId(c)),
+      );
+      pool = pool.filter((c) => {
+        const parsed = parseConceptId(c.conceptId);
+        return validIds.has(parsed.entityId) || validIds.has(c.iso3);
+      });
+    }
+
+    if (opts.subMode && opts.subMode !== "mixed") {
+      pool = pool.filter((c) => c.conceptId.endsWith(`:${opts.subMode}`));
+    }
+
+    // Keep only concepts of the active dataset. Domain and subMode alone are
+    // not enough: Spain CCAA and provinces share both.
+    return pool.filter((c) => lookupItem(c) !== undefined);
+  };
+
+  /**
+   * In-memory New concepts for dataset entities with no row in `pool`, in
+   * dataset order, respecting the continent filter. Nothing is persisted
+   * until the concept is graded.
+   */
+  const newSeeds = (
+    pool: ConceptProgressRow[],
+    opts: PlannerOpts,
+    limit: number,
+  ): ConceptProgressRow[] => {
+    const seeds: ConceptProgressRow[] = [];
+    if (limit <= 0) return seeds;
+    const used = new Set(pool.map((c) => parseConceptId(c.conceptId).entityId));
+    const sm = seedSubMode(opts);
+    for (const c of activeDataset) {
+      if (seeds.length >= limit) break;
+      if (!inContinent(c, opts.continent)) continue;
+      const entityId = resolveId(c);
+      if (used.has(entityId)) continue;
+      const raw = c as unknown as SessionItemLike;
+      seeds.push({
+        conceptId: formatConceptId({
+          domain: domain as any,
+          entityId,
+          skill,
+          subMode: sm || "default",
+        }),
+        iso3: raw.iso3 ?? entityId,
+        skill,
+        fsrs_state: State.New as any,
+        fsrs_stability: null,
+        fsrs_difficulty: null,
+        fsrs_due: 0,
+        fsrs_reps: 0,
+        fsrs_lapses: 0,
+        fsrs_last_review: 0,
+        updated_at: Date.now(),
+        version: 1,
+        dirty: 0,
+      });
+      used.add(entityId);
+    }
+    return seeds;
+  };
+
+  /** For mixed mode, default to a standard subMode, else use the provided one. */
+  const seedSubMode = (opts: PlannerOpts) =>
+    opts.subMode && opts.subMode !== "mixed" ? opts.subMode : defaultSubMode;
+
+  /** Budget bucket of the concepts `newSeeds` builds for `opts`. */
+  const seedBucket = (opts: PlannerOpts) =>
+    newCardBucket(
+      formatConceptId({
+        domain: domain as GeoDomain,
+        entityId: "_",
+        skill,
+        subMode: seedSubMode(opts) || "default",
+      }),
+    );
+
+  const isSeen = (c: ConceptProgressRow) => normalizeState(c.fsrs_state) !== State.New;
+
+  const safeRetrievability = (c: ConceptProgressRow, nowMs: number): number => {
+    try {
+      return getRetrievability(c, nowMs);
+    } catch {
+      return 0;
+    }
+  };
+
+  /** Fresh-session fields, set when a start begins. */
+  const loadingState = (): Partial<SessionState<TItem>> => ({
+    loading: true,
+    status: "loading",
+    emptyReason: null,
+    hasSeen: false,
+    countsTowardNewCap: false,
+    ...fromPairs<TItem>([]),
+    index: 0,
+    score: 0,
+    combo: 0,
+    bestCombo: 0,
+    correct: 0,
+    wrong: 0,
+    masteredCount: 0,
+    missedItems: [],
+    answerState: "idle",
+    startedAt: 0,
+    endedAt: null,
+    questionStartedAt: 0,
+    fsrsUpdatedIds: new Set(),
+    inSessionRetries: new Map(),
+  });
+
+  /** Fields set when a start has built its pairs. */
+  const readyState = (
+    pairs: SessionPair<TItem>[],
+    info: { hasSeen?: boolean; emptyReason?: EmptyReason } = {},
+  ): Partial<SessionState<TItem>> => {
+    const now = Date.now();
+    return {
+      ...fromPairs(pairs),
+      index: 0,
+      score: 0,
+      combo: 0,
+      bestCombo: 0,
+      correct: 0,
+      wrong: 0,
+      answerState: "idle",
+      startedAt: now,
+      endedAt: null,
+      loading: false,
+      status: pairs.length === 0 ? "empty" : "active",
+      emptyReason: pairs.length === 0 ? (info.emptyReason ?? "limit") : null,
+      hasSeen: info.hasSeen ?? false,
+      questionStartedAt: now,
+      fsrsUpdatedIds: new Set(),
+      inSessionRetries: new Map(),
+    };
+  };
+
+  let mismatchLogged = false;
+  /** Bumped by every start(); a start that is no longer the latest must not touch the store. */
+  let startGen = 0;
+
   return create<SessionState<TItem>>((set, get) => ({
+    pairs: [],
     queue: [],
     conceptQueue: [],
     index: 0,
@@ -142,6 +418,10 @@ export function createSessionStore<TItem = Country>({
     startedAt: 0,
     endedAt: null,
     loading: false,
+    status: "idle",
+    emptyReason: null,
+    hasSeen: false,
+    countsTowardNewCap: false,
     questionStartedAt: 0,
     fsrsUpdatedIds: new Set(),
     inSessionRetries: new Map(),
@@ -152,52 +432,21 @@ export function createSessionStore<TItem = Country>({
     },
 
     async start(opts) {
-      set({
-        loading: true,
-        queue: [],
-        conceptQueue: [],
-        index: 0,
-        score: 0,
-        combo: 0,
-        bestCombo: 0,
-        correct: 0,
-        wrong: 0,
-        masteredCount: 0,
-        missedItems: [],
-        answerState: "idle",
-        startedAt: 0,
-        endedAt: null,
-        questionStartedAt: 0,
-        fsrsUpdatedIds: new Set(),
-        inSessionRetries: new Map(),
-      });
+      const gen = ++startGen;
+      set(loadingState());
 
-      let q: TItem[] = [];
-      let cq: (ConceptProgressRow | null)[] = [];
-
-      const itemMap = new Map<string, TItem>();
-      for (const item of activeDataset) {
-        const raw = item as unknown as SessionItemLike;
-        const id = resolveId(item);
-        itemMap.set(id, item);
-        if (raw.iso3) itemMap.set(raw.iso3, item);
-      }
+      let pairs: SessionPair<TItem>[] = [];
+      let info: { hasSeen?: boolean; emptyReason?: EmptyReason } = {};
+      // Only the planner branch spends the daily new-card cap.
+      let countsTowardNewCap = false;
 
       if (opts?.conceptRows && opts.conceptRows.length > 0) {
         // Due Today / pre-built mode: skip the planner, use the caller's queue directly.
-        cq = opts.conceptRows;
-        const rows: TItem[] = [];
-        for (const c of opts.conceptRows) {
-          if (!c) continue;
-          const parsed = parseConceptId(c.conceptId);
-          const found = itemMap.get(parsed.entityId) ?? itemMap.get(c.iso3);
-          if (found) rows.push(found);
-        }
-        q = rows;
+        pairs = buildPairs(opts.conceptRows, lookupItem);
       } else if ((opts?.items && opts.items.length > 0) || (opts?.allCountries && opts.allCountries.length > 0)) {
         // Complete mode: use the pre-built shuffled array directly.
         const source = (opts.items ?? opts.allCountries)!;
-        q = [...source];
+        const q = [...source];
         for (let i = q.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [q[i], q[j]] = [q[j]!, q[i]!];
@@ -205,16 +454,13 @@ export function createSessionStore<TItem = Country>({
 
         // Populate cq with existing FSRS progress rows from DB, or initialize State.New
         const allDbConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
+        if (gen !== startGen) return;
         const dbConceptMap = new Map(allDbConcepts.map((c) => [c.conceptId, c]));
 
-        let defaultSubMode = "";
-        if (skill === "capital") defaultSubMode = "countryToCap";
-        if (skill === "flag") defaultSubMode = "flagToCountry";
-        if (skill === "name") defaultSubMode = "name";
-        if (skill === "location") defaultSubMode = "find";
         const sm = opts?.subMode && opts.subMode !== "mixed" ? opts.subMode : defaultSubMode;
 
-        cq = q.map((item) => {
+        // Each item gets its concept here, so the pair is formed at construction.
+        pairs = q.map((item): SessionPair<TItem> => {
           const raw = item as unknown as SessionItemLike;
           const entityId = resolveId(item);
           const conceptId = formatConceptId({
@@ -224,8 +470,8 @@ export function createSessionStore<TItem = Country>({
             subMode: sm || "default",
           });
           const existing = dbConceptMap.get(conceptId);
-          if (existing) return existing;
-          return {
+          if (existing) return { item, conceptId, concept: existing };
+          const concept: ConceptProgressRow = {
             conceptId,
             iso3: raw.iso3 ?? entityId,
             skill,
@@ -240,121 +486,74 @@ export function createSessionStore<TItem = Country>({
             version: 1,
             dirty: 0,
           };
+          return { item, conceptId, concept };
         });
       } else {
-        // FSRS session planner
+        // FSRS session planner: due and learning rows first, then new concepts
+        // up to the session size, within today's new-card limit.
+        const plannerOpts: PlannerOpts = { continent: opts?.continent, subMode: opts?.subMode };
+        lastPlannerOpts = plannerOpts;
+        countsTowardNewCap = true;
         const allConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
-        let pool = allConcepts;
+        if (gen !== startGen) return;
+        const pool = filterPool(allConcepts, plannerOpts);
 
-        // Filter pool by domain if specified
-        if (domain && domain !== "world") {
-          pool = pool.filter(c => c.conceptId.startsWith(`${domain}:`));
-        } else if (domain === "world") {
-          // World domain: either legacy (no domain prefix) or explicitly world:
-          pool = pool.filter(c => !c.conceptId.includes(":") || !c.conceptId.startsWith("spain:"));
-        }
-        
-        if (opts?.continent && opts.continent !== "All") {
-          const validIds = new Set(
-            activeDataset
-              .filter(c => (c as unknown as SessionItemLike).continent === opts.continent)
-              .map(c => resolveId(c))
-          );
-          pool = allConcepts.filter(c => {
-            const parsed = parseConceptId(c.conceptId);
-            return validIds.has(parsed.entityId) || validIds.has(c.iso3);
-          });
-        }
+        // The budget is per bucket (domain:skill:subMode), the same one the seeds land in.
+        const newToday = await readNewCardsToday(seedBucket(plannerOpts));
+        if (gen !== startGen) return;
+        const newBudget = Math.max(0, MAX_NEW_PER_DAY - newToday);
 
-        if (opts?.subMode && opts.subMode !== "mixed") {
-          pool = pool.filter(c => c.conceptId.endsWith(`:${opts.subMode}`));
-        }
-        
-        // If there are not enough concepts seeded yet (e.g. fresh install), create dummy ones
-        if (pool.length < questions) {
-          const used = new Set(pool.map(c => parseConceptId(c.conceptId).entityId));
-          const candidates = activeDataset.filter(c => {
-            const raw = c as unknown as SessionItemLike;
-            return !opts?.continent || opts.continent === "All" || raw.continent === opts.continent;
-          });
-          for (const c of candidates) {
-            if (pool.length >= questions) break;
-            const entityId = resolveId(c);
-            const raw = c as unknown as SessionItemLike;
-            if (!used.has(entityId)) {
-              // For mixed mode, default to a standard subMode if we must seed, or use provided subMode
-              let defaultSubMode = "";
-              if (skill === "capital") defaultSubMode = "countryToCap";
-              if (skill === "flag") defaultSubMode = "flagToCountry";
-              if (skill === "name") defaultSubMode = "name";
-              if (skill === "location") defaultSubMode = "find";
-              
-              const sm = (opts?.subMode && opts.subMode !== "mixed") ? opts.subMode : defaultSubMode;
-              const newConceptId = formatConceptId({
-                domain: domain as any,
-                entityId,
-                skill,
-                subMode: sm || "default",
-              });
-              
-              pool.push({
-                conceptId: newConceptId,
-                iso3: raw.iso3 ?? entityId,
-                skill,
-                fsrs_state: State.New as any,
-                fsrs_stability: null,
-                fsrs_difficulty: null,
-                fsrs_due: 0,
-                fsrs_reps: 0,
-                fsrs_lapses: 0,
-                fsrs_last_review: 0,
-                updated_at: Date.now(),
-                version: 1,
-                dirty: 0
-              });
-              used.add(entityId);
-            }
-          }
-        }
-        
-        const plannedConcepts = generateSessionQueue(pool, undefined, { sessionSize: questions });
-        const plannedItems: TItem[] = [];
-        for (const c of plannedConcepts) {
-          const parsed = parseConceptId(c.conceptId);
-          const found = itemMap.get(parsed.entityId) ?? itemMap.get(c.iso3);
-          if (found) plannedItems.push(found);
-        }
-        q = plannedItems;
-        cq = plannedConcepts;
+        const planned = generateSessionQueue(pool, undefined, {
+          sessionSize: questions,
+          maxNewPerSession: newBudget,
+        });
+        const plannedNew = planned.filter((c) => normalizeState(c.fsrs_state) === State.New).length;
+        const room = Math.min(questions - planned.length, newBudget - plannedNew);
+        pairs = buildPairs([...planned, ...newSeeds(pool, plannerOpts, room)], lookupItem);
+        info = {
+          hasSeen: pool.some(isSeen),
+          emptyReason: newBudget - plannedNew <= 0 ? "limit" : "seenAll",
+        };
       }
 
+      set({ ...readyState(pairs, info), countsTowardNewCap });
+    },
+
+    async startPractice() {
+      const gen = ++startGen;
+      set(loadingState());
+      const allConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
+      if (gen !== startGen) return;
       const now = Date.now();
-      set({
-        queue: q,
-        conceptQueue: cq,
-        index: 0,
-        score: 0,
-        combo: 0,
-        bestCombo: 0,
-        correct: 0,
-        wrong: 0,
-        answerState: "idle",
-        startedAt: now,
-        endedAt: null,
-        loading: false,
-        questionStartedAt: now,
-        fsrsUpdatedIds: new Set(),
-        inSessionRetries: new Map(),
-      });
+      const seen = filterPool(allConcepts, lastPlannerOpts)
+        .filter(isSeen)
+        .map((c) => ({ c, r: safeRetrievability(c, now) }))
+        .sort((a, b) => a.r - b.r || a.c.fsrs_due - b.c.fsrs_due)
+        .slice(0, questions)
+        .map((x) => x.c);
+      const pairs = buildPairs(seen, lookupItem);
+      set(readyState(pairs, { hasSeen: pairs.length > 0 }));
     },
 
     submit(isCorrect, submitOpts) {
       const s = get();
       if (s.answerState !== "idle") return;
       playAnswerSound(isCorrect);
-      const target = s.queue[s.index];
-      const targetConcept = s.conceptQueue[s.index];
-      if (!target) return;
+      const pair = s.pairs[s.index];
+      if (!pair) return;
+      const target = pair.item;
+      const targetConcept = pair.concept;
+
+      // Never write a grade to a concept other than the one shown.
+      const gradeable = conceptMatchesItem(targetConcept, target);
+      if (!gradeable) {
+        const msg = `Session pair mismatch: item ${resolveId(target)} vs concept ${targetConcept.conceptId}`;
+        if (import.meta.env.DEV) throw new Error(msg);
+        if (!mismatchLogged) {
+          mismatchLogged = true;
+          console.error(`${msg}. Skipping FSRS grade.`);
+        }
+      }
 
       const responseMs = Math.max(0, Date.now() - (s.questionStartedAt || Date.now()));
 
@@ -467,7 +666,7 @@ export function createSessionStore<TItem = Country>({
         };
       }
 
-      if (effectiveConcept && !s.fsrsUpdatedIds.has(effectiveConcept.conceptId)) {
+      if (gradeable && effectiveConcept && !s.fsrsUpdatedIds.has(effectiveConcept.conceptId)) {
         const now = Date.now();
 
         // Use the concept's own skill (critical for Due Today mixed sessions)
@@ -485,6 +684,7 @@ export function createSessionStore<TItem = Country>({
           direction: actualDirection,
         });
 
+        const wasNew = normalizeState(effectiveConcept.fsrs_state) === State.New;
         const currentCard = rowToCard(effectiveConcept);
         const { card: nextCard, log: fsrsLog } = processReview(
           currentCard,
@@ -511,15 +711,23 @@ export function createSessionStore<TItem = Country>({
           answeredAt: now,
         }).catch(console.error);
 
+        // First grade of a new concept in a planner session uses up one of today's new cards.
+        // The bucket comes from the graded concept's own id, so mixed-subMode seeds
+        // and Due Today rows count against their real domain:skill:subMode.
+        if (wasNew && s.countsTowardNewCap) {
+          const bucket = newCardBucket(effectiveConcept.conceptId);
+          incrementNewCardsToday(bucket, now).catch(console.error);
+        }
+
         // Mark this concept as FSRS-updated for this session
         const nextFsrsUpdatedIds = new Set(s.fsrsUpdatedIds);
         nextFsrsUpdatedIds.add(effectiveConcept.conceptId);
         updates.fsrsUpdatedIds = nextFsrsUpdatedIds;
 
         // Optimistic row update at the current index position
-        const baseConceptQueue = [...s.conceptQueue];
-        baseConceptQueue[s.index] = updatedProgressRow;
-        updates.conceptQueue = baseConceptQueue;
+        const basePairs = [...s.pairs];
+        basePairs[s.index] = { ...pair, concept: updatedProgressRow };
+        Object.assign(updates, fromPairs(basePairs));
       }
 
       // 3. Desirable-difficulty re-queue for incorrect answers.
@@ -554,15 +762,10 @@ export function createSessionStore<TItem = Country>({
           // Clamp to the end of the queue (splice inserts before that index)
           const insertAt = Math.min(s.index + 1 + offset, s.queue.length);
 
-          // Build new queues with the failed card re-inserted
-          const newQueue = [...(updates.queue ?? s.queue)];
-          const newConceptQueue = [...(updates.conceptQueue ?? s.conceptQueue)];
-
-          newQueue.splice(insertAt, 0, target);
-          newConceptQueue.splice(insertAt, 0, newConceptQueue[s.index] ?? null);
-
-          updates.queue = newQueue;
-          updates.conceptQueue = newConceptQueue;
+          // Re-insert the failed slot (item and its possibly updated concept together)
+          const newPairs = [...(updates.pairs ?? s.pairs)];
+          newPairs.splice(insertAt, 0, newPairs[s.index]!);
+          Object.assign(updates, fromPairs(newPairs));
 
           // Record the retry count
           const nextRetries = new Map(s.inSessionRetries);

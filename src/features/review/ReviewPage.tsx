@@ -12,6 +12,7 @@ import {
   type SpainFeatureCollection,
 } from "@/lib/spain";
 import { parseConceptId } from "@/lib/fsrs/concept";
+import { reviewLabels } from "./reviewLabels";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -169,10 +170,11 @@ function LocationQuestion({
 /**
  * Multiple-choice question card for flag / capital / name skills.
  */
-function McQuestion({
+export function McQuestion({
   options,
   current,
   skill,
+  subMode,
   answerState,
   selectedId,
   onSelect,
@@ -180,18 +182,20 @@ function McQuestion({
   options: ReviewEntity[];
   current: ReviewEntity;
   skill: string;
+  subMode: string;
   answerState: "idle" | "correct" | "wrong" | "revealed";
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
   const revealed = answerState !== "idle";
   const currentTargetId = isSpainEntity(current) ? current.id : current.iso3;
+  const { optionLabel } = reviewLabels(skill, subMode, current);
 
   return (
     <div className="w-full max-w-xl grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
       {options.map((opt: ReviewEntity, idx: number) => {
         const optId = isSpainEntity(opt) ? opt.id : opt.iso3;
-        const label = skill === "capital" ? (opt.capital ?? opt.name) : opt.name;
+        const label = optionLabel(opt);
         const isCorrectOption = optId === currentTargetId;
         const isChosen = selectedId === optId;
 
@@ -415,7 +419,7 @@ export default function ReviewPage() {
       case "capital":
         if (subMode === "capToCountry") {
           return {
-            prompt: `Which ${isSpain ? "region" : "country"}'s capital is ${current.capital}?`,
+            prompt: reviewLabels(skill, subMode, current).prompt,
             visual: (
               <div className="flex flex-col items-center gap-3 py-6">
                 <div className="font-display text-5xl md:text-6xl font-bold text-[color:var(--cyan)] tracking-tight text-center">
@@ -427,7 +431,7 @@ export default function ReviewPage() {
           };
         }
         return {
-          prompt: `What's the capital of ${regionName}?`,
+          prompt: reviewLabels(skill, subMode, current).prompt,
           visual: (
             <div className="flex flex-col items-center gap-3 py-6">
               <div className="font-display text-5xl md:text-6xl font-bold text-white/90 tracking-tight text-center">
@@ -498,7 +502,8 @@ export default function ReviewPage() {
   }
 
   /* ─── Empty state ─── */
-  if (loadState === "empty") {
+  // Also when every row of the batch failed lookup: the store is empty, not the queue.
+  if (loadState === "empty" || s.status === "empty") {
     return (
       <div className="relative min-h-dvh pt-24 pb-12 flex flex-col items-center justify-center px-4">
         <div className="absolute top-24 z-20 flex justify-center w-full">
@@ -716,6 +721,7 @@ export default function ReviewPage() {
                 options={mcOptions}
                 current={current}
                 skill={skill}
+                subMode={subMode}
                 answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
                 selectedId={selectedId}
                 onSelect={(id) => {

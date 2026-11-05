@@ -5,6 +5,7 @@ import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
+import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { HardInput } from "@/features/engine/HardInput";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
@@ -67,6 +68,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
+  const empty = !finished && s.status === "empty";
 
   // Count of countries in selected continent
   const continentCount = useMemo(() => {
@@ -133,6 +135,60 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
     [s],
   );
 
+  const toolbar = (
+    <div className="absolute top-24 inset-x-0 z-20 px-4 md:px-6 flex items-center justify-between pointer-events-auto max-w-5xl mx-auto">
+      <div className="flex items-center gap-2 flex-wrap">
+        <RegionSelect
+          value={continent}
+          onChangeContinent={restartWithContinent}
+          spainSkill="locate"
+        />
+        {sub === "find" && (
+          <div
+            className="glass rounded-full p-1 flex flex-nowrap items-center gap-0.5"
+            role="group"
+            aria-label="Session length"
+          >
+            <button
+              type="button"
+              onClick={() => setSessionMode("quick")}
+              aria-pressed={sessionMode === "quick"}
+              className={cn(
+                "px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider transition-colors",
+                sessionMode === "quick"
+                  ? "bg-white/15 text-white"
+                  : "text-white/55 hover:text-white",
+              )}
+            >
+              10 Q
+            </button>
+            <button
+              type="button"
+              onClick={() => setSessionMode("complete")}
+              aria-pressed={sessionMode === "complete"}
+              title={`All ${continentCount} countries in ${continent === "All" ? "the world" : continent}`}
+              className={cn(
+                "px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider transition-colors",
+                sessionMode === "complete"
+                  ? "bg-white/15 text-white"
+                  : "text-white/55 hover:text-white",
+              )}
+            >
+              All {continentCount}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <ModeDropdown options={SUB_MODE_OPTIONS} value={sub} onChange={setSub} />
+        {sub === "name" && (
+          <ModeDropdown options={DIFFICULTY_OPTIONS} value={difficulty} onChange={setDifficulty} />
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="relative min-h-dvh pt-20">
       {/* 3D Globe Background */}
@@ -177,61 +233,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
       {!finished && current && (
         <>
           {/* Top HUD Controls */}
-          <div className="absolute top-24 inset-x-0 z-20 px-4 md:px-6 flex items-center justify-between pointer-events-auto max-w-5xl mx-auto">
-            <div className="flex items-center gap-2 flex-wrap">
-              <RegionSelect
-                value={continent}
-                onChangeContinent={restartWithContinent}
-                spainSkill="locate"
-              />
-              {sub === "find" && (
-                <div
-                  className="glass rounded-full p-1 flex flex-nowrap items-center gap-0.5"
-                  role="group"
-                  aria-label="Session length"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setSessionMode("quick")}
-                    aria-pressed={sessionMode === "quick"}
-                    className={cn(
-                      "px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider transition-colors",
-                      sessionMode === "quick"
-                        ? "bg-white/15 text-white"
-                        : "text-white/55 hover:text-white",
-                    )}
-                  >
-                    10 Q
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSessionMode("complete")}
-                    aria-pressed={sessionMode === "complete"}
-                    title={`All ${continentCount} countries in ${continent === "All" ? "the world" : continent}`}
-                    className={cn(
-                      "px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider transition-colors",
-                      sessionMode === "complete"
-                        ? "bg-white/15 text-white"
-                        : "text-white/55 hover:text-white",
-                    )}
-                  >
-                    All {continentCount}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <ModeDropdown options={SUB_MODE_OPTIONS} value={sub} onChange={setSub} />
-              {sub === "name" && (
-                <ModeDropdown
-                  options={DIFFICULTY_OPTIONS}
-                  value={difficulty}
-                  onChange={setDifficulty}
-                />
-              )}
-            </div>
-          </div>
+          {toolbar}
 
           {/* Prompt Pill */}
           <div className="absolute top-36 md:top-32 inset-x-0 z-20 flex justify-center pointer-events-none">
@@ -270,6 +272,19 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                 />
               )
             ) : null}
+          </div>
+        </>
+      )}
+
+      {empty && (
+        <>
+          {toolbar}
+          <div className="absolute top-40 md:top-36 inset-x-0 z-20 px-4">
+            <SessionEmpty
+              reason={s.emptyReason}
+              hasSeen={s.hasSeen}
+              onPractice={() => void s.startPractice()}
+            />
           </div>
         </>
       )}
