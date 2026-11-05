@@ -53,9 +53,9 @@ function AccountPage() {
       await deleteAccount();
       await qc.cancelQueries();
       qc.clear();
-      await supabase.auth.signOut();
-      const { swap } = await import("@/lib/db/dbProvider");
-      await swap(null);
+      // Signs out, closes and deletes this user's local Dexie DB.
+      const { finishAccountDeletion } = await import("@/lib/accountCleanup");
+      await finishAccountDeletion(user!.id);
       toast.success("Your account has been deleted.");
       router.navigate({ to: "/auth", search: {}, replace: true });
     } catch (e) {
