@@ -610,7 +610,6 @@ export default function SpainPage() {
                     subtitle={[`Capital of ${current.name}`, feedbackContext(current)].filter(Boolean).join(" · ")}
                     chosen={s.chosen}
                     onNext={() => s.next()}
-                    onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
                     hideNext={s.answerState === "correct"}
                   />
                 </div>
@@ -660,7 +659,6 @@ export default function SpainPage() {
                   subtitle={[feedbackContext(current), current.capital && `Capital: ${current.capital}`].filter(Boolean).join(" · ")}
                   chosen={s.chosen}
                   onNext={() => s.next()}
-                  onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
                   hideNext={s.answerState === "correct"}
                 />
               </div>

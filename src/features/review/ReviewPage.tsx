@@ -673,7 +673,6 @@ export default function ReviewPage() {
               subtitle={feedbackContext(current) ?? (isSpainEntity(current) ? "Spain" : current.continent)}
               chosen={s.chosen}
               onNext={() => s.next()}
-              onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
               hideNext={s.answerState === "correct"}
             />
           </div>
@@ -771,7 +770,6 @@ export default function ReviewPage() {
               ) : undefined
             }
             onNext={() => s.next()}
-            onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
             hideNext={s.answerState === "correct"}
           />
         </div>
