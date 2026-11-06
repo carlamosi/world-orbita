@@ -42,6 +42,17 @@ vi.mock("@/lib/db/progressRepo", () => ({
 }));
 vi.mock("@/lib/db/repo", () => ({ recordSessionEnd: vi.fn(async () => {}) }));
 vi.mock("@/lib/audio", () => ({ playAnswerSound: vi.fn() }));
+let failReview = false;
+vi.mock("@/lib/fsrs/adapter", async (orig) => {
+  const actual = await orig<typeof import("@/lib/fsrs/adapter")>();
+  return {
+    ...actual,
+    processReview: (...a: Parameters<typeof actual.processReview>) => {
+      if (failReview) throw new Error("boom");
+      return actual.processReview(...a);
+    },
+  };
+});
 
 import { buildPairs, createSessionStore } from "@/features/engine/useSession";
 import { SPAIN_CCAA, SPAIN_PROVINCES } from "@/lib/spain";
@@ -413,6 +424,26 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
     store.getState().submit(true);
     await flush();
     expect(meta.get(todayKey())).toBe("1");
+  });
+
+  it("a grading failure does not spend a new-card slot", async () => {
+    const [p1] = SPAIN_PROVINCES;
+    rows.push(row(findId(p1!.id), p1!.id, -1));
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    store.getState().submit(true);
+    store.getState().next();
+    expect(store.getState().conceptQueue[store.getState().index]!.fsrs_state).toBe(State.New);
+    failReview = true;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      store.getState().submit(true);
+      await flush();
+    } finally {
+      failReview = false;
+    }
+    expect(meta.get(todayKey())).toBeUndefined();
+    expect(meta.get(newCardsKey(GLOBAL_NEW_BUCKET, Date.now()))).toBeUndefined();
   });
 
   describe("only planner sessions spend the new-card cap", () => {

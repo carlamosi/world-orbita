@@ -788,19 +788,19 @@ export function createSessionStore<TItem = Country>({
           const basePairs = [...s.pairs];
           basePairs[s.index] = { ...pair, concept: updatedProgressRow };
           Object.assign(updates, fromPairs(basePairs));
+
+          // First grade of a new concept in a planner session uses up one of today's new cards.
+          // The bucket comes from the graded concept's own id, so mixed-subMode seeds
+          // and Due Today rows count against their real domain:skill:subMode.
+          if (wasNew && s.countsTowardNewCap) {
+            const bucket = newCardBucket(effectiveConcept.conceptId);
+            incrementNewCardsToday(bucket, now).catch(console.error);
+          }
+          if (wasNew) incrementNewCardsToday(GLOBAL_NEW_BUCKET, now).catch(console.error);
         } catch (err) {
           // A bad row must not freeze the session: log it and let the UI advance.
           console.error("FSRS processing failed; answer not graded", err);
         }
-
-        // First grade of a new concept in a planner session uses up one of today's new cards.
-        // The bucket comes from the graded concept's own id, so mixed-subMode seeds
-        // and Due Today rows count against their real domain:skill:subMode.
-        if (wasNew && s.countsTowardNewCap) {
-          const bucket = newCardBucket(effectiveConcept.conceptId);
-          incrementNewCardsToday(bucket, now).catch(console.error);
-        }
-        if (wasNew) incrementNewCardsToday(GLOBAL_NEW_BUCKET, now).catch(console.error);
 
         // Mark this concept as FSRS-updated for this session
         const nextFsrsUpdatedIds = new Set(s.fsrsUpdatedIds);
