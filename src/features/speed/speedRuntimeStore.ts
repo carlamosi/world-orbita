@@ -3,10 +3,6 @@ import type { Country } from "@/types/country";
 import type { Skill } from "@/lib/db/orbita-db";
 import { selectMixedQuestions } from "@/lib/mastery";
 import { recordSessionEnd } from "@/lib/db/repo";
-import { assess } from "@/lib/fsrs/assessment";
-import { rowToCard, cardToRowUpdates, processReview } from "@/lib/fsrs/adapter";
-import { recordConceptAttempt, getConceptProgress } from "@/lib/db/progressRepo";
-import { State } from "ts-fsrs";
 import type { MissedItem } from "@/features/engine/useSession";
 import { playAnswerSound } from "@/lib/audio";
 
@@ -17,6 +13,9 @@ import { playAnswerSound } from "@/lib/audio";
  * session tree; combo / lives mutate per-answer rather than per-question;
  * questions are pre-batched into a queue. Persistence still routes through
  * the same repo layer (Dexie cache → outbox → Supabase RPC).
+ *
+ * Speed is a fluency game with its own score: it never writes FSRS/concept
+ * progress (it only reads it, to pick weak or unseen countries).
  */
 
 export type SpeedMode = "sprint60" | "marathon120" | "suddenDeath";
@@ -30,7 +29,6 @@ interface SpeedItem {
   country: Country;
   skill: Skill;
   options: Country[];
-  shownAt: number;
 }
 
 export interface SpeedState {
@@ -48,6 +46,8 @@ export interface SpeedState {
   correct: number;
   wrong: number;
   missedItems: MissedItem[];
+  /** Set for REVEAL_MS after a miss; input is ignored meanwhile. */
+  reveal: { correctIso3: string; pickedIso3: string } | null;
 
   startedAt: number;
   endedAt: number | null;
@@ -62,6 +62,8 @@ export interface SpeedState {
 const SPRINT_MS = 60_000;
 const MARATHON_MS = 120_000;
 const TICK_MS = 250;
+/** How long the correct option stays visible after a miss. */
+export const REVEAL_MS = 800;
 
 function modeDurationMs(m: SpeedMode): number {
   if (m === "sprint60") return SPRINT_MS;
@@ -121,6 +123,7 @@ const INITIAL_STATE = {
   correct: 0,
   wrong: 0,
   missedItems: [] as MissedItem[],
+  reveal: null as { correctIso3: string; pickedIso3: string } | null,
   startedAt: 0,
   endedAt: null as number | null,
 };
@@ -172,7 +175,6 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
       country: p.country,
       skill: p.skill,
       options: makeOptions(p.country, COUNTRIES),
-      shownAt: now,
     }));
 
     // If reset() was called while building the queue, abort cleanly.
@@ -215,69 +217,11 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
 
   answer(iso3) {
     const s = get();
-    if (s.status !== "running") return;
+    if (s.status !== "running" || s.reveal) return;
     const item = s.queue[s.index];
     if (!item) return;
     const isCorrect = item.country.iso3 === iso3;
     playAnswerSound(isCorrect);
-    const responseMs = Math.max(0, Date.now() - item.shownAt);
-    const now = Date.now();
-    
-    // Speed Mode implicit subModes mapped from the visual prompt logic in SpeedPage.tsx
-    let actualDirection = "";
-    if (item.skill === "name") actualDirection = "name";
-    else if (item.skill === "flag") actualDirection = "countryToFlag";
-    else if (item.skill === "capital") actualDirection = "countryToCap";
-    else if (item.skill === "location") actualDirection = "capToCountry";
-    
-    // FSRS expects conceptId format: iso3:skill:subMode
-    // Speed mode maps "location" visually to capToCountry (which is a capital skill)
-    const targetSkill = item.skill === "location" ? "capital" : item.skill;
-    const conceptId = `${item.country.iso3}:${targetSkill}:${actualDirection}`;
-    
-    getConceptProgress(conceptId).then((targetConcept) => {
-      if (!targetConcept) return;
-
-      // Step 1: Evaluate the answer
-      const assessment = assess({
-        validationResult: { correct: isCorrect, softCorrect: false },
-        responseMs,
-        attemptNumber: 1,
-        hintsUsed: 0,
-        questionType: targetSkill,
-        retrievalMode: "easy",
-        direction: actualDirection,
-      });
-
-      // Step 2: Process through official FSRS-6 adapter
-      const currentCard = rowToCard(targetConcept);
-      const { card: nextCard, log: fsrsLog } = processReview(
-        currentCard,
-        assessment.outcome,
-        now,
-      );
-
-      // Step 3: Merge updates back to row
-      const updatedRow = {
-        ...targetConcept,
-        ...cardToRowUpdates(nextCard, 1, true, targetConcept.version),
-      };
-
-      // Step 4: Persist (idempotent op_id)
-      recordConceptAttempt(updatedRow, {
-        op_id: crypto.randomUUID(),
-        conceptId: targetConcept.conceptId,
-        sessionId: "speed-" + s.startedAt,
-        grade: assessment.outcome === "again" ? 0 : assessment.outcome === "hard" ? 1 : assessment.outcome === "good" ? 2 : 3,
-        mode: assessment.retrievalMode,
-        direction: assessment.direction,
-        fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
-        responseMs,
-        correct: isCorrect,
-        answeredAt: now,
-      }).catch(console.error);
-    });
-
     if (isCorrect) {
       const combo = s.combo + 1;
       const mult = Math.min(5, 1 + Math.floor((combo - 1) / 3));
@@ -321,40 +265,28 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
         wrong: s.wrong + 1,
         missedItems,
         lives,
-        index: s.index + 1,
+        reveal: { correctIso3: item.country.iso3, pickedIso3: iso3 },
       });
-      if (lives <= 0) {
-        finalize();
-        return;
-      }
+      // Show the right option first; the next question (or game over) follows.
+      const t = setTimeout(() => {
+        pendingTimeouts.delete(t);
+        if (get().status !== "running") return;
+        set({ reveal: null, index: get().index + 1 });
+        if (lives <= 0) finalize();
+        else topUpIfLow();
+      }, REVEAL_MS);
+      pendingTimeouts.add(t);
+      return;
     }
-    // Stamp `shownAt` on the new current item so response time is accurate.
-    const newIdx = get().index;
-    const newItem = get().queue[newIdx];
-    if (newItem && newItem.shownAt === 0) {
-      const next = get().queue.slice();
-      next[newIdx] = { ...newItem, shownAt: Date.now() };
-      useSpeedRuntime.setState({ queue: next });
-    } else if (newItem) {
-      // Re-stamp the freshly-displayed item so its timer starts at "now".
-      const next = get().queue.slice();
-      next[newIdx] = { ...newItem, shownAt: Date.now() };
-      useSpeedRuntime.setState({ queue: next });
-    }
-
-    if (get().index >= get().queue.length - 4) {
-      void topUpQueue();
-    }
+    topUpIfLow();
   },
 
   skip() {
     const s = get();
-    if (s.status !== "running") return;
+    if (s.status !== "running" || s.reveal) return;
     if (!s.queue[s.index]) return;
     set({ combo: 0, wrong: s.wrong + 1, index: s.index + 1 });
-    if (get().index >= get().queue.length - 4) {
-      void topUpQueue();
-    }
+    topUpIfLow();
   },
 
   reset() {
@@ -369,6 +301,11 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
   },
 }));
 
+function topUpIfLow() {
+  const s = useSpeedRuntime.getState();
+  if (s.index >= s.queue.length - 4) void topUpQueue();
+}
+
 async function topUpQueue() {
   const s = useSpeedRuntime.getState();
   const { COUNTRIES } = await import("@/lib/countries");
@@ -377,7 +314,6 @@ async function topUpQueue() {
     ["name", "flag", "capital", "location"],
     { continent: s.config.continent },
   );
-  const now = Date.now();
   useSpeedRuntime.setState({
     queue: [
       ...s.queue,
@@ -385,7 +321,6 @@ async function topUpQueue() {
         country: p.country,
         skill: p.skill,
         options: makeOptions(p.country, COUNTRIES),
-        shownAt: now,
       })),
     ],
   });
