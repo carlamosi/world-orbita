@@ -244,12 +244,15 @@ export default function SpainPage() {
   const overlayPolygons = useMemo(() => activeFeatures?.features ?? [], [activeFeatures]);
 
   const startSession = useCallback(
-    (sk: GameSkill, lv: AdminLevel, sm: SessionLengthMode) => {
+    (sk: GameSkill, lv: AdminLevel, sm: SessionLengthMode, diff: Difficulty) => {
       setLastWrongId(null);
       setHoveredRegionId(null);
       const isCCAA = sk === "flags" || lv === "ccaa";
       const dataset = isCCAA ? SPAIN_CCAA : SPAIN_PROVINCES;
-      const subMode = sk === "locate" ? "find" : sk === "name" ? "name" : sk === "flags" ? "flag" : "capital";
+      const base = sk === "locate" ? "find" : sk === "name" ? "name" : sk === "flags" ? "flag" : "capital";
+      // Choices are recognition, typing is recall: each is its own card (as in world Flags).
+      const typed = diff === "hard" && (sk === "name" || sk === "flags");
+      const subMode = typed ? (sk === "name" ? "nameType" : "flagToType") : base;
 
       // CCAA is ALWAYS all 19 items across all modes
       if (isCCAA || sm === "complete") {
@@ -262,9 +265,9 @@ export default function SpainPage() {
   );
 
   useEffect(() => {
-    startSession(skill, level, sessionMode);
+    startSession(skill, level, sessionMode, difficulty);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skill, level, sessionMode]);
+  }, [skill, level, sessionMode, difficulty]);
 
   useAutoAdvance({ answerState: s.answerState, finished, next: s.next });
 
@@ -550,7 +553,7 @@ export default function SpainPage() {
                       target={current}
                       matchTarget={current.name}
                       placeholder="Type the autonomous community name…"
-                      onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                      onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
                     />
                   )}
                 </div>
@@ -577,7 +580,7 @@ export default function SpainPage() {
                       target={current}
                       matchTarget={current.capital ?? ""}
                       placeholder="Type the capital city…"
-                      onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                      onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
                     />
                   </div>
                 ) : (
@@ -627,7 +630,7 @@ export default function SpainPage() {
                       target={current}
                       matchTarget={current.name}
                       placeholder="Type the region name…"
-                      onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                      onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
                     />
                   )
                 ) : (
@@ -674,7 +677,7 @@ export default function SpainPage() {
         masteredCount={s.masteredCount}
         missedItems={s.missedItems}
         hasNextBlock={level === "provinces" && sessionMode === "quick"}
-        onNextBlock={() => startSession(skill, level, sessionMode)}
+        onNextBlock={() => startSession(skill, level, sessionMode, difficulty)}
       />
     </div>
   );

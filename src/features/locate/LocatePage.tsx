@@ -80,7 +80,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 
   // Start / restart session logic
   const startSession = useCallback(
-    (c: ContinentChoice, sMode: SubMode, findLength: SessionMode) => {
+    (c: ContinentChoice, sMode: SubMode, findLength: SessionMode, diff: NameDifficulty) => {
       setLastWrongIso3(null); // Reset differential feedback state
       if (sMode === "find" && findLength === "complete") {
         const all = selectAllForContinent(c === "All" ? null : c);
@@ -88,16 +88,18 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
       } else if (sMode === "find") {
         void findSession.start({ continent: c === "All" ? undefined : c, subMode: sMode });
       } else {
-        void nameSession.start({ continent: c === "All" ? undefined : c, subMode: sMode });
+        // Choosing among 4 is recognition, typing is recall: each is its own card.
+        const subMode = diff === "hard" ? "nameType" : "name";
+        void nameSession.start({ continent: c === "All" ? undefined : c, subMode });
       }
     },
     [findSession, nameSession],
   );
 
   useEffect(() => {
-    startSession(continent, sub, sessionMode);
+    startSession(continent, sub, sessionMode, difficulty);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [continent, sub, sessionMode]);
+  }, [continent, sub, sessionMode, difficulty]);
 
   useAutoAdvance({
     answerState: s.answerState,
@@ -127,13 +129,6 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
     );
     return shuffle([current, ...others]);
   }, [current, sub, difficulty, continent]);
-
-  const handleNameSubmit = useCallback(
-    (isCorrect: boolean, _country: Country) => {
-      s.submit(isCorrect);
-    },
-    [s],
-  );
 
   const toolbar = (
     <div className="absolute top-24 inset-x-0 z-20 px-4 md:px-6 flex items-center justify-between pointer-events-auto max-w-5xl mx-auto">
@@ -261,14 +256,14 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                   options={nameOptions}
                   targetIso3={current.iso3}
                   disabled={s.answerState !== "idle"}
-                  onPick={(iso3) => handleNameSubmit(iso3 === current.iso3, current)}
+                  onPick={(iso3) => s.submit(iso3 === current.iso3)}
                 />
               ) : (
                 <HardInput
                   target={current}
                   answerState={s.answerState}
                   correctAnswer={current.name}
-                  onSubmit={(ok) => handleNameSubmit(ok, current)}
+                  onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
                 />
               )
             ) : null}
@@ -300,7 +295,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
         durationMs={(s.endedAt ?? 0) - s.startedAt}
         missedItems={s.missedItems}
         hasNextBlock={sessionMode !== "complete"}
-        onReplay={() => startSession(continent, sub, sessionMode)}
+        onReplay={() => startSession(continent, sub, sessionMode, difficulty)}
       />
     </div>
   );

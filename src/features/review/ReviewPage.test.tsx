@@ -21,19 +21,26 @@ const orphanRow = {
   version: 1,
   dirty: 0,
 };
+const due = vi.hoisted(() => ({ rows: [] as unknown[] }));
 vi.mock("@/lib/db/orbita-db", () => ({
   ALL_SKILLS: ["flag"],
   db: () => ({
-    concept_progress: { where: () => ({ equals: () => ({ toArray: async () => [orphanRow] }) }) },
+    concept_progress: { where: () => ({ equals: () => ({ toArray: async () => due.rows }) }) },
   }),
 }));
+vi.mock("@/features/globe/Globe3D", () => ({
+  default: (p: { highlightIso3?: string | null }) => (
+    <div data-testid="globe" data-highlight={p.highlightIso3 ?? ""} />
+  ),
+}));
+const recordConceptAttempt = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("@/lib/fsrs/planner", () => ({ generateDueTodayQueue: (rows: unknown[]) => rows }));
 vi.mock("@/lib/db/repo", () => ({
   getPref: vi.fn(async () => undefined),
   setPref: vi.fn(async () => {}),
   recordSessionEnd: vi.fn(async () => {}),
 }));
-vi.mock("@/lib/db/progressRepo", () => ({ recordConceptAttempt: vi.fn(async () => {}) }));
+vi.mock("@/lib/db/progressRepo", () => ({ recordConceptAttempt }));
 vi.mock("@/lib/audio", () => ({ playAnswerSound: vi.fn() }));
 
 import ReviewPage, { McQuestion } from "./ReviewPage";
@@ -94,6 +101,7 @@ describe("Review capital questions", () => {
 
 describe("Review page when every row of the batch fails lookup", () => {
   it("renders the nothing-to-review state instead of a blank area", async () => {
+    due.rows = [orphanRow];
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -108,5 +116,94 @@ describe("Review page when every row of the batch fails lookup", () => {
     expect(host.textContent).toContain("All clear!");
     act(() => root.unmount());
     host.remove();
+  });
+});
+
+const fra = COUNTRIES.find((c) => c.iso3 === "FRA")!;
+
+async function renderDue(conceptId: string, skill: string) {
+  due.rows = [{ ...orphanRow, conceptId, iso3: "FRA", skill }];
+  recordConceptAttempt.mockClear();
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  await act(async () => {
+    root.render(<ReviewPage />);
+  });
+  for (let i = 0; i < 20 && !host.querySelector("input, [data-testid=globe], button span.truncate"); i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+  }
+  // Let the lazy globe resolve too.
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 20));
+  });
+  return {
+    host,
+    input: () => host.querySelector("input:not([type=hidden])") as HTMLInputElement | null,
+    options: () => host.querySelectorAll("button span.truncate").length,
+    globe: () => host.querySelector("[data-testid=globe]"),
+    flag: () => host.querySelector('[alt="Mystery flag"]'),
+    cleanup: () => {
+      act(() => root.unmount());
+      host.remove();
+    },
+  };
+}
+
+describe("Review asks each card in its own format", () => {
+  it.each([
+    ["FRA:capital:countryToCap", "capital"],
+    ["FRA:capital:capToCountry", "capital"],
+    ["FRA:flag:flagToType", "flag"],
+  ])("%s gets a text box, not options", async (conceptId, skill) => {
+    const r = await renderDue(conceptId, skill);
+    expect(r.input()).not.toBeNull();
+    expect(r.options()).toBe(0);
+    r.cleanup();
+  });
+
+  it("FRA:flag:flagToCountry stays multiple choice", async () => {
+    const r = await renderDue("FRA:flag:flagToCountry", "flag");
+    expect(r.input()).toBeNull();
+    expect(r.options()).toBe(4);
+    r.cleanup();
+  });
+
+  it("the map Name card shows the country on the globe, not a flag, with options", async () => {
+    const r = await renderDue("FRA:name:name", "name");
+    expect(r.globe()?.getAttribute("data-highlight")).toBe("FRA");
+    expect(r.flag()).toBeNull();
+    expect(r.options()).toBe(4);
+    expect(r.input()).toBeNull();
+    r.cleanup();
+  });
+
+  it("the typed Name card shows the globe and a text box", async () => {
+    const r = await renderDue("FRA:name:nameType", "name");
+    expect(r.globe()?.getAttribute("data-highlight")).toBe("FRA");
+    expect(r.flag()).toBeNull();
+    expect(r.input()).not.toBeNull();
+    expect(r.options()).toBe(0);
+    r.cleanup();
+  });
+
+  it("typed answers are graded hard, and a typo accepted on Enter as softCorrect (Hard)", async () => {
+    const r = await renderDue("FRA:capital:countryToCap", "capital");
+    const input = r.input()!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, fra.capital + "x");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    const attempt = (recordConceptAttempt.mock.calls[0] as unknown[] | undefined)?.[1] as
+      | { mode: string; grade: number; conceptId: string }
+      | undefined;
+    expect(attempt).toMatchObject({ conceptId: "FRA:capital:countryToCap", mode: "hard", grade: 1 });
+    r.cleanup();
   });
 });

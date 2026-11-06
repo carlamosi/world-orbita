@@ -95,11 +95,14 @@ function LocationQuestion({
   answerState,
   onSubmit,
   spainFeatures,
+  naming = false,
 }: {
   current: ReviewEntity;
   answerState: "idle" | "correct" | "wrong" | "revealed";
   onSubmit: (id: string) => void;
   spainFeatures: SpainFeatureCollection | null;
+  /** Name card: the target is highlighted, as in Locate's and Spain's Name mode, and the map is not clickable. */
+  naming?: boolean;
 }) {
   const isSpain = isSpainEntity(current);
   const SPAIN_POV = useMemo(() => ({ lat: 39.2, lng: -3.7, altitude: 0.28 }), []);
@@ -115,7 +118,7 @@ function LocationQuestion({
             disableMicrostates
             autoRotate={false}
             quality="high"
-            highlightId={answerState === "correct" ? currentId : null}
+            highlightId={answerState === "correct" || (naming && answerState === "idle") ? currentId : null}
             revealId={answerState === "wrong" || answerState === "revealed" ? currentId : null}
             disableHoverLabel={answerState === "idle"}
             questionKey={currentId}
@@ -124,6 +127,7 @@ function LocationQuestion({
             overlayCapColor={(d: any) => {
               const fid = d?.properties?.id ?? "";
               if (fid === currentId) {
+                if (naming && answerState === "idle") return "rgba(0, 212, 255, 0.45)";
                 if (answerState === "correct" || answerState === "wrong" || answerState === "revealed") {
                   return "rgba(16, 185, 129, 0.65)";
                 }
@@ -134,7 +138,7 @@ function LocationQuestion({
             overlayStrokeColor={() => "rgba(255,255,255,0.75)"}
             overlayAltitude={0.012}
             onOverlayClick={(d: any) => {
-              if (answerState === "idle") {
+              if (answerState === "idle" && !naming) {
                 const clickedId = d?.properties?.id ?? "";
                 onSubmit(clickedId);
               }
@@ -150,17 +154,18 @@ function LocationQuestion({
       <Suspense fallback={<GlobeFallback />}>
         <Globe3D
           countries={COUNTRIES}
-          highlightIso3={answerState === "correct" ? current.iso3 : null}
+          highlightIso3={answerState === "correct" || (naming && answerState === "idle") ? current.iso3 : null}
           revealIso3={
             answerState === "wrong" || answerState === "revealed" ? current.iso3 : null
           }
           onCountryClick={
-            answerState === "idle" ? onSubmit : undefined
+            answerState === "idle" && !naming ? onSubmit : undefined
           }
           disableHoverLabel={answerState === "idle"}
           questionKey={current.iso3}
           pointOfView={undefined}
           activeContinent={null}
+          autoRotateSpeed={naming ? 0.05 : undefined}
         />
       </Suspense>
     </div>
@@ -356,6 +361,10 @@ export default function ReviewPage() {
   const skillLabel = SKILL_LABELS[skill] ?? skill;
   const skillColor = SKILL_COLORS[skill] ?? SKILL_COLORS.flag!;
   const isLocationSkill = skill === "location" || subMode === "find" || subMode === "locator";
+  // The Name card is learned from the highlighted map, never from a flag.
+  const isMapName = skill === "name";
+  // Cards learned by typing are reviewed by typing; Capitals is typing only.
+  const isTyped = skill === "capital" || subMode === "flagToType" || subMode === "nameType";
 
   // Generate 4 MC options
   const mcOptions: ReviewEntity[] = useMemo(() => {
@@ -374,8 +383,8 @@ export default function ReviewPage() {
 
   // Keyboard shortcuts for MC skills
   const hotkeyItems = useMemo(
-    () => (s.answerState === "idle" && !isLocationSkill ? mcOptions.map((o) => ({ id: isSpainEntity(o) ? o.id : o.iso3 })) : []),
-    [mcOptions, s.answerState, isLocationSkill],
+    () => (s.answerState === "idle" && !isLocationSkill && !isTyped ? mcOptions.map((o) => ({ id: isSpainEntity(o) ? o.id : o.iso3 })) : []),
+    [mcOptions, s.answerState, isLocationSkill, isTyped],
   );
   const onHotkey = useCallback(
     (id: string) => {
@@ -571,8 +580,34 @@ export default function ReviewPage() {
     );
   }
 
-  /* ─── Active session — LOCATION skill: full-screen globe ─── */
-  if (isLocationSkill && current) {
+  const answersCapital = skill === "capital" && subMode !== "capToCountry";
+  const answerInput = !current ? null : isTyped ? (
+    <div className="w-full max-w-md mx-auto">
+      <HardInput
+        target={current}
+        matchTarget={answersCapital ? (current.capital ?? current.name) : current.name}
+        onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
+        placeholder={answersCapital ? "Type the capital…" : "Type the name…"}
+      />
+    </div>
+  ) : (
+    <McQuestion
+      options={mcOptions}
+      current={current}
+      skill={skill}
+      subMode={subMode}
+      answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
+      selectedId={selectedId}
+      onSelect={(id) => {
+        if (!current || s.answerState !== "idle") return;
+        setSelectedId(id);
+        s.submit(id === currentId);
+      }}
+    />
+  );
+
+  /* ─── Active session — LOCATION and map NAME cards: full-screen globe ─── */
+  if ((isLocationSkill || isMapName) && current) {
     const displayName = current.name;
     return (
       <div className="relative min-h-dvh pt-20">
@@ -581,6 +616,7 @@ export default function ReviewPage() {
           answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
           onSubmit={handleGlobeClick}
           spainFeatures={spainFeatures}
+          naming={isMapName}
         />
 
         {/* Skill badge */}
@@ -618,10 +654,20 @@ export default function ReviewPage() {
             index={s.index}
             total={s.queue.length}
             title={
-              <>Find <span className="text-glow-cyan">{displayName}</span> on the map</>
+              isMapName ? (
+                isSpainEntity(current) ? "Name this region" : "Name this country"
+              ) : (
+                <>Find <span className="text-glow-cyan">{displayName}</span> on the map</>
+              )
             }
           />
         </div>
+
+        {isMapName && s.answerState === "idle" && (
+          <div className="absolute bottom-8 inset-x-0 z-30 px-4 flex justify-center pointer-events-auto">
+            {answerInput}
+          </div>
+        )}
 
         {/* Feedback bar */}
         <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
@@ -706,31 +752,7 @@ export default function ReviewPage() {
               </motion.div>
             )}
 
-            {/* Question input: Hard typing for flagToType / typing modes, MC for choices */}
-            {subMode === "flagToType" ? (
-              <div className="w-full max-w-md mx-auto">
-                <HardInput
-                  target={current}
-                  matchTarget={current.name}
-                  onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
-                  placeholder="Type the name…"
-                />
-              </div>
-            ) : (
-              <McQuestion
-                options={mcOptions}
-                current={current}
-                skill={skill}
-                subMode={subMode}
-                answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
-                selectedId={selectedId}
-                onSelect={(id) => {
-                  if (!current || s.answerState !== "idle") return;
-                  setSelectedId(id);
-                  s.submit(id === currentId);
-                }}
-              />
-            )}
+            {answerInput}
           </motion.div>
         )}
       </AnimatePresence>
