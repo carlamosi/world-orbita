@@ -54,8 +54,8 @@ function concept(extra: Partial<ConceptProgressRow> = {}): ConceptProgressRow {
     fsrs_reps: 1,
     fsrs_lapses: 0,
     fsrs_last_review: T,
-    fsrs_elapsed_days: 0,
-    fsrs_scheduled_days: 0,
+    fsrs_elapsed_days: 2,
+    fsrs_scheduled_days: 5,
     fsrs_learning_steps: 1,
     updated_at: T,
     version: 1,
@@ -161,10 +161,16 @@ describe("client <-> v2 baseline", () => {
       "FRA:capital:countryToCap",
     )) as unknown as ConceptProgressRow;
     expect(c).toMatchObject({
-      fsrs_learning_steps: 1,
-      fsrs_last_review: T,
       fsrs_due: T + 10 * 60_000,
+      fsrs_stability: 2.3,
+      fsrs_difficulty: 5.5,
       fsrs_state: State.Learning,
+      fsrs_reps: 1,
+      fsrs_lapses: 0,
+      fsrs_learning_steps: 1,
+      fsrs_elapsed_days: 2,
+      fsrs_scheduled_days: 5,
+      fsrs_last_review: T,
     });
     expect(await mem.question_history.get(qh)).toMatchObject({
       op_id: qh,
@@ -264,5 +270,54 @@ describe("client <-> v2 baseline", () => {
     } finally {
       await t.asUser(USER);
     }
+  });
+});
+
+describe("concept_progress review clock", () => {
+  type Push = { accepted: string[]; rejected: { op_id: string; reason: string }[]; canonical: { payload: Record<string, unknown> }[] };
+  const push = (conceptId: string, lastReview: number, client = "dev-1") =>
+    t.call<Push>("sync_push", {
+      _mutations: [
+        {
+          op_id: crypto.randomUUID(),
+          entity: "concept_progress",
+          op: "upsert",
+          payload: {
+            ...conceptProgressPayload(concept({ conceptId, fsrs_last_review: lastReview }))!,
+            client_id: client,
+          },
+        },
+      ],
+    });
+  const stored = async (conceptId: string) => {
+    const out = await t.call<{ concept_progress: { rows: Record<string, unknown>[] } }>(
+      "sync_pull",
+      { _cursors: { concept_progress: null }, _limit: 1000 },
+    );
+    return out.concept_progress.rows.find((r) => r.conceptId === conceptId)!;
+  };
+
+  it("two devices: an older review pushed after a newer one is stale and the canonical is the newer", async () => {
+    const id = "FRA:capital:twoDevices";
+    expect((await push(id, T + 60_000, "dev-A")).rejected).toEqual([]);
+    const r = await push(id, T, "dev-B");
+    expect(r.rejected).toMatchObject([{ reason: "stale_review" }]);
+    expect(r.canonical[0].payload.fsrs_last_review).toBe(T + 60_000);
+    expect((await stored(id)).fsrs_last_review).toBe(T + 60_000);
+  });
+
+  it("a far-future last_review is clamped to now + 5 min and a later correct-clock review still wins", async () => {
+    const id = "FRA:capital:futureClock";
+    const before = Date.now();
+    await push(id, before + 10 * 86_400_000, "dev-fast");
+    const clamped = (await stored(id)).fsrs_last_review as number;
+    expect(clamped).toBeLessThanOrEqual(Date.now() + 5 * 60_000);
+    expect(clamped).toBeGreaterThanOrEqual(before + 5 * 60_000 - 1000);
+
+    // Past the clamp ceiling, which a right-clock device reaches in 5 minutes.
+    const later = Date.now() + 5 * 60_000 + 1000;
+    const r = await push(id, later, "dev-ok");
+    expect(r.rejected).toEqual([]);
+    expect((await stored(id)).fsrs_last_review as number).toBeGreaterThan(clamped);
   });
 });

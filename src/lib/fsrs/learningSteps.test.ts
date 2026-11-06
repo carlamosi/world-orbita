@@ -56,6 +56,15 @@ describe("FSRS-1: learning_steps survives persistence round trip", () => {
   });
 });
 
+describe("elapsed_days is never negative", () => {
+  it("is 0 when stored and when read back, whatever the card or row carried", () => {
+    const card = { ...createNewCard(Date.UTC(2026, 10, 5)), elapsed_days: -3 };
+    const row = persist(card);
+    expect(row.fsrs_elapsed_days).toBe(0);
+    expect(rowToCard({ ...row, fsrs_elapsed_days: -3 }).elapsed_days).toBe(0);
+  });
+});
+
 describe("legacy rows without fsrs_learning_steps", () => {
   const base = (state: State, gapMs: number): ConceptProgressRow => {
     const last = Date.UTC(2026, 10, 5, 10, 0, 0);

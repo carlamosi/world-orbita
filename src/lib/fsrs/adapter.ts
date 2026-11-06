@@ -132,7 +132,7 @@ export function rowToCard(row: ConceptProgressRow): Card {
   }
   card.reps = row.fsrs_reps ?? 0;
   card.lapses = row.fsrs_lapses ?? 0;
-  card.elapsed_days = row.fsrs_elapsed_days ?? 0;
+  card.elapsed_days = Math.max(0, row.fsrs_elapsed_days ?? 0); // a future last_review makes ts-fsrs report negative days
   card.scheduled_days = row.fsrs_scheduled_days ?? 0;
   card.learning_steps = learningStepsOf(row, card.state);
 
@@ -212,7 +212,7 @@ export function cardToRowUpdates(
     fsrs_reps: card.reps,
     fsrs_lapses: card.lapses,
     fsrs_last_review: (card.last_review ?? new Date(now)).getTime(),
-    fsrs_elapsed_days: card.elapsed_days,
+    fsrs_elapsed_days: Math.max(0, card.elapsed_days),
     fsrs_scheduled_days: card.scheduled_days,
     fsrs_learning_steps: card.learning_steps,
     updated_at: now,
