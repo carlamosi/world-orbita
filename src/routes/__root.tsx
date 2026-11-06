@@ -165,9 +165,11 @@ function RootComponent() {
       if (!mounted) return;
 
       // Sync only once the user's DB is current: a cycle must never run against
-      // the guest DB with the user's token. Skip if a later swap replaced it.
+      // another DB with this session's token (guest, or user A on a direct A→B
+      // sign-in). Same-user events return at once and set it back to true; a
+      // later swap that replaced this DB keeps it false.
       const swapTo = (uid: string | null) => {
-        if (!uid) useSyncStore.getState().setSignedIn(false);
+        useSyncStore.getState().setSignedIn(false);
         return swap(uid).then((d) => {
           if (uid && getCurrent() === d) useSyncStore.getState().setSignedIn(true);
         });

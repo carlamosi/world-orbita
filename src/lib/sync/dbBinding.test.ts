@@ -4,7 +4,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createOrbitaDb, type OutboxRow } from "@/lib/db/orbita-db";
-import { swap, currentDbName } from "@/lib/db/dbProvider";
+import { swap, currentDbName, getCurrent, onSwap, SWAP_WAIT_MS } from "@/lib/db/dbProvider";
 import type { Mutation, PushResult } from "./types";
 
 let pushReply: (m: Mutation[]) => Promise<PushResult>;
@@ -85,6 +85,65 @@ describe("db binding", () => {
     expect(await a.outbox.count()).toBe(0);
     expect(await a.countryProgress.get("FRA")).toBeDefined();
     a.close();
+  });
+
+  it("a hung cycle cannot block swap: it is aborted instead", async () => {
+    const a = createOrbitaDb(currentDbName());
+    await a.outbox.add(outbox(crypto.randomUUID()));
+    const uidB = crypto.randomUUID();
+    const pre = createOrbitaDb(`orbita-${uidB}`);
+    const theirs = outbox(crypto.randomUUID());
+    await pre.outbox.add(theirs);
+    pre.close();
+
+    let release!: (r: PushResult) => void;
+    let sent!: () => void;
+    const reached = new Promise<void>((r) => (sent = r));
+    pushReply = (m) => {
+      sent();
+      return new Promise((r) => {
+        release = () =>
+          r({
+            accepted: m.map((x) => x.op_id),
+            rejected: [],
+            canonical: [
+              {
+                entity: "country_progress",
+                op_id: m[0].op_id,
+                payload: { country_code: "FRA", skills: {}, skill_versions: {}, last_seen_at: T },
+              },
+            ],
+          });
+      });
+    };
+    const push = runPushOnce();
+    await reached;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const swapped = swap(uidB);
+      await vi.advanceTimersByTimeAsync(SWAP_WAIT_MS);
+      const b = await swapped;
+      expect(currentDbName()).toBe(`orbita-${uidB}`);
+      release({ accepted: [], rejected: [], canonical: [] });
+      await push;
+      expect(await b.outbox.toArray()).toMatchObject([{ ...theirs, status: "pending" }]);
+      expect(await b.countryProgress.count()).toBe(0);
+      // The cycle stopped after the switch: its row stays in_flight in A.
+      expect(await a.outbox.toArray()).toMatchObject([{ status: "in_flight" }]);
+    } finally {
+      vi.useRealTimers();
+      a.close();
+    }
+  });
+
+  it("concurrent swaps to the same DB share one switch", async () => {
+    const seen: unknown[] = [];
+    const off = onSwap((d) => seen.push(d));
+    const [x, y] = await Promise.all([swap(null), swap(null)]);
+    off();
+    expect(seen).toHaveLength(1);
+    expect(x).toBe(getCurrent());
+    expect(y).toBe(getCurrent());
   });
 
   it("outbox rows addressed by op_id", async () => {
