@@ -73,6 +73,8 @@ begin
         v_cp.fsrs_scheduled_days := public.orbita_int(p->'fsrs_scheduled_days');
         v_cp.fsrs_learning_steps := public.orbita_int(p->'fsrs_learning_steps');
         v_cp.client_id := p->>'client_id';
+        -- Shift due by the clamped amount so the card is not hidden from other devices.
+        v_cp.fsrs_due := v_cp.fsrs_due - greatest(interval '0', public.orbita_ms(p->'fsrs_last_review') - v_cp.fsrs_last_review);
 
         insert into public.concept_progress
           (user_id, concept_id, iso3, skill, fsrs_state, fsrs_stability, fsrs_difficulty,

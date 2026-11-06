@@ -283,7 +283,7 @@ describe("concept_progress review clock", () => {
           entity: "concept_progress",
           op: "upsert",
           payload: {
-            ...conceptProgressPayload(concept({ conceptId, fsrs_last_review: lastReview }))!,
+            ...conceptProgressPayload(concept({ conceptId, fsrs_last_review: lastReview, fsrs_due: lastReview + 10 * 60_000 }))!,
             client_id: client,
           },
         },
@@ -313,6 +313,8 @@ describe("concept_progress review clock", () => {
     const clamped = (await stored(id)).fsrs_last_review as number;
     expect(clamped).toBeLessThanOrEqual(Date.now() + 5 * 60_000);
     expect(clamped).toBeGreaterThanOrEqual(before + 5 * 60_000 - 1000);
+    // due moves with last_review, so another device does not hide the card for days.
+    expect((await stored(id)).fsrs_due).toBe(clamped + 10 * 60_000);
 
     // Past the clamp ceiling, which a right-clock device reaches in 5 minutes.
     const later = Date.now() + 5 * 60_000 + 1000;
