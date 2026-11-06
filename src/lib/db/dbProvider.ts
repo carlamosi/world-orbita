@@ -67,6 +67,24 @@ export function swap(userId: string | null): Promise<OrbitaDB> {
   return promise;
 }
 
+let swapSeq = 0;
+/**
+ * swap() for a session change. Signed-in is false until the swap lands, and only
+ * the latest call may set it true: with overlapping swaps (B, then sign-out) an
+ * earlier one finishing first must not flag the guest DB as signed in.
+ */
+export function swapForSession(
+  userId: string | null,
+  setSignedIn: (v: boolean) => void,
+): Promise<OrbitaDB> {
+  setSignedIn(false);
+  const seq = ++swapSeq;
+  return swap(userId).then((d) => {
+    if (userId && seq === swapSeq && getCurrent() === d) setSignedIn(true);
+    return d;
+  });
+}
+
 async function doSwap(next: string): Promise<OrbitaDB> {
   if (state.current && state.name === next) return state.current;
 

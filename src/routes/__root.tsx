@@ -18,6 +18,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { authDebug } from "@/lib/auth/debug";
 import { ensureUserProfile } from "@/lib/auth/profile";
 import { runLocalStorageEpochReset } from "@/lib/db/schemaEpoch";
+import type { OrbitaDB } from "@/lib/db/orbita-db";
 import { SaveProgressNudge } from "@/components/ui/SaveProgressNudge";
 
 function NotFoundComponent() {
@@ -161,28 +162,24 @@ function RootComponent() {
       import("@/integrations/supabase/client"),
       import("@/lib/db/dbProvider"),
       import("@/lib/sync/useSyncStore"),
-    ]).then(([{ supabase }, { swap, getCurrent }, { useSyncStore }]) => {
+    ]).then(([{ supabase }, { swapForSession, getCurrent }, { useSyncStore }]) => {
       if (!mounted) return;
 
       // Sync only once the user's DB is current: a cycle must never run against
       // another DB with this session's token (guest, or user A on a direct A→B
       // sign-in). Same-user events return at once and set it back to true; a
       // later swap that replaced this DB keeps it false.
-      const swapTo = (uid: string | null) => {
-        useSyncStore.getState().setSignedIn(false);
-        return swap(uid).then((d) => {
-          if (uid && getCurrent() === d) useSyncStore.getState().setSignedIn(true);
-        });
-      };
+      const swapTo = (uid: string | null) =>
+        swapForSession(uid, useSyncStore.getState().setSignedIn);
 
-      const runMigration = async (uid: string) => {
-        if (migratedRef.current) return;
+      const runMigration = async (uid: string, d: OrbitaDB) => {
+        // A later swap may have replaced this DB; never merge into another one.
+        if (getCurrent() !== d || migratedRef.current) return;
         migratedRef.current = true;
         const { handleSignedInSync } = await import("@/lib/sync/workers");
         const { toast } = await import("sonner");
-        const userDb = getCurrent();
-        if (!userDb) return;
-        const result = await handleSignedInSync(userDb, uid);
+        if (getCurrent() !== d) return;
+        const result = await handleSignedInSync(d, uid);
         if (result.migrated > 0) {
           authDebug("root:migration_done", result);
           toast.success(
@@ -201,7 +198,7 @@ function RootComponent() {
             authDebug("root profile ensure failed", { error: error instanceof Error ? error.message : String(error) })
           );
           // If user was already signed in on page load, check for guest data to migrate
-          void swapped.then(() => runMigration(uid!));
+          void swapped.then((d) => runMigration(uid!, d));
         }
       });
 
@@ -217,7 +214,7 @@ function RootComponent() {
           );
           if (event === "SIGNED_IN") {
             // Run migration after the DB swap completes
-            void swapped.then(() => runMigration(uid!));
+            void swapped.then((d) => runMigration(uid!, d));
           }
         }
         if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
