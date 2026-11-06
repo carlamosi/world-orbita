@@ -22,7 +22,6 @@ vi.mock("@/lib/sync/queue", () => ({
 
 import { updateSkillProgress, recordSessionEnd } from "@/lib/db/repo";
 import { recordConceptAttempt } from "@/lib/db/progressRepo";
-import { swap } from "@/lib/db/dbProvider";
 import { conceptProgressPayload } from "./payloads";
 
 const T = Date.UTC(2026, 10, 5, 10, 0, 0);
@@ -133,38 +132,6 @@ describe("progressRepo.recordConceptAttempt", () => {
       1,
     );
     warn.mockRestore();
-  });
-});
-
-describe("dbProvider guest -> user merge", () => {
-  it("queues numeric dates, learning steps, and skips never-reviewed concepts", async () => {
-    const guest = createMemDb();
-    created["orbita-local"] = guest;
-    await guest.countryProgress.put({ iso3: "FRA", skills: {}, skill_versions: {}, lastSeenAt: T });
-    await guest.unlocks.put({ key: "first", progress: 1, unlockedAt: T, updatedAt: T });
-    await guest.unlocks.put({ key: "second", progress: 0.5, unlockedAt: null, updatedAt: T });
-    await guest.concept_progress.put(concept() as never);
-    await guest.concept_progress.put(
-      concept({
-        conceptId: "ESP:capital:countryToCap",
-        fsrs_last_review: 0,
-        fsrs_state: State.New,
-      }) as never,
-    );
-    // Make the provider's current DB the guest DB, then promote to a user.
-    await swap(null);
-    const vi_ = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await swap("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
-    vi_.mockRestore();
-    const user = created["orbita-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"];
-    const out = (await user.outbox.toArray()) as unknown as OutboxRow[];
-    const cp = out.find((o) => o.entity === "country_progress")!;
-    expect(cp.payload.last_seen_at).toBe(T);
-    const unlocks = out.filter((o) => o.entity === "unlocks");
-    expect(unlocks.map((u) => u.payload.unlocked_at).sort()).toEqual([T, null].sort());
-    const concepts = out.filter((o) => o.entity === "concept_progress");
-    expect(concepts).toHaveLength(1);
-    expect(concepts[0].payload.fsrs_learning_steps).toBe(1);
   });
 });
 

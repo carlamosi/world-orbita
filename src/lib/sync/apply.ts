@@ -8,8 +8,10 @@
 import type {
   OrbitaDB,
   ConceptProgressRow,
+  CountryProgressRow,
   DailySummaryRow,
   QuestionHistoryRow,
+  UnlockRow,
 } from "@/lib/db/orbita-db";
 import { normalizeState } from "@/lib/fsrs/adapter";
 
@@ -99,30 +101,45 @@ function serverHistoryToRow(row: Row): QuestionHistoryRow {
  * Mirror of the server merge (sync_push country_progress): a pulled skill wins
  * only with a strictly higher version, so unpushed local skills survive.
  */
-async function applyCountry(d: OrbitaDB, row: Row) {
-  const iso3 = String(row.country_code);
+export function mergeCountry(local: CountryProgressRow | undefined, row: Row): CountryProgressRow {
   const pulled = (row.skills ?? {}) as Record<string, unknown>;
   const pulledVer = (row.skill_versions ?? {}) as Record<string, unknown>;
   const seen = row.last_seen_at != null ? num(row.last_seen_at, Date.now()) : Date.now();
-  await d.transaction("rw", d.countryProgress, async () => {
-    const local = await d.countryProgress.get(iso3);
-    const skills: Record<string, unknown> = { ...(local?.skills ?? {}) };
-    const versions: Record<string, number> = { ...(local?.skill_versions ?? {}) };
-    for (const k of Object.keys(pulled)) {
-      if (!(k in skills) || num(pulledVer[k]) > (versions[k] ?? 0)) {
-        skills[k] = pulled[k];
-        versions[k] = num(pulledVer[k]);
-      }
+  const skills: Record<string, unknown> = { ...(local?.skills ?? {}) };
+  const versions: Record<string, number> = { ...(local?.skill_versions ?? {}) };
+  for (const k of Object.keys(pulled)) {
+    if (!(k in skills) || num(pulledVer[k]) > (versions[k] ?? 0)) {
+      skills[k] = pulled[k];
+      versions[k] = num(pulledVer[k]);
     }
-    const ahead = Object.keys(versions).some((k) => versions[k] > num(pulledVer[k]));
-    await d.countryProgress.put({
-      iso3,
-      skills: skills as never,
-      skill_versions: versions as never,
-      lastSeenAt: Math.max(local?.lastSeenAt ?? 0, seen),
-      updated_at: Date.now(),
-      dirty: ahead ? 1 : 0,
-    });
+  }
+  const ahead = Object.keys(versions).some((k) => versions[k] > num(pulledVer[k]));
+  return {
+    iso3: String(row.country_code),
+    skills: skills as never,
+    skill_versions: versions as never,
+    lastSeenAt: Math.max(local?.lastSeenAt ?? 0, seen),
+    updated_at: Date.now(),
+    dirty: ahead ? 1 : 0,
+  };
+}
+
+/** Same merge as the server: progress only grows, the first unlock date stays. */
+export function mergeUnlock(local: UnlockRow | undefined, row: Row): UnlockRow {
+  const pulledAt = row.unlocked_at != null ? num(row.unlocked_at) : null;
+  const at = [local?.unlockedAt ?? null, pulledAt].filter((v): v is number => v != null);
+  return {
+    key: String(row.key),
+    progress: Math.max(local?.progress ?? 0, num(row.progress)),
+    unlockedAt: at.length ? Math.min(...at) : null,
+    updatedAt: Date.now(),
+  };
+}
+
+async function applyCountry(d: OrbitaDB, row: Row) {
+  await d.transaction("rw", d.countryProgress, async () => {
+    const local = await d.countryProgress.get(String(row.country_code));
+    await d.countryProgress.put(mergeCountry(local, row));
   });
 }
 
@@ -162,18 +179,8 @@ export async function applyPulledRows(
     if (entity === "country_progress") {
       await applyCountry(d, row);
     } else if (entity === "unlocks") {
-      // Same merge as the server: progress only grows, the first unlock date stays.
-      const key = String(row.key);
       await d.transaction("rw", d.unlocks, async () => {
-        const local = await d.unlocks.get(key);
-        const pulledAt = row.unlocked_at != null ? num(row.unlocked_at) : null;
-        const at = [local?.unlockedAt ?? null, pulledAt].filter((v): v is number => v != null);
-        await d.unlocks.put({
-          key,
-          progress: Math.max(local?.progress ?? 0, num(row.progress)),
-          unlockedAt: at.length ? Math.min(...at) : null,
-          updatedAt: Date.now(),
-        });
+        await d.unlocks.put(mergeUnlock(await d.unlocks.get(String(row.key)), row));
       });
     } else if (entity === "concept_progress") {
       await applyConcept(d, row, userId);

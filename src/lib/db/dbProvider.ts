@@ -2,7 +2,8 @@
  * Per-user Dexie DB provider.
  *
  * DB name pattern: `orbita-${serverUserId ?? 'local'}`. Anonymous users use
- * `orbita-local`. On sign-in, we swap to a per-user DB.
+ * `orbita-local`. On sign-in, we swap to a per-user DB; the guest data is merged
+ * afterwards by auth/migrateGuestProgress.
  *
  * The shared singleton ref lives here. `orbita-db.ts#db()` reads it and
  * initialises a default local DB synchronously if none exists yet.
@@ -59,29 +60,18 @@ export function swap(userId: string | null): Promise<OrbitaDB> {
   // Single flight: a second swap to the same DB (e.g. SIGNED_OUT plus the
   // menu's own swap(null)) joins the first instead of opening another instance.
   if (pending?.name === next) return pending.promise;
-  const promise = doSwap(userId, next).finally(() => {
+  const promise = doSwap(next).finally(() => {
     if (pending?.promise === promise) pending = null;
   });
   pending = { name: next, promise };
   return promise;
 }
 
-async function doSwap(userId: string | null, next: string): Promise<OrbitaDB> {
+async function doSwap(next: string): Promise<OrbitaDB> {
   if (state.current && state.name === next) return state.current;
 
   const prev = state.current;
-  const prevName = state.name;
   const nextDb = createOrbitaDb(next);
-
-  // Anonymous → signed-in promotion: if local has data and the per-user DB
-  // is empty, copy rows across and enqueue them to the cloud.
-  if (userId && prev && prevName === "orbita-local") {
-    try {
-      await mergeLocalIntoUserDb(prev, nextDb);
-    } catch (e) {
-      console.warn("[dbProvider] merge skipped:", e);
-    }
-  }
 
   // Let in-flight sync cycles finish on their DB. Loop until no new cycle was
   // registered meanwhile; nothing awaits between the loop and the switch.
@@ -107,81 +97,6 @@ async function doSwap(userId: string | null, next: string): Promise<OrbitaDB> {
     try { l(state.current); } catch { /* ignore */ }
   }
   return state.current;
-}
-
-async function mergeLocalIntoUserDb(local: OrbitaDB, target: OrbitaDB) {
-  const [progress, unlocks, sessions] = await Promise.all([
-    local.countryProgress.toArray().catch(() => []),
-    local.unlocks.toArray().catch(() => []),
-    local.gameSessions.toArray().catch(() => []),
-  ]);
-  const targetCount = await target.countryProgress.count().catch(() => 0);
-  // Also check FSRS concept_progress for the bail-out — if the user already
-  // has per-user FSRS data we don't want to overwrite it.
-  const targetFsrsCount = await target.concept_progress.count().catch(() => 0);
-  if (targetCount > 0 || targetFsrsCount > 0) return;
-
-  const { getClientId, newOpId } = await import("@/lib/sync/clientId");
-  const { countryProgressPayload, unlockPayload, conceptProgressPayload } = await import(
-    "@/lib/sync/payloads"
-  );
-  const cid = getClientId();
-  const now = Date.now();
-
-  if (progress.length) await target.countryProgress.bulkPut(progress).catch(() => {});
-  if (unlocks.length) await target.unlocks.bulkPut(unlocks).catch(() => {});
-  if (sessions.length) await target.gameSessions.bulkPut(sessions).catch(() => {});
-
-  // --- BUG-10 FIX: copy FSRS tables so spaced-repetition progress survives login ---
-  const [concepts, history, dailySummaries] = await Promise.all([
-    local.concept_progress.toArray().catch(() => []),
-    local.question_history.toArray().catch(() => []),
-    local.daily_summary.toArray().catch(() => []),
-  ]);
-  if (concepts.length) await target.concept_progress.bulkPut(concepts).catch(() => {});
-  if (history.length) await target.question_history.bulkPut(history).catch(() => {});
-  if (dailySummaries.length) await target.daily_summary.bulkPut(dailySummaries).catch(() => {});
-
-  const rows = [
-    ...progress.map((r) => ({
-      op_id: newOpId(),
-      entity: "country_progress" as const,
-      op: "upsert" as const,
-      payload: { ...countryProgressPayload(r, now), client_id: cid },
-      created_at: now,
-      attempts: 0,
-      next_attempt_at: now,
-      status: "pending" as const,
-    })),
-    ...unlocks.map((u) => ({
-      op_id: newOpId(),
-      entity: "unlocks" as const,
-      op: "upsert" as const,
-      payload: { ...unlockPayload(u), client_id: cid },
-      created_at: now,
-      attempts: 0,
-      next_attempt_at: now,
-      status: "pending" as const,
-    })),
-    // Queue FSRS concept_progress for cloud sync (never-reviewed rows are skipped).
-    ...concepts.flatMap((c) => {
-      const payload = conceptProgressPayload(c);
-      if (!payload) return [];
-      return [
-        {
-          op_id: newOpId(),
-          entity: "concept_progress" as const,
-          op: "upsert" as const,
-          payload: { ...payload, client_id: cid },
-          created_at: now,
-          attempts: 0,
-          next_attempt_at: now,
-          status: "pending" as const,
-        },
-      ];
-    }),
-  ];
-  if (rows.length) await target.outbox.bulkPut(rows).catch(() => {});
 }
 
 export function onSwap(fn: Listener): () => void {
