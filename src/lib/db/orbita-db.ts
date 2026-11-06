@@ -1,6 +1,7 @@
 import Dexie, { type Table } from "dexie";
 import { ensureDb, getDbSync } from "./dbProvider";
 import { State } from "ts-fsrs";
+import { resetDbBeforeOpen } from "./schemaEpoch";
 // BUG-01 FIX: Grade was imported from the legacy engine.ts (0-indexed: 0=Again)
 // which conflicts with ts-fsrs Rating (1-indexed: 1=Again). Store grade as
 // plain number to accept both legacy values and ts-fsrs Grade without mismatch.
@@ -349,6 +350,7 @@ export class OrbitaDB extends Dexie {
 }
 
 export function createOrbitaDb(name: string): OrbitaDB {
+  resetDbBeforeOpen(name); // v2 epoch: delete stale local data before the first open
   const d = new OrbitaDB(name);
   d.meta
     .put({ id: "meta", schemaVersion: 9, lastOpenedAt: Date.now(), prefs: {} })

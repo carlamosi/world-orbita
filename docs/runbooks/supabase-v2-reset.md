@@ -9,17 +9,16 @@ Archivos implicados:
 
 ## 0. Requisitos previos
 
-1. Haz merge del PR de la v2 y despliega el cliente. El cliente v1 no habla el contrato nuevo (fechas en ms, cursores compuestos): si lo dejas vivo contra la base nueva, solo recibe errores.
-2. El cliente v2 borra la base local (IndexedDB `orbita*` y claves `orbita*` de localStorage) una única vez al arrancar (`SCHEMA_EPOCH = 2`). No hace falta pedir nada a los usuarios.
-3. Backup: decisión tomada, no se necesita. Si cambias de opinión, hazlo ANTES de empezar: Dashboard > Database > Backups, o `supabase db dump --linked -f backup-v1.sql` y `supabase db dump --linked --data-only -f backup-v1-data.sql`. Guarda los archivos fuera del repo.
+1. Haz merge del PR de la v2 y despliega el cliente. El cliente v1 no habla el contrato nuevo (fechas en ms, cursores compuestos): si lo dejas vivo contra la base nueva, solo recibe errores. Entre el despliegue del cliente v2 y el reset (paso 1) hay un hueco en el que el cliente v2 habla con la base v1 y la sincronización falla; mantenlo lo más corto posible (haz el reset justo después de desplegar). Los datos locales de ese hueco se pierden igualmente, porque el reset local los borra.
+2. El cliente v2 borra cada base local `orbita-*` de IndexedDB la primera vez que la abre (marca `orbita_epoch_db:<nombre>` en localStorage), y al arrancar limpia las claves `orbita*` de localStorage (`orbita_schema_epoch = 2`). No toca las claves `sb-*` de la sesión. No hace falta pedir nada a los usuarios.
+3. Backup: decisión tomada, no se necesita. Si cambias de opinión, hazlo ANTES de empezar: Dashboard > Database > Backups. `supabase db dump` NO incluye el esquema `auth` (las cuentas) y necesita Docker; para las cuentas usa el backup del Dashboard. Guarda cualquier archivo fuera del repo.
 
 ## 1. Elige un camino
 
 ### Camino A: SQL editor del Dashboard (más sencillo)
 
-1. Dashboard > SQL Editor > New query. Pega `supabase/reset/2026-11-06-reset.sql` completo y ejecuta (Run).
-2. Nueva query. Pega `supabase/migrations/20261106000000_baseline_v2.sql` completo y ejecuta.
-3. Nueva query, registra el baseline en el historial (así `supabase db push` no intenta reaplicarlo):
+1. Dashboard > SQL Editor > New query. Pega `supabase/reset/2026-11-06-reset.sql` completo y, justo debajo en la MISMA query, `supabase/migrations/20261106000000_baseline_v2.sql` completo; ejecuta (Run). Así no hay ningún momento con la base sin esquema. (Si prefieres dos queries, ejecútalas seguidas y sin pausa.)
+2. Nueva query, registra el baseline en el historial (así `supabase db push` no intenta reaplicarlo):
 
 ```sql
 insert into supabase_migrations.schema_migrations (version, name)
@@ -31,7 +30,7 @@ on conflict (version) do nothing;
 
 1. Vincula el proyecto (la referencia está en el README): `npx supabase link --project-ref <ref>`.
 2. Ejecuta `supabase/reset/2026-11-06-reset.sql` en el SQL editor (la CLI no tiene un comando directo para SQL arbitrario remoto). Este script ya vacía `schema_migrations`.
-3. Si el paso 2 no vació el historial, o prefieres hacerlo por CLI, marca las 10 versiones antiguas como revertidas:
+3. El `repair` es redundante tras el paso 2, porque el reset ya vació el historial. Solo hace falta si NO ejecutaste reset.sql (por ejemplo, si borraste los datos por otra vía) y el historial remoto aún lista las 10 versiones antiguas. En ese caso márcalas como revertidas:
 
 ```
 supabase migration repair --status reverted 20260616184030 20260616184048 20260618063158 20260618063218 20260618063254 20260619161538 20260809234100 20260810000000 20260810110000 20260906162149
@@ -83,6 +82,7 @@ select count(*) from public.profiles where id not in (select id from auth.users)
 
    Si falla con `permission denied for table users` (el rol dueño de la función no puede borrar de `auth.users`): ejecuta `select proowner::regrole from pg_proc where proname = 'delete_account';`. Debe ser `postgres`. Si es otro, `alter function public.delete_account() owner to postgres;`. Si aun así `postgres` no puede, como último recurso `grant delete on auth.users to postgres;`. Si nada funciona, avisa: habría que volver a llamar a `auth.admin.deleteUser` desde el servidor tras el RPC.
 5. Con el borrado hecho, comprueba que la app queda en sesión cerrada y con la base local vacía.
+6. Sesiones antiguas. Los navegadores que estaban con la sesión abierta antes del reset conservan un JWT (`sb-*`) de un usuario que ya no existe. Siguen "conectados" hasta que falle el refresco del token (hasta ~1 h); mientras tanto `sync_push` falla por clave foránea. Prueba: abre un perfil de navegador que estuviera con sesión iniciada antes del reset, carga la app y juega unas preguntas. Resultado esperado: acaba con la sesión cerrada, sin bucle de errores (el cliente cierra sesión al ver el error de clave foránea de `user_id` en el push y deja las filas pendientes en la cola; ya están en una base local nueva). Si ves errores repetidos sin cierre de sesión, es un bug del cliente: cierra sesión a mano y avisa. Para evitar la ventana, también puedes invalidar las sesiones en el reset: el `delete from auth.users` ya elimina los refresh tokens, así que el cierre llega en cuanto expira el JWT.
 
 ## 4. Rollback
 

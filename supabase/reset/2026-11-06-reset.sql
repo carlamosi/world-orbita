@@ -2,9 +2,10 @@
 -- World Orbita: production reset for the v2 baseline (2026-11-06)
 --
 -- DESTRUCTIVE. Deletes ALL users and ALL app data, then removes every object
--- created by supabase/migrations_archive/*. Run it once in the Supabase SQL
--- editor, then apply supabase/migrations/20261106000000_baseline_v2.sql.
--- Safe to run twice. See docs/runbooks/supabase-v2-reset.md.
+-- created by supabase/migrations_archive/*. Run it in the Supabase SQL editor
+-- and apply supabase/migrations/20261106000000_baseline_v2.sql right after
+-- (ideally in the same query, so the database is never left without schema).
+-- Safe to run more than once. See docs/runbooks/supabase-v2-reset.md.
 -- =============================================================================
 
 -- 1. Users (cascades into every table that references auth.users)

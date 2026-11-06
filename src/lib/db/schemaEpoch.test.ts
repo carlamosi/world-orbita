@@ -1,6 +1,12 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { SCHEMA_EPOCH, SCHEMA_EPOCH_KEY, runSchemaEpochReset } from "./schemaEpoch";
+import {
+  SCHEMA_EPOCH,
+  SCHEMA_EPOCH_KEY,
+  DB_EPOCH_PREFIX,
+  resetDbBeforeOpen,
+  runLocalStorageEpochReset,
+} from "./schemaEpoch";
 
 class FakeStorage {
   m = new Map<string, string>();
@@ -21,33 +27,16 @@ class FakeStorage {
   }
 }
 
-function fakeIdb(names: string[], failOn?: string) {
-  const dbs = new Set(names);
-  const deleted: string[] = [];
-  return {
-    dbs,
-    deleted,
-    databases: (async () => [...dbs].map((name) => ({ name }))) as unknown,
-    deleteDatabase: (name: string) => {
-      const req: { onsuccess?: () => void; onerror?: () => void; onblocked?: () => void } = {};
-      setTimeout(() => {
-        if (name === failOn) return req.onerror?.();
-        dbs.delete(name);
-        deleted.push(name);
-        req.onsuccess?.();
-      }, 0);
-      return req;
-    },
-  };
-}
-
 const g = globalThis as Record<string, unknown>;
 let ls: FakeStorage;
+let deleted: string[];
 
 beforeEach(() => {
   ls = new FakeStorage();
+  deleted = [];
   g.window = g;
   g.localStorage = ls;
+  g.indexedDB = { deleteDatabase: (n: string) => void deleted.push(n) };
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -57,56 +46,28 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("schema epoch", () => {
-  it("epoch reset wipes old dbs once", async () => {
-    const idb = fakeIdb(["orbita-local", "orbita-user-1", "other-app"]);
-    g.indexedDB = idb;
-    ls.setItem("orbita_client_id", "x");
-    ls.setItem("orbita.explorer.lastIso3", "ESP");
-    ls.setItem("unrelated", "keep");
-
-    await runSchemaEpochReset();
-    expect(idb.deleted.sort()).toEqual(["orbita-local", "orbita-user-1"]);
-    expect(idb.dbs.has("other-app")).toBe(true);
-    expect(ls.getItem("orbita_client_id")).toBeNull();
-    expect(ls.getItem("orbita.explorer.lastIso3")).toBeNull();
-    expect(ls.getItem("unrelated")).toBe("keep");
-    expect(ls.getItem(SCHEMA_EPOCH_KEY)).toBe(String(SCHEMA_EPOCH));
-
-    // second call: nothing happens, new data survives
-    idb.dbs.add("orbita-local");
-    ls.setItem("orbita_client_id", "new");
-    idb.deleted.length = 0;
-    await runSchemaEpochReset();
-    expect(idb.deleted).toEqual([]);
-    expect(ls.getItem("orbita_client_id")).toBe("new");
+describe("per-db reset", () => {
+  it("epoch reset wipes each old db once, with no databases() needed", () => {
+    resetDbBeforeOpen("orbita-local");
+    resetDbBeforeOpen("orbita-local");
+    resetDbBeforeOpen("orbita-user-1");
+    resetDbBeforeOpen("orbita-user-1");
+    resetDbBeforeOpen("other-app");
+    expect(deleted).toEqual(["orbita-local", "orbita-user-1"]);
+    expect(ls.getItem(DB_EPOCH_PREFIX + "orbita-local")).toBe(String(SCHEMA_EPOCH));
   });
 
-  it("falls back to the known names when indexedDB.databases is missing", async () => {
-    const idb = fakeIdb(["orbita-local"]);
-    idb.databases = undefined;
-    g.indexedDB = idb;
-    await runSchemaEpochReset();
-    expect(idb.deleted).toContain("orbita-local");
+  it("a deletion error does not throw and is retried next time", () => {
+    g.indexedDB = {
+      deleteDatabase: () => {
+        throw new Error("boom");
+      },
+    };
+    expect(() => resetDbBeforeOpen("orbita-local")).not.toThrow();
+    expect(ls.getItem(DB_EPOCH_PREFIX + "orbita-local")).toBeNull();
   });
 
-  it("a lower epoch also resets", async () => {
-    const idb = fakeIdb(["orbita-local"]);
-    g.indexedDB = idb;
-    ls.setItem(SCHEMA_EPOCH_KEY, "1");
-    await runSchemaEpochReset();
-    expect(idb.deleted).toEqual(["orbita-local"]);
-  });
-
-  it("a deletion error does not throw", async () => {
-    const idb = fakeIdb(["orbita-local", "orbita-u"], "orbita-local");
-    g.indexedDB = idb;
-    await expect(runSchemaEpochReset()).resolves.toBeUndefined();
-    expect(idb.deleted).toEqual(["orbita-u"]);
-  });
-
-  it("a broken localStorage does not throw", async () => {
-    g.indexedDB = fakeIdb([]);
+  it("a broken localStorage does not throw and deletes nothing", () => {
     g.localStorage = {
       getItem() {
         throw new Error("denied");
@@ -114,20 +75,52 @@ describe("schema epoch", () => {
       setItem() {
         throw new Error("denied");
       },
-      removeItem() {
-        throw new Error("denied");
-      },
-      key() {
-        return null;
-      },
-      length: 0,
     };
-    await expect(runSchemaEpochReset()).resolves.toBeUndefined();
+    expect(() => resetDbBeforeOpen("orbita-local")).not.toThrow();
+    expect(deleted).toEqual([]);
   });
 
-  it("SSR (no window) is a no-op", async () => {
+  it("SSR (no window) is a no-op", () => {
     delete g.window;
     delete g.localStorage;
-    await expect(runSchemaEpochReset()).resolves.toBeUndefined();
+    delete g.indexedDB;
+    expect(() => resetDbBeforeOpen("orbita-local")).not.toThrow();
+    expect(() => runLocalStorageEpochReset()).not.toThrow();
+  });
+});
+
+describe("localStorage reset", () => {
+  it("wipes orbita keys once, keeping sb-* auth keys and per-db epoch keys", () => {
+    ls.setItem("orbita_client_id", "x");
+    ls.setItem("orbita.explorer.lastIso3", "ESP");
+    ls.setItem("sb-abc-auth-token", "jwt");
+    ls.setItem("unrelated", "keep");
+    ls.setItem(DB_EPOCH_PREFIX + "orbita-local", "2");
+
+    runLocalStorageEpochReset();
+    expect(ls.getItem("orbita_client_id")).toBeNull();
+    expect(ls.getItem("orbita.explorer.lastIso3")).toBeNull();
+    expect(ls.getItem("sb-abc-auth-token")).toBe("jwt");
+    expect(ls.getItem("unrelated")).toBe("keep");
+    expect(ls.getItem(DB_EPOCH_PREFIX + "orbita-local")).toBe("2");
+    expect(ls.getItem(SCHEMA_EPOCH_KEY)).toBe(String(SCHEMA_EPOCH));
+
+    ls.setItem("orbita_client_id", "new");
+    runLocalStorageEpochReset();
+    expect(ls.getItem("orbita_client_id")).toBe("new");
+  });
+
+  it("a lower epoch also resets, and a broken localStorage does not throw", () => {
+    ls.setItem(SCHEMA_EPOCH_KEY, "1");
+    ls.setItem("orbita_x", "1");
+    runLocalStorageEpochReset();
+    expect(ls.getItem("orbita_x")).toBeNull();
+
+    g.localStorage = {
+      getItem() {
+        throw new Error("denied");
+      },
+    };
+    expect(() => runLocalStorageEpochReset()).not.toThrow();
   });
 });

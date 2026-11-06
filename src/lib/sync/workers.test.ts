@@ -33,6 +33,9 @@ vi.mock("./sync.functions", () => ({
   }),
 }));
 
+const signOut = vi.hoisted(() => vi.fn(async () => ({ error: null })));
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { signOut } } }));
+
 import { runPullOnce, runPushOnce, MAX_PULL_PAGES } from "./workers";
 import { useSyncStore } from "./useSyncStore";
 import { PULL_OVERLAP_MS } from "./cursor";
@@ -383,6 +386,32 @@ describe("push result handling", () => {
     expect(r.status).toBe("pending");
     expect(r.attempts).toBe(1);
     expect(r.next_attempt_at).toBeGreaterThan(Date.now());
+  });
+
+  it("a push failing with a user foreign-key error signs out instead of burning retries", async () => {
+    const op = crypto.randomUUID();
+    await mem.outbox.put(outbox(op) as never);
+    pushReply = () => {
+      throw new Error('insert or update on table "unlocks" violates foreign key constraint "unlocks_user_id_fkey"');
+    };
+    await runPushOnce();
+    expect(signOut).toHaveBeenCalledTimes(1);
+    const [r] = await allOutbox();
+    expect(r.status).toBe("pending");
+    expect(r.attempts).toBe(0);
+  });
+
+  it("other push errors keep retrying without signing out", async () => {
+    signOut.mockClear();
+    const op = crypto.randomUUID();
+    await mem.outbox.put(outbox(op) as never);
+    pushReply = () => {
+      throw new Error("network down");
+    };
+    await runPushOnce();
+    expect(signOut).not.toHaveBeenCalled();
+    const [r] = await allOutbox();
+    expect(r.attempts).toBe(1);
   });
 
   it("country_progress canonical uses the server last_seen_at", async () => {

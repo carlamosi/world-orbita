@@ -76,6 +76,11 @@ async function purgeBrokenOpIds() {
   }
 }
 
+/** A user_id foreign-key failure means auth.users no longer has this user. */
+function isOrphanedSessionError(msg: string): boolean {
+  return /foreign key constraint/i.test(msg) && /user_id|auth\.users|profiles?_id/i.test(msg);
+}
+
 async function markRetry(r: OutboxRow, reason: string) {
   const attempts = r.attempts + 1;
   await db().outbox.update(r.id!, {
@@ -133,6 +138,20 @@ async function pushBatch(due: OutboxRow[]) {
     useSyncStore.getState().setError(null);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "push failed";
+    if (isOrphanedSessionError(msg)) {
+      // The account was deleted (e.g. by the v2 reset) but this browser still
+      // holds its JWT. Retrying only burns attempts; sign out instead and keep
+      // the rows pending.
+      await db().outbox.where("id").anyOf(due.map((d) => d.id!)).modify({ status: "pending" });
+      try {
+        const { supabase } = await import("@/integrations/supabase/client");
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn("[sync] signOut after orphaned session failed:", err);
+      }
+      useSyncStore.getState().setError(msg);
+      return;
+    }
     for (const r of due) await markRetry(r, msg);
     useSyncStore.getState().setError(msg);
     useSyncStore.getState().setStatus("error");
