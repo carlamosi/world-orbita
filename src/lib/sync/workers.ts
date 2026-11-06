@@ -402,7 +402,7 @@ async function pullCycle(opts: { limit?: number }) {
         const keep = cursorToStore(stored[entity] ?? null, server);
         if (keep !== (stored[entity] ?? null)) {
           stored[entity] = keep;
-          await d.sync_meta.put({ key: `cursor_${entity}`, value: keep as string }).catch(() => {});
+          await d.sync_meta.put({ key: `cursor_${entity}`, value: keep as string });
         }
         if (payload.has_more === true) more = true;
       }

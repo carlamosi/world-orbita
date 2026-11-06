@@ -290,6 +290,102 @@ describe("pull apply", () => {
   });
 });
 
+describe("pull never overwrites local changes", () => {
+  const ID = "FRA:capital:countryToCap";
+  const conceptOp = (status: OutboxRow["status"], conceptId = ID): OutboxRow => ({
+    ...outbox(crypto.randomUUID(), "concept_progress"),
+    payload: { conceptId },
+    status,
+  });
+  const local = async () => (await mem.concept_progress.get(ID)) as unknown as ConceptProgressRow;
+
+  it("pull never overwrites dirty row", async () => {
+    // What recordConceptAttempt leaves: dirty row + its op, here mid-push.
+    await mem.concept_progress.put({ ...conceptServerRow({ fsrs_last_review: T - 1000 }), dirty: 1 } as never);
+    await mem.outbox.put(conceptOp("in_flight") as never);
+    pullPages = [page("concept_progress", [conceptServerRow({ fsrs_last_review: T })], `${T}|x`)];
+    await runPullOnce();
+    expect(await local()).toMatchObject({ fsrs_last_review: T - 1000, dirty: 1 });
+  });
+
+  it("a pending op for the same key blocks the pulled row, one for another key does not", async () => {
+    await mem.concept_progress.put({ ...conceptServerRow({ fsrs_last_review: T - 1000 }), dirty: 0 } as never);
+    await mem.outbox.put(conceptOp("pending") as never);
+    await mem.outbox.put(conceptOp("pending", "DEU:capital:countryToCap") as never);
+    pullPages = [page("concept_progress", [conceptServerRow({ fsrs_last_review: T })], `${T}|x`)];
+    await runPullOnce();
+    expect((await local()).fsrs_last_review).toBe(T - 1000);
+
+    // Once the op is gone (here: dead), the newer review applies on the next pull.
+    const [mine] = (await allOutbox()).filter((r) => r.payload.conceptId === ID);
+    await mem.outbox.where("op_id").equals(mine.op_id).modify({ status: "dead" });
+    await runPullOnce();
+    expect((await local()).fsrs_last_review).toBe(T);
+  });
+
+  it("a canonical never overwrites a local row that still has an op queued", async () => {
+    const op = crypto.randomUUID();
+    await mem.outbox.put(outbox(op, "concept_progress") as never);
+    await mem.outbox.put({ ...conceptOp("pending"), next_attempt_at: Date.now() + 1e6 } as never);
+    await mem.concept_progress.put({ ...conceptServerRow({ fsrs_last_review: T - 1000 }), dirty: 1 } as never);
+    pushReply = () => ({
+      accepted: [],
+      rejected: [{ op_id: op, reason: "stale_review" }],
+      canonical: [{ entity: "concept_progress", op_id: op, payload: conceptServerRow() }],
+    });
+    await runPushOnce();
+    expect(await local()).toMatchObject({ fsrs_last_review: T - 1000, dirty: 1 });
+  });
+
+  it("country_progress merges per skill keeping the higher version", async () => {
+    await mem.countryProgress.put({
+      iso3: "FRA",
+      skills: { capital: { local: true }, flag: { local: true } },
+      skill_versions: { capital: 5, flag: 1 },
+      lastSeenAt: T + 1,
+      dirty: 1,
+    });
+    pullPages = [
+      page(
+        "country_progress",
+        [
+          {
+            country_code: "FRA",
+            skills: { capital: { server: true }, flag: { server: true }, location: { server: true } },
+            skill_versions: { capital: 4, flag: 2, location: 1 },
+            last_seen_at: T,
+          },
+        ],
+        `${T}|FRA`,
+      ),
+    ];
+    await runPullOnce();
+    expect(await mem.countryProgress.get("FRA")).toMatchObject({
+      skills: { capital: { local: true }, flag: { server: true }, location: { server: true } },
+      skill_versions: { capital: 5, flag: 2, location: 1 },
+      lastSeenAt: T + 1,
+      dirty: 1,
+    });
+  });
+
+  it("unlocks merge like the server: progress max, earliest unlock date", async () => {
+    await mem.unlocks.put({ key: "k", progress: 5, unlockedAt: null, updatedAt: T });
+    pullPages = [page("unlocks", [{ key: "k", progress: 3, unlocked_at: T }], `${T}|k`)];
+    await runPullOnce();
+    expect(await mem.unlocks.get("k")).toMatchObject({ progress: 5, unlockedAt: T });
+  });
+
+  it("a Dexie write failure does not advance the cursor", async () => {
+    mem.concept_progress.put = async () => {
+      throw new Error("QuotaExceededError");
+    };
+    pullPages = [page("concept_progress", [conceptServerRow()], `${T}|x`)];
+    await runPullOnce();
+    expect(await mem.sync_meta.get("cursor_concept_progress")).toBeUndefined();
+    expect(useSyncStore.getState().lastError).toMatch(/Quota/);
+  });
+});
+
 describe("push result handling", () => {
   it("an invalid op_id is marked dead locally and never reaches the RPC", async () => {
     await mem.outbox.put(outbox("abc:cp") as never);
