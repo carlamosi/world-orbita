@@ -387,30 +387,39 @@ async function pullCycle(opts: { limit?: number }) {
     const uid = activeUserId(name);
     let send: Record<string, string | null> = {};
     for (const k of CURSOR_KEYS) send[k] = overlapCursor(stored[k] ?? null);
+    const failed = new Map<string, unknown>();
     for (let pageNo = 0; pageNo < MAX_PULL_PAGES; pageNo++) {
       const result = await syncPull({ data: { cursors: send, limit: opts.limit } });
       if (moved(name)) return;
       const next: Record<string, string | null> = { ...send };
       let more = false;
       for (const [entity, payload] of Object.entries(result ?? {})) {
-        if (!payload) continue;
+        if (!payload || failed.has(entity)) continue;
         if (moved(name)) return;
-        await applyPulledRows(d, entity, payload.rows ?? [], uid);
-        if (moved(name)) return;
-        const server = payload.cursor ?? null;
-        next[entity] = server ?? send[entity] ?? null;
-        const keep = cursorToStore(stored[entity] ?? null, server);
-        if (keep !== (stored[entity] ?? null)) {
-          stored[entity] = keep;
-          await d.sync_meta.put({ key: `cursor_${entity}`, value: keep as string });
+        // A failing entity keeps its cursor and stops paging; the others go on.
+        try {
+          await applyPulledRows(d, entity, payload.rows ?? [], uid);
+          if (moved(name)) return;
+          const server = payload.cursor ?? null;
+          const keep = cursorToStore(stored[entity] ?? null, server);
+          if (keep !== (stored[entity] ?? null)) {
+            await d.sync_meta.put({ key: `cursor_${entity}`, value: keep as string });
+            stored[entity] = keep;
+          }
+          next[entity] = server ?? send[entity] ?? null;
+          if (payload.has_more === true) more = true;
+        } catch (e) {
+          failed.set(entity, e);
         }
-        if (payload.has_more === true) more = true;
       }
       if (!more) break;
       send = next;
     }
     useSyncStore.getState().setLastPull(Date.now());
-    useSyncStore.getState().setError(null);
+    const err = failed.values().next().value;
+    useSyncStore.getState().setError(
+      failed.size > 0 ? (err instanceof Error ? err.message : "pull failed") : null,
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "pull failed";
     useSyncStore.getState().setError(msg);

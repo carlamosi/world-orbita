@@ -384,6 +384,25 @@ describe("pull never overwrites local changes", () => {
     expect(await mem.sync_meta.get("cursor_concept_progress")).toBeUndefined();
     expect(useSyncStore.getState().lastError).toMatch(/Quota/);
   });
+
+  it("a failing entity only stalls its own cursor", async () => {
+    mem.concept_progress.put = async () => {
+      throw new Error("QuotaExceededError");
+    };
+    await mem.sync_meta.put({ key: "cursor_concept_progress", value: `${T - 1}|old` });
+    pullPages = [
+      {
+        country_progress: { rows: [], cursor: `${T}|FRA`, has_more: false },
+        concept_progress: { rows: [conceptServerRow()], cursor: `${T}|x`, has_more: false },
+        unlocks: { rows: [{ key: "k", progress: 1 }], cursor: `${T}|k`, has_more: false },
+      },
+    ];
+    await runPullOnce();
+    expect((await mem.sync_meta.get("cursor_concept_progress"))?.value).toBe(`${T - 1}|old`);
+    expect((await mem.sync_meta.get("cursor_unlocks"))?.value).toBe(`${T}|k`);
+    expect(await mem.unlocks.get("k")).toMatchObject({ progress: 1 });
+    expect(useSyncStore.getState().lastError).toMatch(/Quota/);
+  });
 });
 
 describe("push result handling", () => {
