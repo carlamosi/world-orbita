@@ -23,6 +23,14 @@ const state: State = {
   listeners: new Set(),
 };
 
+let inflightCycle: Promise<unknown> = Promise.resolve();
+
+/** Register a sync cycle so swap() waits for it before changing DB. Never rejects the wait. */
+export function trackCycle<T>(cycle: Promise<T>): Promise<T> {
+  inflightCycle = Promise.all([inflightCycle, cycle.catch(() => {})]);
+  return cycle;
+}
+
 export function getCurrent(): OrbitaDB | null {
   return state.current;
 }
@@ -60,6 +68,14 @@ export async function swap(userId: string | null): Promise<OrbitaDB> {
       console.warn("[dbProvider] merge skipped:", e);
     }
   }
+
+  // Let in-flight sync cycles finish on their DB. Loop until no new cycle was
+  // registered meanwhile; nothing awaits between the loop and the switch.
+  let waited: Promise<unknown>;
+  do {
+    waited = inflightCycle;
+    await waited;
+  } while (waited !== inflightCycle);
 
   if (prev) {
     try { prev.close(); } catch { /* ignore */ }

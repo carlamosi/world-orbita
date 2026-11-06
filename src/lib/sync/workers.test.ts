@@ -11,7 +11,10 @@ let mem: MemDb = createMemDb();
 const USER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 vi.mock("@/lib/db/orbita-db", () => ({ db: () => mem }));
-vi.mock("@/lib/db/dbProvider", () => ({ currentDbName: () => `orbita-${USER}` }));
+vi.mock("@/lib/db/dbProvider", () => ({
+  currentDbName: () => `orbita-${USER}`,
+  trackCycle: <T>(p: Promise<T>) => p,
+}));
 
 const pullCalls: Record<string, string | null>[] = [];
 let pullPages: PullResult[] = [];

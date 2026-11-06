@@ -2,8 +2,8 @@
  * Push + pull workers. Both run on intervals and listen to visibility.
  * They are explicitly fire-and-forget — failures never propagate to gameplay.
  */
-import { db } from "@/lib/db/orbita-db";
-import { currentDbName } from "@/lib/db/dbProvider";
+import { db, type OrbitaDB } from "@/lib/db/orbita-db";
+import { currentDbName, trackCycle } from "@/lib/db/dbProvider";
 import { syncPush, syncPull } from "./sync.functions";
 import { useSyncStore } from "./useSyncStore";
 import { PERMANENT_REJECT_REASONS, type Mutation, type SyncEntity } from "./types";
@@ -12,12 +12,14 @@ import { isValidOpId } from "./opId";
 import { applyCanonical, applyPulledRows } from "./apply";
 import { cursorToStore, overlapCursor } from "./cursor";
 
-/** Derive the Supabase user_id from the active Dexie DB name. Returns null for guest DB. */
-function activeUserId(): string | null {
-  const name = currentDbName();
+/** Derive the Supabase user_id from a Dexie DB name. Returns null for guest DB. */
+function activeUserId(name: string): string | null {
   if (name === "orbita-local") return null;
   return name.replace(/^orbita-/, "") || null;
 }
+
+/** A cycle stops writing once the provider has moved to another DB. */
+const moved = (name: string) => currentDbName() !== name;
 
 const MAX_ATTEMPTS = 10;
 const BATCH = 50;
@@ -98,10 +100,10 @@ let checkingSession = false;
  * or no user and no error). If it is valid, or the check itself failed
  * transiently (network, 5xx, 429), keep the session: just back off and retry.
  */
-async function handleAuthRejection(due: OutboxRow[], msg: string) {
-  await db()
-    .outbox.where("id")
-    .anyOf(due.map((d) => d.id!))
+async function handleAuthRejection(d: OrbitaDB, due: OutboxRow[], msg: string) {
+  await d.outbox
+    .where("op_id")
+    .anyOf(due.map((r) => r.op_id))
     .modify({ status: "pending", next_attempt_at: backoff(3) } as Partial<OutboxRow>);
   useSyncStore.getState().setError(msg);
   await verifySessionOrSignOut();
@@ -144,10 +146,10 @@ async function verifySessionOrSignOut() {
  * The account was deleted (e.g. by the v2 reset) but this browser still holds
  * its JWT. Retrying only burns attempts: keep every row pending, sign out once.
  */
-async function handleOrphanedSession(due: OutboxRow[], msg: string) {
-  await db()
-    .outbox.where("id")
-    .anyOf(due.map((d) => d.id!))
+async function handleOrphanedSession(d: OrbitaDB, due: OutboxRow[], msg: string) {
+  await d.outbox
+    .where("op_id")
+    .anyOf(due.map((r) => r.op_id))
     .modify({ status: "pending" });
   useSyncStore.getState().setError(msg);
   if (signingOut) return;
@@ -162,19 +164,25 @@ async function handleOrphanedSession(due: OutboxRow[], msg: string) {
   }
 }
 
-async function markRetry(r: OutboxRow, reason: string) {
+async function markRetry(d: OrbitaDB, r: OutboxRow, reason: string) {
   const attempts = r.attempts + 1;
-  await db().outbox.update(r.id!, {
-    status: attempts >= MAX_ATTEMPTS ? "dead" : "pending",
-    attempts,
-    next_attempt_at: backoff(attempts),
-    last_error: reason,
-  } as Partial<OutboxRow>);
+  await d.outbox
+    .where("op_id")
+    .equals(r.op_id)
+    .modify({
+      status: attempts >= MAX_ATTEMPTS ? "dead" : "pending",
+      attempts,
+      next_attempt_at: backoff(attempts),
+      last_error: reason,
+    } as Partial<OutboxRow>);
 }
 
-async function pushBatch(due: OutboxRow[]) {
-  const ids = due.map((d) => d.id!).filter((x) => x != null);
-  await db().outbox.where("id").anyOf(ids).modify({ status: "in_flight" });
+async function pushBatch(d: OrbitaDB, name: string, due: OutboxRow[]) {
+  await d.outbox
+    .where("op_id")
+    .anyOf(due.map((r) => r.op_id))
+    .modify({ status: "in_flight" });
+  if (moved(name)) return;
   const mutations: Mutation[] = due.map((r) => ({
     op_id: r.op_id,
     entity: r.entity,
@@ -183,57 +191,66 @@ async function pushBatch(due: OutboxRow[]) {
   }));
   try {
     const result = await syncPush({ data: { mutations } });
+    if (moved(name)) return;
     const accepted = Array.isArray(result?.accepted) ? result.accepted : [];
     const rejected = Array.isArray(result?.rejected) ? result.rejected : [];
     const canonical = Array.isArray(result?.canonical) ? result.canonical : [];
     const orphaned = rejected.find((r) => isOrphanedSessionError(String(r.reason)));
     if (orphaned) {
       // sync_push reports the FK failure per item instead of raising.
-      await handleOrphanedSession(due, String(orphaned.reason));
+      await handleOrphanedSession(d, due, String(orphaned.reason));
       return;
     }
     const acceptedSet = new Set(accepted);
     const rejectedMap = new Map(rejected.map((r) => [r.op_id, String(r.reason)]));
     for (const r of due) {
+      if (moved(name)) return;
+      const row = d.outbox.where("op_id").equals(r.op_id);
       if (acceptedSet.has(r.op_id)) {
-        await db().outbox.delete(r.id!);
+        await row.delete();
       } else if (rejectedMap.has(r.op_id)) {
         const reason = rejectedMap.get(r.op_id)!;
         if (PERMANENT_REJECT_REASONS.includes(reason)) {
           // Permanent: retrying the same payload can never succeed.
-          await db().outbox.update(r.id!, {
+          await row.modify({
             status: "dead",
             attempts: r.attempts + 1,
             last_error: reason,
           } as Partial<OutboxRow>);
         } else if (reason === "stale_review") {
           // The server kept a newer review; its canonical row is applied below.
-          await db().outbox.delete(r.id!);
+          await row.delete();
         } else {
-          await markRetry(r, reason);
+          await markRetry(d, r, reason);
         }
       } else {
-        await db().outbox.update(r.id!, { status: "pending" } as Partial<OutboxRow>);
+        await row.modify({ status: "pending" } as Partial<OutboxRow>);
       }
     }
     // Canonical rows: country_progress after every accept, concept_progress on stale_review.
-    const uid = activeUserId();
+    // apply.ts writes through db(), which is d here: swap() waits for tracked cycles.
+    const uid = activeUserId(name);
     for (const c of canonical) {
+      if (moved(name)) return;
       await applyCanonical(String(c.entity), c.payload, uid);
     }
     useSyncStore.getState().setLastPush(Date.now());
     useSyncStore.getState().setError(null);
   } catch (e) {
+    if (moved(name)) return;
     const msg = e instanceof Error ? e.message : "push failed";
     if (isAuthRejection(e)) {
-      await handleAuthRejection(due, msg);
+      await handleAuthRejection(d, due, msg);
       return;
     }
     if (isOrphanedSessionError(msg)) {
-      await handleOrphanedSession(due, msg);
+      await handleOrphanedSession(d, due, msg);
       return;
     }
-    for (const r of due) await markRetry(r, msg);
+    for (const r of due) {
+      if (moved(name)) return;
+      await markRetry(d, r, msg);
+    }
     useSyncStore.getState().setError(msg);
     useSyncStore.getState().setStatus("error");
   }
@@ -248,41 +265,54 @@ export async function runPushOnce() {
   }
   pushing = true;
   try {
-    const now = Date.now();
-    const due = await db()
-      .outbox.where("status")
-      .equals("pending")
-      .filter((r) => r.next_attempt_at <= now)
-      .limit(BATCH)
-      .toArray();
-    if (due.length === 0) {
-      await refreshQueued();
-      const queued = useSyncStore.getState().queued;
-      useSyncStore.getState().setStatus(queued > 0 ? "queued" : "synced");
-      return;
-    }
-    useSyncStore.getState().setStatus("syncing");
-    // Ruling 6d: a non-UUID op_id can never succeed; mark it dead locally and
-    // never send it, so it cannot fail the server-side validation of the batch.
-    const sendable: OutboxRow[] = [];
-    for (const r of due) {
-      if (isValidOpId(r.op_id)) sendable.push(r);
-      else {
-        await db().outbox.update(r.id!, {
+    await trackCycle(pushCycle());
+  } finally {
+    pushing = false;
+  }
+}
+
+/** Bound to the DB current when it starts; registered with swap() via trackCycle. */
+async function pushCycle() {
+  const d = db();
+  const name = currentDbName();
+  const now = Date.now();
+  const due = await d.outbox
+    .where("status")
+    .equals("pending")
+    .filter((r) => r.next_attempt_at <= now)
+    .limit(BATCH)
+    .toArray();
+  if (moved(name)) return;
+  if (due.length === 0) {
+    await refreshQueued();
+    const queued = useSyncStore.getState().queued;
+    useSyncStore.getState().setStatus(queued > 0 ? "queued" : "synced");
+    return;
+  }
+  useSyncStore.getState().setStatus("syncing");
+  // Ruling 6d: a non-UUID op_id can never succeed; mark it dead locally and
+  // never send it, so it cannot fail the server-side validation of the batch.
+  const sendable: OutboxRow[] = [];
+  for (const r of due) {
+    if (isValidOpId(r.op_id)) sendable.push(r);
+    else {
+      if (moved(name)) return;
+      await d.outbox
+        .where("op_id")
+        .equals(r.op_id)
+        .modify({
           status: "dead",
           attempts: r.attempts + 1,
           last_error: "invalid_op_id",
         } as Partial<OutboxRow>);
-      }
     }
-    if (sendable.length > 0) await pushBatch(sendable);
-    await refreshQueued();
-    const queued = useSyncStore.getState().queued;
-    if (useSyncStore.getState().status !== "error") {
-      useSyncStore.getState().setStatus(queued > 0 ? "queued" : "synced");
-    }
-  } finally {
-    pushing = false;
+  }
+  if (sendable.length > 0) await pushBatch(d, name, sendable);
+  if (moved(name)) return;
+  await refreshQueued();
+  const queued = useSyncStore.getState().queued;
+  if (useSyncStore.getState().status !== "error") {
+    useSyncStore.getState().setStatus(queued > 0 ? "queued" : "synced");
   }
 }
 
@@ -298,10 +328,10 @@ const CURSOR_KEYS: SyncEntity[] = [
   "profiles",
 ];
 
-async function getCursors(): Promise<Record<string, string | null>> {
+async function getCursors(d: OrbitaDB): Promise<Record<string, string | null>> {
   const out: Record<string, string | null> = {};
   for (const k of CURSOR_KEYS) {
-    const row = await db().sync_meta.get(`cursor_${k}`);
+    const row = await d.sync_meta.get(`cursor_${k}`);
     out[k] = row?.value ?? null;
   }
   return out;
@@ -321,25 +351,39 @@ export async function runPullOnce(opts: { limit?: number } = {}) {
   if (typeof navigator !== "undefined" && !navigator.onLine) return;
   pulling = true;
   try {
-    const stored = await getCursors();
-    const uid = activeUserId();
+    await trackCycle(pullCycle(opts));
+  } finally {
+    pulling = false;
+  }
+}
+
+/** Bound to the DB current when it starts; registered with swap() via trackCycle. */
+async function pullCycle(opts: { limit?: number }) {
+  const d = db();
+  const name = currentDbName();
+  try {
+    const stored = await getCursors(d);
+    if (moved(name)) return;
+    const uid = activeUserId(name);
     let send: Record<string, string | null> = {};
     for (const k of CURSOR_KEYS) send[k] = overlapCursor(stored[k] ?? null);
     for (let pageNo = 0; pageNo < MAX_PULL_PAGES; pageNo++) {
       const result = await syncPull({ data: { cursors: send, limit: opts.limit } });
+      if (moved(name)) return;
       const next: Record<string, string | null> = { ...send };
       let more = false;
       for (const [entity, payload] of Object.entries(result ?? {})) {
         if (!payload) continue;
+        if (moved(name)) return;
+        // apply.ts writes through db(), which is d here: swap() waits for tracked cycles.
         await applyPulledRows(entity, payload.rows ?? [], uid);
+        if (moved(name)) return;
         const server = payload.cursor ?? null;
         next[entity] = server ?? send[entity] ?? null;
         const keep = cursorToStore(stored[entity] ?? null, server);
         if (keep !== (stored[entity] ?? null)) {
           stored[entity] = keep;
-          await db()
-            .sync_meta.put({ key: `cursor_${entity}`, value: keep as string })
-            .catch(() => {});
+          await d.sync_meta.put({ key: `cursor_${entity}`, value: keep as string }).catch(() => {});
         }
         if (payload.has_more === true) more = true;
       }
@@ -352,8 +396,6 @@ export async function runPullOnce(opts: { limit?: number } = {}) {
     const msg = e instanceof Error ? e.message : "pull failed";
     useSyncStore.getState().setError(msg);
     if (isAuthRejection(e)) await verifySessionOrSignOut();
-  } finally {
-    pulling = false;
   }
 }
 

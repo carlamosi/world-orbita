@@ -164,6 +164,15 @@ function RootComponent() {
     ]).then(([{ supabase }, { swap, getCurrent }, { useSyncStore }]) => {
       if (!mounted) return;
 
+      // Sync only once the user's DB is current: a cycle must never run against
+      // the guest DB with the user's token. Skip if a later swap replaced it.
+      const swapTo = (uid: string | null) => {
+        if (!uid) useSyncStore.getState().setSignedIn(false);
+        return swap(uid).then((d) => {
+          if (uid && getCurrent() === d) useSyncStore.getState().setSignedIn(true);
+        });
+      };
+
       const runMigration = async (uid: string) => {
         if (migratedRef.current) return;
         migratedRef.current = true;
@@ -184,14 +193,13 @@ function RootComponent() {
       supabase.auth.getSession().then(({ data }) => {
         const uid = data.session?.user.id ?? null;
         authDebug("root session restore", { hasSession: !!data.session, userId: uid });
-        useSyncStore.getState().setSignedIn(!!uid);
-        void swap(uid);
+        const swapped = swapTo(uid);
         if (data.session?.user) {
           void ensureUserProfile(data.session.user).catch((error) =>
             authDebug("root profile ensure failed", { error: error instanceof Error ? error.message : String(error) })
           );
           // If user was already signed in on page load, check for guest data to migrate
-          void swap(uid).then(() => runMigration(uid!));
+          void swapped.then(() => runMigration(uid!));
         }
       });
 
@@ -200,15 +208,14 @@ function RootComponent() {
           return;
         const uid = session?.user.id ?? null;
         authDebug("root auth event", { event, hasSession: !!session, userId: uid });
-        useSyncStore.getState().setSignedIn(!!uid);
-        void swap(uid);
+        const swapped = swapTo(uid);
         if (session?.user) {
           void ensureUserProfile(session.user).catch((error) =>
             authDebug("root profile ensure failed", { error: error instanceof Error ? error.message : String(error) })
           );
           if (event === "SIGNED_IN") {
             // Run migration after the DB swap completes
-            void swap(uid).then(() => runMigration(uid!));
+            void swapped.then(() => runMigration(uid!));
           }
         }
         if (event !== "SIGNED_OUT") queryClient.invalidateQueries();

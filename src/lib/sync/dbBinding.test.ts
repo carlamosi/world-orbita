@@ -1,0 +1,129 @@
+// @vitest-environment jsdom
+// A sync cycle belongs to the Dexie DB it started on, and outbox rows are
+// addressed by op_id (outbox ids are per-DB autoincrements and can collide).
+import "fake-indexeddb/auto";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createOrbitaDb, type OutboxRow } from "@/lib/db/orbita-db";
+import { swap, currentDbName } from "@/lib/db/dbProvider";
+import type { Mutation, PushResult } from "./types";
+
+let pushReply: (m: Mutation[]) => Promise<PushResult>;
+vi.mock("./sync.functions", () => ({
+  syncPull: vi.fn(async () => ({})),
+  syncPush: vi.fn(async (a: { data: { mutations: Mutation[] } }) => pushReply(a.data.mutations)),
+}));
+const getUser = vi.hoisted(() => vi.fn(async () => ({ data: { user: { id: "u" } }, error: null })));
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: { auth: { getUser, signOut: vi.fn(async () => ({ error: null })) } },
+}));
+
+import { runPushOnce } from "./workers";
+import { useSyncStore } from "./useSyncStore";
+
+const T = Date.UTC(2026, 10, 6, 10, 0, 0);
+function outbox(op_id: string): OutboxRow {
+  return {
+    op_id,
+    entity: "country_progress",
+    op: "upsert",
+    payload: { a: 1 },
+    created_at: T,
+    attempts: 0,
+    next_attempt_at: 0,
+    status: "pending",
+  };
+}
+
+beforeEach(async () => {
+  await swap(crypto.randomUUID());
+  useSyncStore.setState({ signedIn: true, status: "idle", lastError: null });
+});
+
+describe("db binding", () => {
+  it("cycle aborts when db swapped", async () => {
+    const a = createOrbitaDb(currentDbName()); // same IndexedDB as the provider's
+    const op = crypto.randomUUID();
+    await a.outbox.add(outbox(op));
+    // User B's DB already holds an outbox row with the same autoincrement id.
+    const uidB = crypto.randomUUID();
+    const pre = createOrbitaDb(`orbita-${uidB}`);
+    const theirs = outbox(crypto.randomUUID());
+    await pre.outbox.add(theirs);
+    pre.close();
+
+    let release!: () => void;
+    let sent!: () => void;
+    const reached = new Promise<void>((r) => (sent = r));
+    pushReply = (m) => {
+      sent();
+      return new Promise((r) => {
+        release = () =>
+          r({
+            accepted: m.map((x) => x.op_id),
+            rejected: [],
+            canonical: [
+              {
+                entity: "country_progress",
+                op_id: op,
+                payload: { country_code: "FRA", skills: {}, skill_versions: {}, last_seen_at: T },
+              },
+            ],
+          });
+      });
+    };
+    const push = runPushOnce();
+    await reached;
+    const swapped = swap(uidB);
+    release();
+    const b = await swapped;
+    await push;
+
+    expect(currentDbName()).toBe(`orbita-${uidB}`);
+    expect(await b.outbox.toArray()).toMatchObject([{ ...theirs, status: "pending" }]);
+    expect(await b.countryProgress.count()).toBe(0);
+    // swap() waited, so the cycle finished on its own DB.
+    expect(await a.outbox.count()).toBe(0);
+    expect(await a.countryProgress.get("FRA")).toBeDefined();
+    a.close();
+  });
+
+  it("outbox rows addressed by op_id", async () => {
+    const a = createOrbitaDb(currentDbName());
+    const [ok, bad, retry] = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    await a.outbox.bulkAdd([outbox(ok), outbox(bad), outbox(retry)]);
+    pushReply = async () => {
+      // The rows are re-stored mid-push under new ids (same op_ids).
+      const rows = await a.outbox.toArray();
+      await a.outbox.clear();
+      await a.outbox.bulkAdd(rows.map(({ id: _id, ...r }) => r));
+      return {
+        accepted: [ok],
+        rejected: [
+          { op_id: bad, reason: "invalid_payload" },
+          { op_id: retry, reason: "deadlock detected" },
+        ],
+        canonical: [],
+      };
+    };
+    await runPushOnce();
+    const byOp = new Map((await a.outbox.toArray()).map((r) => [r.op_id, r]));
+    expect(byOp.has(ok)).toBe(false);
+    expect(byOp.get(bad)).toMatchObject({ status: "dead", last_error: "invalid_payload" });
+    expect(byOp.get(retry)).toMatchObject({ status: "pending", attempts: 1 });
+
+    // Auth rejection resets the batch to pending by op_id as well.
+    pushReply = async () => {
+      const rows = await a.outbox.toArray();
+      await a.outbox.clear();
+      await a.outbox.bulkAdd(rows.map(({ id: _id, ...r }) => r));
+      throw Object.assign(new Error("Unauthorized"), { statusCode: 401 });
+    };
+    await a.outbox.where("op_id").equals(retry).modify({ next_attempt_at: 0 });
+    await runPushOnce();
+    expect(await a.outbox.where("op_id").equals(retry).first()).toMatchObject({
+      status: "pending",
+      attempts: 1,
+    });
+    a.close();
+  });
+});
