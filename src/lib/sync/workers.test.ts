@@ -34,7 +34,10 @@ vi.mock("./sync.functions", () => ({
 }));
 
 const signOut = vi.hoisted(() => vi.fn(async () => ({ error: null })));
-vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { signOut } } }));
+const getUser = vi.hoisted(() => vi.fn(async () => ({ data: { user: { id: "u" } }, error: null }) as unknown));
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { signOut, getUser } } }));
+// The exact error thrown by requireSupabaseAuth when GoTrue rejects a deleted user.
+const AUTH_ERR = "Unauthorized: Invalid token";
 
 import { runPullOnce, runPushOnce, MAX_PULL_PAGES } from "./workers";
 import { useSyncStore } from "./useSyncStore";
@@ -425,6 +428,59 @@ describe("push result handling", () => {
       expect(r.status).toBe("pending");
       expect(r.attempts).toBe(0);
     }
+  });
+
+  describe("auth rejection by the middleware (deleted user)", () => {
+    beforeEach(() => {
+      signOut.mockClear();
+      getUser.mockClear();
+      getUser.mockImplementation(async () => ({ data: { user: { id: "u" } }, error: null }));
+    });
+    const authFail = () => {
+      pushReply = () => {
+        throw Object.assign(new Error(AUTH_ERR), { statusCode: 401 });
+      };
+    };
+
+    it("keeps rows pending without spending attempts and signs out when the user is gone", async () => {
+      const op = crypto.randomUUID();
+      await mem.outbox.put(outbox(op) as never);
+      authFail();
+      getUser.mockImplementation(async () => ({
+        data: { user: null },
+        error: { status: 403, message: "User from sub claim in JWT does not exist" },
+      }));
+      await runPushOnce();
+      expect(getUser).toHaveBeenCalledTimes(1);
+      expect(signOut).toHaveBeenCalledTimes(1);
+      const [r] = await allOutbox();
+      expect(r.status).toBe("pending");
+      expect(r.attempts).toBe(0);
+    });
+
+    it("does not sign out when getUser succeeds (transient hiccup) and spends no attempts", async () => {
+      const op = crypto.randomUUID();
+      await mem.outbox.put(outbox(op) as never);
+      authFail();
+      await runPushOnce();
+      expect(getUser).toHaveBeenCalledTimes(1);
+      expect(signOut).not.toHaveBeenCalled();
+      const [r] = await allOutbox();
+      expect(r.status).toBe("pending");
+      expect(r.attempts).toBe(0);
+      expect(r.next_attempt_at).toBeGreaterThan(Date.now());
+    });
+
+    it("a pull failing with the auth error also checks the session and signs out", async () => {
+      authFail();
+      const { syncPull } = await import("./sync.functions");
+      (syncPull as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+        throw Object.assign(new Error(AUTH_ERR), { statusCode: 401 });
+      });
+      getUser.mockImplementation(async () => ({ data: { user: null }, error: { status: 403 } }));
+      await runPullOnce();
+      expect(signOut).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("other push errors keep retrying without signing out", async () => {

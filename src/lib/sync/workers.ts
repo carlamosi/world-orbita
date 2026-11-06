@@ -81,7 +81,58 @@ function isOrphanedSessionError(msg: string): boolean {
   return /violates foreign key constraint/i.test(msg) && /_user_id_fkey|auth\.users/i.test(msg);
 }
 
+/** The server-function auth middleware rejected the token (e.g. deleted user). */
+function isAuthRejection(e: unknown): boolean {
+  const status = (e as { statusCode?: number; status?: number } | null)?.statusCode ??
+    (e as { status?: number } | null)?.status;
+  const msg = e instanceof Error ? e.message : "";
+  return status === 401 || /unauthorized/i.test(msg);
+}
+
 let signingOut = false;
+let checkingSession = false;
+
+/**
+ * Auth failure: never spend attempts. Ask GoTrue once whether the session is
+ * still valid; if the user is gone (or the session cannot be refreshed), sign
+ * out. If it is valid, it was a transient hiccup: just back off.
+ */
+async function handleAuthRejection(due: OutboxRow[], msg: string) {
+  await db()
+    .outbox.where("id")
+    .anyOf(due.map((d) => d.id!))
+    .modify({ status: "pending", next_attempt_at: backoff(3) } as Partial<OutboxRow>);
+  useSyncStore.getState().setError(msg);
+  await verifySessionOrSignOut();
+}
+
+async function verifySessionOrSignOut() {
+  if (checkingSession || signingOut) return;
+  checkingSession = true;
+  try {
+    const { supabase } = await import("@/integrations/supabase/client");
+    let gone = false;
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      gone = !!error || !data?.user;
+    } catch {
+      gone = true;
+    }
+    if (!gone) return;
+    signingOut = true;
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn("[sync] signOut after auth rejection failed:", err);
+    } finally {
+      signingOut = false;
+    }
+  } catch (err) {
+    console.warn("[sync] session check failed:", err);
+  } finally {
+    checkingSession = false;
+  }
+}
 
 /**
  * The account was deleted (e.g. by the v2 reset) but this browser still holds
@@ -168,6 +219,10 @@ async function pushBatch(due: OutboxRow[]) {
     useSyncStore.getState().setError(null);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "push failed";
+    if (isAuthRejection(e)) {
+      await handleAuthRejection(due, msg);
+      return;
+    }
     if (isOrphanedSessionError(msg)) {
       await handleOrphanedSession(due, msg);
       return;
@@ -290,6 +345,7 @@ export async function runPullOnce(opts: { limit?: number } = {}) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "pull failed";
     useSyncStore.getState().setError(msg);
+    if (isAuthRejection(e)) await verifySessionOrSignOut();
   } finally {
     pulling = false;
   }

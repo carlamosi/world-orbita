@@ -161,7 +161,7 @@ function RootComponent() {
       import("@/integrations/supabase/client"),
       import("@/lib/db/dbProvider"),
       import("@/lib/sync/useSyncStore"),
-    ]).then(([{ supabase },{ swap, getCurrent }, { useSyncStore }]) => {
+    ]).then(([{ supabase }, { swap, getCurrent }, { useSyncStore }]) => {
       if (!mounted) return;
 
       const runMigration = async (uid: string) => {
