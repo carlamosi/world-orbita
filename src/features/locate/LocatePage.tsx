@@ -8,6 +8,8 @@ import { SessionEnd } from "@/features/engine/SessionEnd";
 import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { HardInput } from "@/features/engine/HardInput";
+import { FeedbackBar } from "@/features/engine/FeedbackBar";
+import { feedbackContext } from "@/features/engine/feedbackContext";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
@@ -212,7 +214,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                       if (!isCorrect) {
                         setLastWrongIso3(iso3);
                       }
-                      s.submit(isCorrect);
+                      s.submit(isCorrect, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name });
                     }
                   }
                 : undefined
@@ -250,13 +252,14 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 
           {/* Answer Controls & Surface */}
           <div className="absolute bottom-8 inset-x-0 z-30 px-4">
-            {sub === "name" ? (
+            {/* The feedback bar takes the controls' place once answered. */}
+            {s.answerState === "idle" && sub === "name" ? (
               difficulty === "easy" ? (
                 <EasyOptions
                   options={nameOptions}
                   targetIso3={current.iso3}
                   disabled={s.answerState !== "idle"}
-                  onPick={(iso3) => s.submit(iso3 === current.iso3)}
+                  onPick={(iso3) => s.submit(iso3 === current.iso3, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name })}
                 />
               ) : (
                 <HardInput
@@ -264,10 +267,19 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                   kind="country"
                   answerState={s.answerState}
                   correctAnswer={current.name}
-                  onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
+                  onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                 />
               )
             ) : null}
+            <FeedbackBar
+              show={s.answerState !== "idle"}
+              state={s.answerState === "idle" ? "correct" : s.answerState}
+              title={current.name}
+              subtitle={feedbackContext(current)}
+              chosen={s.chosen}
+              onNext={() => s.next()}
+              hideNext={s.answerState === "correct"}
+            />
           </div>
         </>
       )}

@@ -22,6 +22,7 @@ import { SessionEnd } from "@/features/engine/SessionEnd";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
+import { feedbackContext } from "@/features/engine/feedbackContext";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { db, type ConceptProgressRow, ALL_SKILLS } from "@/lib/db/orbita-db";
 import { generateDueTodayQueue } from "@/lib/fsrs/planner";
@@ -58,6 +59,9 @@ function isSpainEntity(item: ReviewEntity): item is SpainEntity {
 }
 
 const ALL_REVIEW_ITEMS: ReviewEntity[] = [...COUNTRIES, ...SPAIN_ALL];
+/** Name of a picked option or clicked region, for "You chose X". */
+const nameOf = (id: string) =>
+  ALL_REVIEW_ITEMS.find((i) => (isSpainEntity(i) ? i.id : i.iso3) === id)?.name;
 
 /* The session store: mixed-skill Due Today session across all countries and Spain entities. */
 const useReviewSession = createSessionStore<ReviewEntity>({
@@ -393,7 +397,7 @@ export default function ReviewPage() {
     (id: string) => {
       if (!current || s.answerState !== "idle") return;
       setSelectedId(id);
-      s.submit(id === currentId);
+      s.submit(id === currentId, { chosen: nameOf(id) });
     },
     [current, currentId, s],
   );
@@ -473,7 +477,7 @@ export default function ReviewPage() {
     (id: string) => {
       if (!current || s.answerState !== "idle") return;
       setSelectedId(id);
-      s.submit(id === currentId);
+      s.submit(id === currentId, { chosen: nameOf(id) });
     },
     [current, currentId, s],
   );
@@ -565,13 +569,16 @@ export default function ReviewPage() {
   }
 
   const answersCapital = skill === "capital" && subMode !== "capToCountry";
+  const answer = current ? (answersCapital ? (current.capital ?? current.name) : current.name) : "";
   const answerInput = !current ? null : isTyped ? (
     <div className="w-full max-w-md mx-auto">
       <HardInput
         target={current}
         matchTarget={answersCapital ? (current.capital ?? current.name) : current.name}
         kind={isSpainEntity(current) ? (answersCapital ? "spainCapital" : "spain") : answersCapital ? "capital" : "country"}
-        onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
+        answerState={s.answerState}
+        correctAnswer={answer}
+        onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
         placeholder={answersCapital ? "Type the capital…" : "Type the name…"}
       />
     </div>
@@ -586,7 +593,7 @@ export default function ReviewPage() {
       onSelect={(id) => {
         if (!current || s.answerState !== "idle") return;
         setSelectedId(id);
-        s.submit(id === currentId);
+        s.submit(id === currentId, { chosen: nameOf(id) });
       }}
     />
   );
@@ -661,10 +668,11 @@ export default function ReviewPage() {
               show={s.answerState !== "idle"}
               state={s.answerState as "correct" | "wrong" | "revealed"}
               title={displayName}
-              subtitle={isSpainEntity(current) ? "Spain" : current.continent}
+              subtitle={feedbackContext(current) ?? (isSpainEntity(current) ? "Spain" : current.continent)}
+              chosen={s.chosen}
               onNext={() => s.next()}
               onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-              hideNext
+              hideNext={s.answerState === "correct"}
             />
           </div>
         </div>
@@ -748,11 +756,21 @@ export default function ReviewPage() {
           <FeedbackBar
             show={s.answerState !== "idle"}
             state={s.answerState as "correct" | "wrong" | "revealed"}
-            title={current?.name ?? ""}
-            subtitle={questionMeta?.subtitle ?? ""}
+            title={answer}
+            subtitle={(current && feedbackContext(current)) ?? questionMeta?.subtitle ?? ""}
+            chosen={s.chosen}
+            flag={
+              current && skill === "flag" ? (
+                isSpainEntity(current) ? (
+                  <FlagImage src={getSpainFlagUrl(current.flagCode)} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />
+                ) : (
+                  <FlagImage iso2={current.iso2} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />
+                )
+              ) : undefined
+            }
             onNext={() => s.next()}
             onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-            hideNext
+            hideNext={s.answerState === "correct"}
           />
         </div>
       </div>

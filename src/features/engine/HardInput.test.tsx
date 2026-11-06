@@ -31,22 +31,22 @@ describe("HardInput matching", () => {
     const a = setup({ name: "Iran", id: "IRN" });
     a.type("Iraq");
     a.enter();
-    expect(a.onSubmit).toHaveBeenCalledWith(false, false);
+    expect(a.onSubmit).toHaveBeenCalledWith(false, false, "Iraq");
     const b = setup({ name: "Zambia", id: "ZMB" });
     b.type("Gambia");
     b.enter();
-    expect(b.onSubmit).toHaveBeenCalledWith(false, false);
+    expect(b.onSubmit).toHaveBeenCalledWith(false, false, "Gambia");
   });
 
   it("a real typo is accepted with exact=false", () => {
     const a = setup({ name: "Iran", id: "IRN" });
     a.type("Irann");
     a.enter();
-    expect(a.onSubmit).toHaveBeenCalledWith(true, false);
+    expect(a.onSubmit).toHaveBeenCalledWith(true, false, "Irann");
     const b = setup({ name: "Zambia", id: "ZMB" });
     b.type("Zambai");
     b.enter();
-    expect(b.onSubmit).toHaveBeenCalledWith(true, false);
+    expect(b.onSubmit).toHaveBeenCalledWith(true, false, "Zambai");
   });
 
   it("typing Niger for Nigeria does not auto-submit; Enter grades it wrong", () => {
@@ -54,7 +54,7 @@ describe("HardInput matching", () => {
     a.type("Niger");
     expect(a.onSubmit).not.toHaveBeenCalled();
     a.enter();
-    expect(a.onSubmit).toHaveBeenCalledWith(false, false);
+    expect(a.onSubmit).toHaveBeenCalledWith(false, false, "Niger");
   });
 
   it("Niger for Niger waits for Enter, then is exact", () => {
@@ -62,7 +62,7 @@ describe("HardInput matching", () => {
     a.type("Niger");
     expect(a.onSubmit).not.toHaveBeenCalled();
     a.enter();
-    expect(a.onSubmit).toHaveBeenCalledWith(true, true);
+    expect(a.onSubmit).toHaveBeenCalledWith(true, true, "Niger");
   });
 
   it("exact match still auto-submits when it prefixes nothing", () => {

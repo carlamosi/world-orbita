@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
+import { COUNTRY_BY_ISO3, pickRandomCountries } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -8,6 +8,7 @@ import { SessionEnd } from "@/features/engine/SessionEnd";
 import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
+import { feedbackContext } from "@/features/engine/feedbackContext";
 import { HardInput } from "@/features/engine/HardInput";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { FlagImage } from "@/components/ui/FlagImage";
@@ -89,7 +90,7 @@ export default function FlagsPage() {
     [options, s.answerState, sub],
   );
   const onHotkey = useCallback(
-    (id: string) => current && s.submit(id === current.iso3),
+    (id: string) => current && s.submit(id === current.iso3, { chosen: COUNTRY_BY_ISO3.get(id)?.name }),
     [current, s],
   );
   useAnswerHotkeys(hotkeyItems, onHotkey);
@@ -135,17 +136,32 @@ export default function FlagsPage() {
                       target={current}
                       options={options}
                       disabled={s.answerState !== "idle"}
-                      onPick={(iso3) => s.submit(iso3 === current.iso3)}
+                      onPick={(iso3) => s.submit(iso3 === current.iso3, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name })}
                     />
                   ) : sub === "flagToCountry" ? null : (
                     current ? (
                       <FlagToType
                         target={current}
                         answerState={s.answerState}
-                        onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
+                        onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                       />
                     ) : null
                   )}
+                </div>
+              </div>
+
+              <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
+                <div className="pointer-events-auto">
+                  <FeedbackBar
+                    show={s.answerState !== "idle" && !!current}
+                    state={s.answerState === "idle" ? "correct" : s.answerState}
+                    title={current?.name ?? ""}
+                    subtitle={current && feedbackContext(current)}
+                    chosen={s.chosen}
+                    flag={current && <FlagImage iso2={current.iso2} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />}
+                    onNext={() => s.next()}
+                    hideNext={s.answerState === "correct"}
+                  />
                 </div>
               </div>
             </>
@@ -313,7 +329,7 @@ function FlagToType({
 }: {
   target: Country;
   answerState?: "idle" | "correct" | "wrong" | "revealed";
-  onSubmit: (ok: boolean, exact?: boolean) => void;
+  onSubmit: (ok: boolean, exact?: boolean, typed?: string) => void;
 }) {
   return (
     <div className="flex flex-col items-center gap-6 w-full">

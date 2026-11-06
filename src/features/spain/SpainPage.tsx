@@ -28,6 +28,8 @@ import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
+import { feedbackContext } from "@/features/engine/feedbackContext";
+import { FlagImage } from "@/components/ui/FlagImage";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { RegionSelect } from "@/features/engine/ContinentSelect";
 import { SessionLengthSelect, type SessionLengthMode } from "@/features/engine/SessionLengthSelect";
@@ -288,7 +290,7 @@ export default function SpainPage() {
     (d: object) => {
       if (skill !== "locate") return;
       if (!current || s.answerState !== "idle") return;
-      const f = d as { properties?: { id?: string } };
+      const f = d as { properties?: { id?: string; name?: string } };
       const clickedId = f.properties?.id ?? "";
       const isCorrect = clickedId === current.id;
       if (!isCorrect) {
@@ -296,7 +298,7 @@ export default function SpainPage() {
       } else {
         setLastWrongId(null);
       }
-      s.submit(isCorrect);
+      s.submit(isCorrect, { chosen: f.properties?.name });
     },
     [skill, current, s],
   );
@@ -480,7 +482,7 @@ export default function SpainPage() {
                             type="button"
                             onClick={() => {
                               setSelectedFlagOptionId(o.id);
-                              s.submit(o.id === current.id);
+                              s.submit(o.id === current.id, { chosen: o.name });
                             }}
                             disabled={s.answerState !== "idle"}
                             animate={
@@ -554,9 +556,23 @@ export default function SpainPage() {
                       matchTarget={current.name}
                       kind="spain"
                       placeholder="Type the autonomous community name…"
-                      onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
+                      onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                     />
                   )}
+                </div>
+              </div>
+              <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
+                <div className="pointer-events-auto">
+                  <FeedbackBar
+                    show={s.answerState !== "idle"}
+                    state={s.answerState === "idle" ? "correct" : s.answerState}
+                    title={current.name}
+                    subtitle={current.capital ? `Capital: ${current.capital}` : undefined}
+                    chosen={s.chosen}
+                    flag={currentFlagSrc && <FlagImage src={currentFlagSrc} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />}
+                    onNext={() => s.next()}
+                    hideNext={s.answerState === "correct"}
+                  />
                 </div>
               </div>
             </div>
@@ -575,29 +591,29 @@ export default function SpainPage() {
               />
 
               <div className="w-full flex flex-col items-center mt-6">
-                {s.answerState === "idle" ? (
+                {s.answerState === "idle" && (
                   <div className="w-full max-w-lg">
                     <HardInput
                       target={current}
                       matchTarget={current.capital ?? ""}
                       kind="spainCapital"
                       placeholder="Type the capital city…"
-                      onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
-                    />
-                  </div>
-                ) : (
-                  <div className="w-full max-w-2xl">
-                    <FeedbackBar
-                      show
-                      state={s.answerState as "correct" | "wrong" | "revealed"}
-                      title={current.name}
-                      subtitle={`Capital: ${current.capital ?? "—"}`}
-                      onNext={() => s.next()}
-                      onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                      hideNext
+                      onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                     />
                   </div>
                 )}
+                <div className="w-full max-w-2xl">
+                  <FeedbackBar
+                    show={s.answerState !== "idle"}
+                    state={s.answerState === "idle" ? "correct" : s.answerState}
+                    title={current.capital ?? current.name}
+                    subtitle={[`Capital of ${current.name}`, feedbackContext(current)].filter(Boolean).join(" · ")}
+                    chosen={s.chosen}
+                    onNext={() => s.next()}
+                    onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
+                    hideNext={s.answerState === "correct"}
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -625,7 +641,7 @@ export default function SpainPage() {
                       labelKey="name"
                       showFlags={false}
                       disabled={s.answerState !== "idle"}
-                      onPick={(id) => s.submit(id === current.id)}
+                      onPick={(id) => s.submit(id === current.id, { chosen: easyOptions.find((o) => o.id === id)?.name })}
                     />
                   ) : (
                     <HardInput
@@ -633,20 +649,20 @@ export default function SpainPage() {
                       matchTarget={current.name}
                       kind="spain"
                       placeholder="Type the region name…"
-                      onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
+                      onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                     />
                   )
-                ) : (
-                  <FeedbackBar
-                    show
-                    state={s.answerState as "correct" | "wrong" | "revealed"}
-                    title={current.name}
-                    subtitle={current.capital ? `Capital: ${current.capital}` : undefined}
-                    onNext={() => s.next()}
-                    onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-                    hideNext
-                  />
-                )}
+                ) : null}
+                <FeedbackBar
+                  show={s.answerState !== "idle"}
+                  state={s.answerState === "idle" ? "correct" : s.answerState}
+                  title={current.name}
+                  subtitle={[feedbackContext(current), current.capital && `Capital: ${current.capital}`].filter(Boolean).join(" · ")}
+                  chosen={s.chosen}
+                  onNext={() => s.next()}
+                  onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
+                  hideNext={s.answerState === "correct"}
+                />
               </div>
             </>
           )}

@@ -582,6 +582,38 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
       expect(store.getState().index).toBe(1);
     });
 
+    it("a miss in the last two questions is appended and shown again (Task 21)", async () => {
+      for (const p of SPAIN_PROVINCES.slice(0, 10)) rows.push(row(findId(p.id), p.id, -1));
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      for (let i = 0; i < 8; i++) {
+        store.getState().submit(true);
+        store.getState().next();
+      }
+      const missed8 = store.getState().queue[8]!.id;
+      store.getState().submit(false);
+      expect(store.getState().queue.map((e) => e.id).at(-1)).toBe(missed8);
+      store.getState().next();
+      const missed9 = store.getState().queue[9]!.id;
+      store.getState().submit(false);
+      const ids = store.getState().queue.map((e) => e.id);
+      expect(ids).toHaveLength(12);
+      expect(ids.at(-1)).toBe(missed9);
+      store.getState().next();
+      const s = store.getState();
+      expect(s.queue[s.index]!.id).toBe(missed8);
+      expect(entityIds(store.getState().conceptQueue)).toEqual(ids);
+    });
+
+    it("submit keeps what the learner chose until next()", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      store.getState().submit(false, { chosen: "Cádiz" });
+      expect(store.getState().chosen).toBe("Cádiz");
+      store.getState().next();
+      expect(store.getState().chosen).toBeNull();
+    });
+
     it("next({ allowIdle: true }) still skips an unanswered question", async () => {
       const store = provinceStore();
       await store.getState().start({ subMode: "find" });

@@ -125,6 +125,8 @@ export interface SessionState<TItem = Country> {
   masteredCount: number;
   missedItems: MissedItem[];
   answerState: AnswerState;
+  /** What the learner picked or typed for the current answer (null: nothing identifiable). */
+  chosen: string | null;
   startedAt: number;
   endedAt: number | null;
   loading: boolean;
@@ -178,7 +180,11 @@ export interface SessionState<TItem = Country> {
    */
   startPractice(): Promise<void>;
   /** `softCorrect`: accepted only through the fuzzy matcher (typo), graded Hard. */
-  submit(isCorrect: boolean, opts?: { retrievalMode?: "easy" | "hard"; softCorrect?: boolean }): void;
+  /** `chosen`: the picked/typed label, shown as "You chose X" after a miss. Not graded. */
+  submit(
+    isCorrect: boolean,
+    opts?: { retrievalMode?: "easy" | "hard"; softCorrect?: boolean; chosen?: string },
+  ): void;
   reveal(): void;
   /** `allowIdle`: advance past an unanswered question (the "no capital, Skip" path). */
   next(opts?: { allowIdle?: boolean }): void;
@@ -417,6 +423,7 @@ export function createSessionStore<TItem = Country>({
     masteredCount: 0,
     missedItems: [],
     answerState: "idle",
+    chosen: null,
     startedAt: 0,
     endedAt: null,
     loading: false,
@@ -568,6 +575,7 @@ export function createSessionStore<TItem = Country>({
       const updates: Partial<SessionState<TItem>> = {};
 
       // 1. Score & UI state
+      updates.chosen = submitOpts?.chosen ?? null;
       if (isCorrect) {
         const combo = s.combo + 1;
         updates.score = s.score + 100 + Math.min(s.combo, 9) * 20;
@@ -756,8 +764,8 @@ export function createSessionStore<TItem = Country>({
       //    - The re-queued slot contains the UPDATED concept row (post-FSRS),
       //      but FSRS will NOT be called again when that slot is answered
       //      (protected by fsrsUpdatedIds).
-      //    - If there are fewer than 3 cards left in the queue, don't re-queue
-      //      (not enough room for meaningful interleaving).
+      //    - If there are fewer than 3 cards left, append the retry at the end
+      //      so a miss near the end of a session still gets its second try.
       if (!isCorrect && targetConcept) {
         const conceptId = targetConcept.conceptId;
         const retries = s.inSessionRetries.get(conceptId) ?? 0;
@@ -766,13 +774,14 @@ export function createSessionStore<TItem = Country>({
 
         const remainingAfterCurrent = s.queue.length - s.index - 1;
 
-        if (retries < maxRetries && remainingAfterCurrent >= 3) {
+        if (retries < maxRetries) {
           // Use the step corresponding to this retry attempt
           const stepUnit = relearningSteps[retries] ?? relearningSteps[relearningSteps.length - 1]!;
           const offset = stepToQueueOffset(String(stepUnit), remainingAfterCurrent);
 
           // Clamp to the end of the queue (splice inserts before that index)
-          const insertAt = Math.min(s.index + 1 + offset, s.queue.length);
+          const insertAt =
+            remainingAfterCurrent >= 3 ? Math.min(s.index + 1 + offset, s.queue.length) : s.queue.length;
 
           // Re-insert the failed slot (item and its possibly updated concept together)
           const newPairs = [...(updates.pairs ?? s.pairs)];
@@ -829,6 +838,7 @@ export function createSessionStore<TItem = Country>({
       set({
         index: nextIndex,
         answerState: "idle",
+        chosen: null,
         questionStartedAt: Date.now(),
       });
     },

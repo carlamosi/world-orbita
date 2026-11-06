@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Skill } from "@/lib/db/orbita-db";
 import { generateDaily, generateWeekly, type ChallengeSet } from "@/lib/challenges";
@@ -12,10 +12,12 @@ import { recordSessionEnd, updateSkillProgress } from "@/lib/db/repo";
 import { confidenceAfter } from "@/lib/mastery";
 import { dateKey, weekKey } from "@/lib/streak";
 import type { Country } from "@/types/country";
-import { pickRandomCountries } from "@/lib/countries";
+import { COUNTRY_BY_ISO3, pickRandomCountries } from "@/lib/countries";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
+import { FeedbackBar } from "@/features/engine/FeedbackBar";
+import { feedbackContext } from "@/features/engine/feedbackContext";
 
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import { Link } from "@tanstack/react-router";
@@ -39,6 +41,8 @@ export type Active = {
   combo: number;
   startedAt: number;
   answerState: "idle" | "correct" | "wrong";
+  /** The picked option's label, for "You chose X" after a miss. */
+  chosen?: string;
   missedItems: MissedItem[];
 };
 
@@ -462,9 +466,11 @@ function ChallengeQuestion({
         }
       }
 
+      const picked = COUNTRY_BY_ISO3.get(iso3);
       setActive({
         ...active,
         answerState: correctPick ? "correct" : "wrong",
+        chosen: current.skill === "capital" ? (picked?.capital ?? undefined) : picked?.name,
         score: active.score + gained,
         combo,
         bestCombo: Math.max(active.bestCombo, combo),
@@ -476,9 +482,15 @@ function ChallengeQuestion({
     [active, current, setActive],
   );
 
+  // An exiting feedback bar or a key press can call a stale `next`: read the latest
+  // state and ignore an unanswered question, so one Next never skips one.
+  const latest = useRef(active);
+  latest.current = active;
   const next = useCallback(() => {
-    setActive({ ...active, index: active.index + 1, answerState: "idle" });
-  }, [active, setActive]);
+    const a = latest.current;
+    if (a.answerState === "idle") return;
+    setActive({ ...a, index: a.index + 1, answerState: "idle", chosen: undefined });
+  }, [setActive]);
 
   // Numeric 1–4 + auto-advance + space-to-skip — same architecture as Find/Name/Flags.
   const hotkeyItems = useMemo(
@@ -559,28 +571,17 @@ function ChallengeQuestion({
           ))}
         </div>
 
-        <AnimatePresence>
-          {active.answerState !== "idle" && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              className="mt-6 glass-strong rounded-2xl p-4 flex items-center justify-between"
-            >
-              <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/45">
-                  {active.answerState === "correct" ? "Nailed it" : "Not quite"}
-                </div>
-                <div className="font-display text-lg text-white">
-                  {current.country.name} — {current.country.capital ?? "—"}
-                </div>
-              </div>
-              <Button size="sm" onClick={next}>
-                Next →
-              </Button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="mt-6">
+          <FeedbackBar
+            show={active.answerState !== "idle"}
+            state={active.answerState === "wrong" ? "wrong" : "correct"}
+            title={current.skill === "capital" ? (current.country.capital ?? current.country.name) : current.country.name}
+            subtitle={feedbackContext(current.country)}
+            chosen={active.chosen ?? null}
+            flag={<FlagImage iso2={current.country.iso2} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />}
+            onNext={next}
+          />
+        </div>
       </div>
     </div>
   );

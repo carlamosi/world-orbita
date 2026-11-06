@@ -51,6 +51,6 @@ describe("Locate Name: recognition and recall are separate cards", () => {
     typeInto(host, target.name + "x", { enter: true });
 
     expect(graded[0]!.opts).toEqual({ retrievalMode: "hard", softCorrect: false });
-    expect(graded[1]!.opts).toEqual({ retrievalMode: "hard", softCorrect: true });
+    expect(graded[1]!.opts).toEqual({ retrievalMode: "hard", softCorrect: true, chosen: target.name + "x" });
   });
 });

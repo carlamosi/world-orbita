@@ -22,8 +22,8 @@ interface Props {
   kind: NameKind;
   correctAnswer?: string;
   answerState?: "idle" | "correct" | "wrong" | "revealed";
-  /** `exact` is false when Enter accepted a typo through the fuzzy matcher. */
-  onSubmit: (ok: boolean, exact?: boolean) => void;
+  /** `exact` is false when Enter accepted a typo through the fuzzy matcher; `typed` is the text sent with Enter. */
+  onSubmit: (ok: boolean, exact?: boolean, typed?: string) => void;
   placeholder?: string;
 }
 
@@ -98,7 +98,7 @@ export function HardInput({
             if (isAnswered) return;
             if (e.key === "Enter") {
               e.preventDefault();
-              if (val.trim()) onSubmit(fuzzyMatch(val, expectedText, alts, others), exactMatch(val, expectedText, alts));
+              if (val.trim()) onSubmit(fuzzyMatch(val, expectedText, alts, others), exactMatch(val, expectedText, alts), val.trim());
             }
           }}
           placeholder={placeholder}

@@ -63,7 +63,7 @@ describe.each(["name", "flags"])("Spain %s: recognition and recall are separate 
     typeInto(host, target.name + "x", { enter: true });
 
     expect(graded[0]!.opts).toEqual({ retrievalMode: "hard", softCorrect: false });
-    expect(graded[1]!.opts).toEqual({ retrievalMode: "hard", softCorrect: true });
+    expect(graded[1]!.opts).toEqual({ retrievalMode: "hard", softCorrect: true, chosen: target.name + "x" });
   });
 });
 
@@ -76,7 +76,7 @@ describe("Spain capitals (typed only)", () => {
     const root = createRoot(host);
     await act(async () => root.render(<SpainPage />));
     typeInto(host, target.capital! + "x", { enter: true });
-    expect(graded[0]!.opts).toEqual({ retrievalMode: "hard", softCorrect: true });
+    expect(graded[0]!.opts).toEqual({ retrievalMode: "hard", softCorrect: true, chosen: target.capital! + "x" });
     act(() => root.unmount());
     host.remove();
   });
