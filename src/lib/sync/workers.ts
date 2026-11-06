@@ -31,6 +31,8 @@ const PUSH_INTERVAL_MS = 4_000;
 let pushTimer: ReturnType<typeof setInterval> | null = null;
 let pullTimer: ReturnType<typeof setInterval> | null = null;
 let offSwap: (() => void) | null = null;
+/** DBs recovered in full this page session; a re-activated one may have a live cycle. */
+const recovered = new Set<string>();
 let started = false;
 let pushing = false;
 let pulling = false;
@@ -417,11 +419,15 @@ export function startSyncWorkers() {
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
   }
-  // Every DB that becomes active gets the same recovery (lease only: a live
-  // cycle may own fresh in_flight rows).
-  offSwap = onSwap((d) => void Promise.all([purgeBrokenOpIds(d), recoverInFlight(d, false)]));
-  // On startup no cycle has run yet, so every in_flight row is orphaned.
+  // A DB's first activation has had no cycle bound to it, so every in_flight
+  // row is orphaned; a re-activated one gets lease-only recovery.
+  offSwap = onSwap((d) => {
+    const first = !recovered.has(d.name);
+    recovered.add(d.name);
+    void Promise.all([purgeBrokenOpIds(d), recoverInFlight(d, first)]);
+  });
   const d = db();
+  recovered.add(d.name);
   Promise.all([purgeBrokenOpIds(d), recoverInFlight(d, true)]).then(() => {
     void runPullOnce();
     void runPushOnce();
@@ -436,6 +442,7 @@ export function stopSyncWorkers() {
   pullTimer = null;
   offSwap?.();
   offSwap = null;
+  recovered.clear();
   if (typeof document !== "undefined") {
     document.removeEventListener("visibilitychange", onVisibility);
   }

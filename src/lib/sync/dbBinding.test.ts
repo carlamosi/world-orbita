@@ -243,7 +243,7 @@ describe("db binding", () => {
     const statusOf = async (d: ReturnType<typeof createOrbitaDb>, r: OutboxRow) =>
       (await d.outbox.where("op_id").equals(r.op_id).first())?.status;
 
-    it("startup resets everything in the current db, a swap only stale leases", async () => {
+    it("startup resets the current db, a first swap activation too, a re-activation only stale leases", async () => {
       useSyncStore.setState({ signedIn: false }); // no cycle may touch the rows
       const cur = createOrbitaDb(currentDbName());
       const crashed = inFlight(1_000);
@@ -259,9 +259,21 @@ describe("db binding", () => {
       try {
         await vi.waitFor(async () => expect(await statusOf(cur, crashed)).toBe("pending"));
         const b = await swap(uidB);
-        await vi.waitFor(async () => expect(await statusOf(b, stale)).toBe("pending"));
-        // Possibly still pushed by a live cycle: not ours to reset.
-        expect(await statusOf(b, fresh)).toBe("in_flight");
+        // First activation in this page session: no cycle was ever bound to it.
+        await vi.waitFor(async () => {
+          expect(await statusOf(b, stale)).toBe("pending");
+          expect(await statusOf(b, fresh)).toBe("pending");
+        });
+
+        // Re-activation: a fresh lease may belong to a live cycle, so it stays.
+        await swap(null);
+        const again = createOrbitaDb(`orbita-${uidB}`);
+        const live = inFlight(5_000);
+        await again.outbox.add(live);
+        const b2 = await swap(uidB);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(await statusOf(b2, live)).toBe("in_flight");
+        again.close();
       } finally {
         stopSyncWorkers();
         cur.close();
