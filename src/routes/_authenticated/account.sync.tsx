@@ -21,7 +21,7 @@ export const Route = createFileRoute("/_authenticated/account/sync")({
 });
 
 function fmt(ts: number | null) {
-  if (!ts) return "—";
+  if (!ts) return "Never";
   const s = Math.round((Date.now() - ts) / 1000);
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
@@ -76,7 +76,7 @@ function SyncPage() {
         <Stat label="Last push" value={fmt(lastPushAt)} />
         <Stat label="Last pull" value={fmt(lastPullAt)} />
         <Stat label="Dead-letter" value={String(dead)} />
-        <Stat label="Last error" value={lastError ?? "—"} />
+        <Stat label="Last error" value={lastError ?? "None"} />
       </section>
 
       <div className="mt-6 flex flex-wrap gap-2">
