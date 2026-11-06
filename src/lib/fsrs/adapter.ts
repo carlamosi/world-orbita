@@ -132,7 +132,7 @@ export function rowToCard(row: ConceptProgressRow): Card {
   }
   card.reps = row.fsrs_reps ?? 0;
   card.lapses = row.fsrs_lapses ?? 0;
-  card.elapsed_days = Math.max(0, row.fsrs_elapsed_days ?? 0); // a future last_review makes ts-fsrs report negative days
+  card.elapsed_days = Math.max(0, row.fsrs_elapsed_days ?? 0); // keeps stored/pulled values non-negative
   card.scheduled_days = row.fsrs_scheduled_days ?? 0;
   card.learning_steps = learningStepsOf(row, card.state);
 
@@ -252,7 +252,8 @@ export function processReview(
   outcome: ReviewOutcome,
   reviewedAtMs: number,
 ): ProcessReviewResult {
-  const now = new Date(reviewedAtMs);
+  // ts-fsrs throws "Invalid delta_t" if the review predates last_review (fast clock elsewhere).
+  const now = new Date(Math.max(reviewedAtMs, currentCard.last_review?.getTime() ?? 0));
 
   const grade: Grade = outcomeToGrade(outcome);
   const logItem = _fsrsInstance.next(currentCard, now, grade);

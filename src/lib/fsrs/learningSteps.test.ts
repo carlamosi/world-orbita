@@ -65,6 +65,17 @@ describe("elapsed_days is never negative", () => {
   });
 });
 
+describe("review before last_review (future-dated row)", () => {
+  it("grades a Review card whose last_review is 1h ahead without throwing", () => {
+    const t0 = Date.UTC(2026, 10, 5, 10, 0, 0);
+    let card = processReview(createNewCard(t0), "easy", t0).card;
+    card = { ...card, last_review: new Date(t0 + 60 * MIN) };
+    const out = processReview(card, "good", t0).card;
+    expect(out.last_review!.getTime()).toBeGreaterThanOrEqual(t0 + 60 * MIN);
+    expect(persist(out).fsrs_elapsed_days).toBeGreaterThanOrEqual(0);
+  });
+});
+
 describe("legacy rows without fsrs_learning_steps", () => {
   const base = (state: State, gapMs: number): ConceptProgressRow => {
     const last = Date.UTC(2026, 10, 5, 10, 0, 0);

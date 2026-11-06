@@ -40,7 +40,7 @@ select pg_get_functiondef('public.sync_push(jsonb)'::regprocedure)
   like '%now() + interval ''5 minutes''%';
 ```
 
-2. Sigue ejecutable solo por `authenticated` (el `proacl` no debe incluir `anon` ni vacío antes de `=`):
+2. Sigue ejecutable solo por `authenticated` (el `proacl` debe contener `authenticated=X/postgres` y no `anon` ni una entrada `=X/...` vacía):
 
 ```sql
 select proacl, prosecdef from pg_proc
@@ -58,7 +58,7 @@ where fsrs_last_review > now() + interval '5 minutes';
 
 ## 3. Rollback
 
-Vuelve a crear la función del baseline: pega en el SQL editor el bloque `create function public.sync_push` de `supabase/migrations/20261106000000_baseline_v2.sql` (desde `-- ===== sync_push` hasta su `end $$;`) cambiando `create function` por `create or replace function`. Si registraste la migración en el historial, bórrala:
+Vuelve a crear la función del baseline: pega en el SQL editor el bloque `create function public.sync_push` de `supabase/migrations/20261106000000_baseline_v2.sql` (desde `-- ============================ sync_push` hasta su `end $$;`) cambiando `create function` por `create or replace function`. Si registraste la migración en el historial, bórrala:
 
 ```sql
 delete from supabase_migrations.schema_migrations where version = '20261107000000';
