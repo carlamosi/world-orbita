@@ -25,6 +25,7 @@ import {
   outcomeToGrade,
   normalizeState,
   isDue,
+  isMastered,
   selectRecommendedMode,
   type NormalizedReview,
   type ReviewOutcome,
@@ -522,3 +523,30 @@ describe("Sub-mode format preservation & feedback", () => {
   });
 });
 
+
+describe("isMastered (Task 22)", () => {
+  const base = {
+    conceptId: "world:FRA:flag:flagToCountry",
+    iso3: "FRA",
+    skill: "flag",
+    fsrs_difficulty: 5,
+    fsrs_due: Date.now(),
+    fsrs_reps: 3,
+    fsrs_lapses: 0,
+    fsrs_last_review: Date.now(),
+    updated_at: Date.now(),
+    version: 1,
+    dirty: 0,
+  } as unknown as ConceptProgressRow;
+  const at = (state: State, stability: number | null) =>
+    ({ ...base, fsrs_state: state, fsrs_stability: stability }) as unknown as ConceptProgressRow;
+
+  it("is true only in Review with stability of 21 days or more", () => {
+    expect(isMastered(at(State.Review, 21))).toBe(true);
+    expect(isMastered(at(State.Review, 60))).toBe(true);
+    expect(isMastered(at(State.Review, 20.9))).toBe(false);
+    expect(isMastered(at(State.Learning, 30))).toBe(false);
+    expect(isMastered(at(State.Relearning, 30))).toBe(false);
+    expect(isMastered(at(State.New, null))).toBe(false);
+  });
+});

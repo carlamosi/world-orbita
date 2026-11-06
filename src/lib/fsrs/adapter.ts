@@ -298,6 +298,17 @@ export function isDue(row: ConceptProgressRow, nowMs = Date.now()): boolean {
   return row.fsrs_due <= nowMs;
 }
 
+/** Days of stability a Review card needs to count as mastered. */
+export const MASTERED_STABILITY_DAYS = 21;
+
+/** A mastered card: in Review and stable for 21+ days (retrievability alone is near 1 right after any review). */
+export function isMastered(row: ConceptProgressRow): boolean {
+  return (
+    normalizeState(row.fsrs_state) === State.Review &&
+    (row.fsrs_stability ?? 0) >= MASTERED_STABILITY_DAYS
+  );
+}
+
 /**
  * Returns the retrievability (probability of recall) for a concept.
  * This is informational only — it must NOT be used as a scheduling trigger.
