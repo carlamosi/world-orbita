@@ -33,9 +33,23 @@ export function FeedbackBar({
   flag,
 }: Props) {
   const miss = state !== "correct";
+  const label = state === "correct" ? "Nailed it" : state === "wrong" ? "Not quite" : "Revealed";
+  const answer = (
+    <>
+      {miss && chosen !== undefined && (chosen ? `You chose ${chosen} · Answer: ` : "Answer: ")}
+      {title}
+    </>
+  );
   return (
-    // Always mounted so screen readers announce the result and the answer.
-    <div role="status" aria-live="polite">
+    <div>
+      {/* Always mounted and text only, so screen readers announce the result and the answer, not the buttons. */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {show && (
+          <>
+            {label}. {answer}. {subtitle}
+          </>
+        )}
+      </div>
       <AnimatePresence mode="wait">
         {show && (
           <motion.div
@@ -55,22 +69,19 @@ export function FeedbackBar({
                   : "border-white/10 shadow-[0_8px_32px_-4px_rgba(0,0,0,0.36)]"
               }`}
             >
-              <div className="text-left min-w-0 flex-1">
+              <div className="text-left min-w-0 flex-1" aria-hidden="true">
                 <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/45">
-                  {state === "correct" ? "Nailed it" : state === "wrong" ? "Not quite" : "Revealed"}
+                  {label}
                 </div>
                 <div className="font-display text-lg text-white flex items-center gap-2">
                   {flag}
-                  <span className="min-w-0">
-                    {miss && chosen !== undefined && (chosen ? `You chose ${chosen} · Answer: ` : "Answer: ")}
-                    {title}
-                  </span>
+                  <span className="min-w-0">{answer}</span>
                 </div>
                 {subtitle && <div className="text-[12px] text-white/55">{subtitle}</div>}
               </div>
               {!hideNext && (
                 // Focus after a miss so Enter/Space continue without the mouse.
-                <Button size="sm" onClick={onNext} autoFocus={miss}>
+                <Button size="sm" onClick={onNext} autoFocus={miss} data-feedback-next="">
                   Next →
                 </Button>
               )}

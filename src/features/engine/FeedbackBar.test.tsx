@@ -72,6 +72,33 @@ describe("feedback after an answer (Task 21)", () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
+  it("Enter on another focused control runs that control, not next", () => {
+    render("wrong");
+    const other = document.createElement("button");
+    const onKey = vi.fn();
+    other.addEventListener("keydown", (e) => onKey(e.defaultPrevented));
+    document.body.appendChild(other);
+    other.focus();
+    key("Enter");
+    expect(next).not.toHaveBeenCalled();
+    expect(onKey).toHaveBeenCalledWith(false);
+    other.remove();
+  });
+
+  it("Enter with focus on the page body advances once", () => {
+    render("wrong");
+    (document.activeElement as HTMLElement | null)?.blur();
+    key("Enter");
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("the status region announces the result, not the buttons", () => {
+    render("wrong");
+    const region = host.querySelector('[role="status"][aria-live="polite"]')!;
+    expect(region.textContent).toContain("Not quite");
+    expect(region.textContent).not.toContain("Next");
+  });
+
   it("a correct answer still auto-advances", () => {
     render("correct");
     act(() => vi.advanceTimersByTime(1_500));
@@ -93,6 +120,10 @@ describe("feedback after an answer (Task 21)", () => {
 describe("feedbackContext", () => {
   it("a country without borders gives only its subregion", () => {
     expect(feedbackContext(COUNTRY_BY_ISO3.get("ATG")!)).toBe("Caribbean");
+  });
+
+  it("an empty subregion leaves no leading separator", () => {
+    expect(feedbackContext({ ...IRAQ, subregion: "" })).toBe("Neighbours: Iran, Jordan, Kuwait");
   });
 
   it("a Spanish province names its autonomous community", () => {

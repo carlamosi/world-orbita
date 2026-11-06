@@ -45,8 +45,9 @@ export function useAutoAdvance({
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Enter" && e.key !== " ") return;
       if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      // Any other focused control (Skip, links, menus) keeps its own Enter/Space.
       const active = document.activeElement as HTMLElement | null;
-      if (active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable)) return;
+      if (active && active !== document.body && !active.hasAttribute("data-feedback-next")) return;
       if (document.querySelector('[role="dialog"][data-state="open"]')) return;
       // Also cancels the focused Next button's native click, so one key = one next().
       e.preventDefault();
