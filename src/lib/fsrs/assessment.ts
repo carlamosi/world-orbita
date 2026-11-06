@@ -112,12 +112,10 @@ function categorizeSpeed(
  * Evaluates a question attempt and returns a structured assessment.
  *
  * FSRS grading is conservative: only the primary correctness signal matters.
- *   - correct   → "correct"   → Rating.Good
- *   - incorrect → "incorrect" → Rating.Again
- *   - soft-correct (near-miss) → "ambiguous" → Rating.Hard
- *
- * Response time, hints, and attempt count are behavioral signals ONLY.
- * They do NOT adjust FSRS intervals.
+ *   - correct   → Good
+ *   - incorrect → Again
+ *   - soft-correct (typo), hints, or a very slow answer → Hard
+ * Easy is never produced here. Speed only ever downgrades (very slow → Hard).
  */
 export function assess(attempt: QuestionAttempt): AssessmentResult {
   const { validationResult, responseMs, attemptNumber, hintsUsed, questionType, retrievalMode } = attempt;
@@ -134,11 +132,9 @@ export function assess(attempt: QuestionAttempt): AssessmentResult {
   } else if (validationResult.softCorrect || hintsUsed > 0 || speed === "very_slow") {
     // Functionally correct but not exact — partial recall, or severe hesitation (>15s), or assisted
     outcome = "hard";
-  } else if (speed === "very_fast") {
-    // Clean correct answer, instant recall
-    outcome = "easy";
   } else {
-    // Clean correct answer, normal recall (including normal thinking/typing speed)
+    // Clean correct answer. Never Easy from auto-grading: speed is not proof of
+    // mastery, and Easy on a first exposure jumped S to ~8 days (Ruling 4).
     outcome = "good";
   }
 

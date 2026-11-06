@@ -533,4 +533,72 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
       "new_cards_2026-11-05_world:location:find",
     );
   });
+
+  describe("honest grades and guards (Task 17)", () => {
+    const first = () => SPAIN_PROVINCES[0]!;
+
+    it("submit does not freeze when FSRS processing throws", async () => {
+      const err = vi.spyOn(console, "error").mockImplementation(() => {});
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      // A row whose fields blow up when read, standing in for any FSRS failure.
+      const bad = { ...store.getState().pairs[0]!.concept };
+      Object.defineProperty(bad, "fsrs_stability", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+      store.setState({
+        pairs: store.getState().pairs.map((x, i) => (i === 0 ? { ...x, concept: bad } : x)),
+      });
+      expect(() => store.getState().submit(true)).not.toThrow();
+      expect(store.getState().answerState).toBe("correct");
+      expect(err).toHaveBeenCalled();
+      err.mockRestore();
+    });
+
+    it("Practice anyway skips Learning cards that are not due yet", async () => {
+      meta.set(todayKey(), String(MAX_NEW_PER_DAY));
+      const now = Date.now();
+      const [p1, p2] = SPAIN_PROVINCES;
+      rows.push({
+        ...row(findId(p1!.id), p1!.id, 3),
+        fsrs_state: State.Learning as never,
+        fsrs_due: now + 5 * 60_000,
+      } as ConceptProgressRow);
+      rows.push(row(findId(p2!.id), p2!.id, 3)); // Review, not due: allowed
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      await store.getState().startPractice();
+      expect(store.getState().queue.map((e) => e.id)).toEqual([p2!.id]);
+    });
+
+    it("a double next() does not skip a question", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      store.getState().submit(true);
+      store.getState().next();
+      store.getState().next();
+      expect(store.getState().index).toBe(1);
+    });
+
+    it("next({ allowIdle: true }) still skips an unanswered question", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      store.getState().next({ allowIdle: true });
+      expect(store.getState().index).toBe(1);
+    });
+
+    it("a fuzzy-accepted answer is graded Hard, an exact one Good", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      store.getState().submit(true, { retrievalMode: "hard", softCorrect: true });
+      const soft = store.getState().conceptQueue[0]!;
+      const hardStab = soft.fsrs_stability!;
+      const store2 = provinceStore();
+      await store2.getState().start({ subMode: "find" });
+      store2.getState().submit(true, { retrievalMode: "hard" });
+      expect(store2.getState().conceptQueue[0]!.fsrs_stability!).toBeGreaterThan(hardStab);
+    });
+  });
 });

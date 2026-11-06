@@ -321,7 +321,7 @@ describe("assess — behavioral signal separation", () => {
     expect(result.outcome).toBe("good");
   });
 
-  it("correct (instant speed) → outcome 'easy'", () => {
+  it("correct (instant speed) → outcome 'good', never 'easy'", () => {
     const result = assess({
       validationResult: { correct: true, softCorrect: false },
       responseMs: 2000, // 2000 is veryFast for capital
@@ -329,7 +329,33 @@ describe("assess — behavioral signal separation", () => {
       hintsUsed: 0,
       questionType: "capital",
     });
-    expect(result.outcome).toBe("easy");
+    expect(result.outcome).toBe("good");
+  });
+
+  it("fuzzy-accepted typo (softCorrect) at instant speed → 'hard'", () => {
+    const result = assess({
+      validationResult: { correct: true, softCorrect: true },
+      responseMs: 1000,
+      attemptNumber: 1,
+      hintsUsed: 0,
+      questionType: "capital",
+      retrievalMode: "hard",
+    });
+    expect(result.outcome).toBe("hard");
+  });
+
+  it("a Review row with difficulty null is graded without throwing", () => {
+    const row = makeReviewRow({ fsrs_difficulty: null, fsrs_stability: null });
+    const card = rowToCard(row);
+    expect(card.difficulty).toBeGreaterThanOrEqual(1);
+    expect(card.stability).toBeGreaterThan(0);
+    expect(() => processReview(card, "good", Date.now())).not.toThrow();
+  });
+
+  it("keeps valid difficulty and stability untouched", () => {
+    const card = rowToCard(makeReviewRow({ fsrs_difficulty: 7.5, fsrs_stability: 12 }));
+    expect(card.difficulty).toBe(7.5);
+    expect(card.stability).toBe(12);
   });
 
   it("soft-correct → outcome 'hard' (near-miss)", () => {

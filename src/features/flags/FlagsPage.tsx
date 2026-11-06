@@ -142,7 +142,7 @@ export default function FlagsPage() {
                       <FlagToType
                         target={current}
                         answerState={s.answerState}
-                        onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                        onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
                       />
                     ) : null
                   )}
@@ -313,7 +313,7 @@ function FlagToType({
 }: {
   target: Country;
   answerState?: "idle" | "correct" | "wrong" | "revealed";
-  onSubmit: (ok: boolean) => void;
+  onSubmit: (ok: boolean, exact?: boolean) => void;
 }) {
   return (
     <div className="flex flex-col items-center gap-6 w-full">

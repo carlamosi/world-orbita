@@ -17,7 +17,11 @@
  * Grade policy (conservative / learning-science grounded):
  *   incorrect  → Rating.Again  (memory trace not recalled)
  *   correct    → Rating.Good   (memory trace successfully recalled)
- *   ambiguous  → Rating.Hard   (partial recall: soft-correct / near-miss)
+ *   ambiguous  → Rating.Hard   (partial recall: typo, hints, very slow)
+ *   Easy is never produced by automatic grading (see assessment.ts).
+ *
+ * The history row's `grade` is Rating - 1 (0 Again, 1 Hard, 2 Good, 3 Easy);
+ * it is not a Rating value, so do not feed it back into ts-fsrs.
  *
  * Easy vs Hard mode differences influence ORBITA's question-selection policy
  * (see planner.ts ModeSelectionPolicy) but NEVER alter the FSRS interval.
@@ -46,7 +50,7 @@ let _fsrsInstance = fsrs({
   enable_short_term: true,
   // Add slight fuzz to long intervals to prevent card bunching
   enable_fuzz: true,
-  // Cap at 5 years — prevents rare edge-case stability runaway
+  // Cap at 100 years (36500 days) — prevents rare edge-case stability runaway
   maximum_interval: 36500,
 });
 
@@ -120,16 +124,17 @@ export function rowToCard(row: ConceptProgressRow): Card {
   card.due = new Date(row.fsrs_due || Date.now());
   card.stability = row.fsrs_stability ?? 0;
   card.difficulty = row.fsrs_difficulty ?? 0;
+  if (card.state !== State.New) {
+    // ts-fsrs throws "Invalid memory state" for d < 1 or s < 0.001 outside New.
+    // Only repair invalid values; valid ones stay as stored.
+    if (!(card.difficulty >= 1)) card.difficulty = 5;
+    if (!(card.stability > 0)) card.stability = card.state === State.Review ? 1 : 0.1;
+  }
   card.reps = row.fsrs_reps ?? 0;
   card.lapses = row.fsrs_lapses ?? 0;
   card.elapsed_days = row.fsrs_elapsed_days ?? 0;
   card.scheduled_days = row.fsrs_scheduled_days ?? 0;
   card.learning_steps = learningStepsOf(row, card.state);
-
-  // Defensive fallback: if a card is marked as Review but has 0/null stability, reset to minimal viable stability
-  if (card.state === State.Review && (!card.stability || card.stability <= 0)) {
-    card.stability = 1;
-  }
 
   if (row.fsrs_last_review && row.fsrs_last_review > 0) {
     card.last_review = new Date(row.fsrs_last_review);

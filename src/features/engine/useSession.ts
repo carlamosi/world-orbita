@@ -177,9 +177,11 @@ export interface SessionState<TItem = Country> {
    * last planner start's filters, lowest retrievability first.
    */
   startPractice(): Promise<void>;
-  submit(isCorrect: boolean, opts?: { retrievalMode?: "easy" | "hard" }): void;
+  /** `softCorrect`: accepted only through the fuzzy matcher (typo), graded Hard. */
+  submit(isCorrect: boolean, opts?: { retrievalMode?: "easy" | "hard"; softCorrect?: boolean }): void;
   reveal(): void;
-  next(): void;
+  /** `allowIdle`: advance past an unanswered question (the "no capital, Skip" path). */
+  next(opts?: { allowIdle?: boolean }): void;
 }
 
 export interface CreateOpts<TItem = Country> {
@@ -527,6 +529,11 @@ export function createSessionStore<TItem = Country>({
       const now = Date.now();
       const seen = filterPool(allConcepts, lastPlannerOpts)
         .filter(isSeen)
+        // Early review would graduate a Learning/Relearning card without its 1m/10m step.
+        .filter((c) => {
+          const st = normalizeState(c.fsrs_state);
+          return !((st === State.Learning || st === State.Relearning) && c.fsrs_due > now);
+        })
         .map((c) => ({ c, r: safeRetrievability(c, now) }))
         .sort((a, b) => a.r - b.r || a.c.fsrs_due - b.c.fsrs_due)
         .slice(0, questions)
@@ -675,7 +682,7 @@ export function createSessionStore<TItem = Country>({
         const actualDirection = parts.length >= 3 ? parts[parts.length - 1]! : `${conceptSkill}->answer`;
 
         const assessment = assess({
-          validationResult: { correct: isCorrect, softCorrect: false },
+          validationResult: { correct: isCorrect, softCorrect: submitOpts?.softCorrect === true },
           responseMs,
           attemptNumber: 1,
           hintsUsed: 0,
@@ -685,31 +692,41 @@ export function createSessionStore<TItem = Country>({
         });
 
         const wasNew = normalizeState(effectiveConcept.fsrs_state) === State.New;
-        const currentCard = rowToCard(effectiveConcept);
-        const { card: nextCard, log: fsrsLog } = processReview(
-          currentCard,
-          assessment.outcome,
-          now,
-        );
+        try {
+          const currentCard = rowToCard(effectiveConcept);
+          const { card: nextCard, log: fsrsLog } = processReview(
+            currentCard,
+            assessment.outcome,
+            now,
+          );
 
-        const updatedProgressRow: ConceptProgressRow = {
-          ...effectiveConcept,
-          ...cardToRowUpdates(nextCard, 1, true, effectiveConcept.version),
-        };
+          const updatedProgressRow: ConceptProgressRow = {
+            ...effectiveConcept,
+            ...cardToRowUpdates(nextCard, 1, true, effectiveConcept.version),
+          };
 
-        // Persist async — idempotent via op_id
-        recordConceptAttempt(updatedProgressRow, {
-          op_id: crypto.randomUUID(),
-          conceptId: effectiveConcept.conceptId,
-          sessionId: "session-" + s.startedAt,
-          grade: assessment.outcome === "again" ? 0 : assessment.outcome === "hard" ? 1 : assessment.outcome === "good" ? 2 : 3,
-          mode: assessment.retrievalMode,
-          direction: assessment.direction,
-          fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
-          responseMs,
-          correct: isCorrect,
-          answeredAt: now,
-        }).catch(console.error);
+          // Persist async — idempotent via op_id
+          recordConceptAttempt(updatedProgressRow, {
+            op_id: crypto.randomUUID(),
+            conceptId: effectiveConcept.conceptId,
+            sessionId: "session-" + s.startedAt,
+            grade: assessment.outcome === "again" ? 0 : assessment.outcome === "hard" ? 1 : assessment.outcome === "good" ? 2 : 3,
+            mode: assessment.retrievalMode,
+            direction: assessment.direction,
+            fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
+            responseMs,
+            correct: isCorrect,
+            answeredAt: now,
+          }).catch(console.error);
+
+          // Optimistic row update at the current index position
+          const basePairs = [...s.pairs];
+          basePairs[s.index] = { ...pair, concept: updatedProgressRow };
+          Object.assign(updates, fromPairs(basePairs));
+        } catch (err) {
+          // A bad row must not freeze the session: log it and let the UI advance.
+          console.error("FSRS processing failed; answer not graded", err);
+        }
 
         // First grade of a new concept in a planner session uses up one of today's new cards.
         // The bucket comes from the graded concept's own id, so mixed-subMode seeds
@@ -723,11 +740,6 @@ export function createSessionStore<TItem = Country>({
         const nextFsrsUpdatedIds = new Set(s.fsrsUpdatedIds);
         nextFsrsUpdatedIds.add(effectiveConcept.conceptId);
         updates.fsrsUpdatedIds = nextFsrsUpdatedIds;
-
-        // Optimistic row update at the current index position
-        const basePairs = [...s.pairs];
-        basePairs[s.index] = { ...pair, concept: updatedProgressRow };
-        Object.assign(updates, fromPairs(basePairs));
       }
 
       // 3. Desirable-difficulty re-queue for incorrect answers.
@@ -786,8 +798,10 @@ export function createSessionStore<TItem = Country>({
       set({ answerState: "revealed" });
     },
 
-    next() {
+    next(nextOpts) {
       const s = get();
+      // A late auto-advance timer or double click must not skip an unanswered question.
+      if (s.endedAt !== null || (s.answerState === "idle" && !nextOpts?.allowIdle)) return;
       const nextIndex = s.index + 1;
       if (nextIndex >= s.queue.length) {
         const endedAt = Date.now();

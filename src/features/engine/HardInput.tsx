@@ -16,7 +16,8 @@ interface Props {
   matchTarget?: string;
   correctAnswer?: string;
   answerState?: "idle" | "correct" | "wrong" | "revealed";
-  onSubmit: (ok: boolean) => void;
+  /** `exact` is false when Enter accepted a typo through the fuzzy matcher. */
+  onSubmit: (ok: boolean, exact?: boolean) => void;
   placeholder?: string;
 }
 
@@ -82,13 +83,13 @@ export function HardInput({
             if (isAnswered) return;
             const v = e.target.value;
             setVal(v);
-            if (exactMatch(v, expectedText)) onSubmit(true);
+            if (exactMatch(v, expectedText)) onSubmit(true, true);
           }}
           onKeyDown={(e) => {
             if (isAnswered) return;
             if (e.key === "Enter") {
               e.preventDefault();
-              if (val.trim()) onSubmit(fuzzyMatch(val, expectedText));
+              if (val.trim()) onSubmit(fuzzyMatch(val, expectedText), exactMatch(val, expectedText));
             }
           }}
           placeholder={placeholder}

@@ -194,7 +194,7 @@ export default function CapitalsPage() {
                   matchTarget={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
                   correctAnswer={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
                   answerState={s.answerState}
-                  onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                  onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
                   placeholder={activeSub === "countryToCap" ? "Type the capital…" : "Type the country…"}
                 />
               </div>
@@ -220,7 +220,7 @@ export default function CapitalsPage() {
         <div className="mt-20 flex flex-col items-center">
           <Badge tone="muted">No capital on file — skipping</Badge>
           <div className="mt-4">
-            <Button size="sm" onClick={() => s.next()}>
+            <Button size="sm" onClick={() => s.next({ allowIdle: true })}>
               Skip
             </Button>
           </div>
