@@ -5,8 +5,12 @@
  * re-reads up to 15 s of rows (see cursor.ts), so applying the same row twice
  * must leave Dexie unchanged. All server dates are epoch ms numbers.
  */
-import { db } from "@/lib/db/orbita-db";
-import type { ConceptProgressRow, DailySummaryRow, QuestionHistoryRow } from "@/lib/db/orbita-db";
+import type {
+  OrbitaDB,
+  ConceptProgressRow,
+  DailySummaryRow,
+  QuestionHistoryRow,
+} from "@/lib/db/orbita-db";
 import { normalizeState } from "@/lib/fsrs/adapter";
 
 type Row = Record<string, unknown>;
@@ -91,8 +95,8 @@ function serverHistoryToRow(row: Row): QuestionHistoryRow {
   };
 }
 
-async function applyCountry(row: Row) {
-  await db().countryProgress.put({
+async function applyCountry(d: OrbitaDB, row: Row) {
+  await d.countryProgress.put({
     iso3: String(row.country_code),
     skills: (row.skills ?? {}) as never,
     skill_versions: (row.skill_versions ?? {}) as never,
@@ -104,6 +108,7 @@ async function applyCountry(row: Row) {
 
 /** Apply one pull page for one entity. Per-row failures are swallowed. */
 export async function applyPulledRows(
+  d: OrbitaDB,
   entity: string,
   rows: Row[],
   userId: string | null,
@@ -111,29 +116,29 @@ export async function applyPulledRows(
   for (const row of rows) {
     try {
       if (entity === "country_progress") {
-        await applyCountry(row);
+        await applyCountry(d, row);
       } else if (entity === "unlocks") {
-        await db().unlocks.put({
+        await d.unlocks.put({
           key: String(row.key),
           progress: num(row.progress),
           unlockedAt: row.unlocked_at != null ? num(row.unlocked_at) : null,
           updatedAt: Date.now(),
         });
       } else if (entity === "concept_progress") {
-        const local = await db().concept_progress.get(String(row.conceptId));
+        const local = await d.concept_progress.get(String(row.conceptId));
         if (shouldApplyPulledConcept(local, row)) {
-          await db().concept_progress.put(serverConceptToRow(row, userId));
+          await d.concept_progress.put(serverConceptToRow(row, userId));
         }
       } else if (entity === "question_history") {
         // Append-only and keyed by op_id: keep an existing local row as-is.
         const id = String(row.op_id);
-        if (!(await db().question_history.get(id))) {
-          await db().question_history.put(serverHistoryToRow(row));
+        if (!(await d.question_history.get(id))) {
+          await d.question_history.put(serverHistoryToRow(row));
         }
       } else if (entity === "daily_summary") {
         const key = String(row.dateKey);
-        const local = await db().daily_summary.get(key);
-        await db().daily_summary.put(mergeDailySummary(local, row));
+        const local = await d.daily_summary.get(key);
+        await d.daily_summary.put(mergeDailySummary(local, row));
       }
       // sessions_log / challenge_attempts / daily_streak / profiles are not
       // mirrored to Dexie (local is authoritative); their cursors still advance.
@@ -145,20 +150,21 @@ export async function applyPulledRows(
 
 /** Apply a sync_push canonical entry (best-effort). */
 export async function applyCanonical(
+  d: OrbitaDB,
   entity: string,
   row: Row | undefined,
   userId: string | null,
 ): Promise<void> {
   if (!row) return;
   try {
-    if (entity === "country_progress") await applyCountry(row);
+    if (entity === "country_progress") await applyCountry(d, row);
     else if (entity === "concept_progress") {
       // Same rule as the pull: a stale_review canonical can be older than the
       // local row (e.g. a resent op after a lost response while the user kept
       // answering), so never roll back a newer local review.
-      const local = await db().concept_progress.get(String(row.conceptId));
+      const local = await d.concept_progress.get(String(row.conceptId));
       if (shouldApplyPulledConcept(local, row)) {
-        await db().concept_progress.put(serverConceptToRow(row, userId));
+        await d.concept_progress.put(serverConceptToRow(row, userId));
       }
     }
   } catch {

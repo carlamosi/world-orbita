@@ -5,11 +5,12 @@ import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createOrbitaDb, type OutboxRow } from "@/lib/db/orbita-db";
 import { swap, currentDbName, getCurrent, onSwap, SWAP_WAIT_MS } from "@/lib/db/dbProvider";
-import type { Mutation, PushResult } from "./types";
+import type { Mutation, PullResult, PushResult } from "./types";
 
 let pushReply: (m: Mutation[]) => Promise<PushResult>;
+let pullReply: () => Promise<PullResult> = async () => ({}) as PullResult;
 vi.mock("./sync.functions", () => ({
-  syncPull: vi.fn(async () => ({})),
+  syncPull: vi.fn(async () => pullReply()),
   syncPush: vi.fn(async (a: { data: { mutations: Mutation[] } }) => pushReply(a.data.mutations)),
 }));
 const getUser = vi.hoisted(() => vi.fn(async () => ({ data: { user: { id: "u" } }, error: null })));
@@ -17,7 +18,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { auth: { getUser, signOut: vi.fn(async () => ({ error: null })) } },
 }));
 
-import { runPushOnce } from "./workers";
+import { runPullOnce, runPushOnce } from "./workers";
 import { useSyncStore } from "./useSyncStore";
 
 const T = Date.UTC(2026, 10, 6, 10, 0, 0);
@@ -134,6 +135,93 @@ describe("db binding", () => {
       vi.useRealTimers();
       a.close();
     }
+  });
+
+  // Switch the provider to B while the cycle is applying a large reply to A:
+  // fire the swap timeout once the first row has landed in A.
+  async function switchMidApply(rowsInA: () => Promise<number>, release: () => void) {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const uidB = crypto.randomUUID();
+      const swapped = swap(uidB);
+      await vi.advanceTimersByTimeAsync(SWAP_WAIT_MS - 1);
+      release();
+      while ((await rowsInA()) === 0) await new Promise((r) => setImmediate(r));
+      await vi.advanceTimersByTimeAsync(1);
+      return await swapped;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("a timed-out pull's late rows stay out of the new DB", async () => {
+    const a = createOrbitaDb(currentDbName());
+    const rows = Array.from({ length: 300 }, (_, i) => ({
+      key: `k${i}`,
+      progress: 1,
+      unlocked_at: T,
+      updated_at: T,
+    }));
+    let release!: () => void;
+    const reached = new Promise<void>((sent) => {
+      pullReply = () => {
+        sent();
+        return new Promise((r) => {
+          release = () => r({ unlocks: { rows, cursor: `${T}|k`, has_more: false } } as PullResult);
+        });
+      };
+    });
+    const pull = runPullOnce();
+    await reached;
+    const b = await switchMidApply(
+      () => a.unlocks.count(),
+      () => release(),
+    );
+    await pull;
+    expect(await b.unlocks.count()).toBe(0);
+    expect(await b.sync_meta.count()).toBe(0);
+    a.close();
+  });
+
+  it("a timed-out push's late canonical rows stay out of the new DB", async () => {
+    const a = createOrbitaDb(currentDbName());
+    await a.outbox.add(outbox(crypto.randomUUID()));
+    const canonical = Array.from({ length: 300 }, (_, i) => ({
+      entity: "concept_progress" as const,
+      op_id: crypto.randomUUID(),
+      payload: {
+        conceptId: `C${i}:capital:countryToCap`,
+        iso3: "FRA",
+        skill: "capital",
+        fsrs_state: 1,
+        fsrs_stability: 2,
+        fsrs_difficulty: 5,
+        fsrs_due: T,
+        fsrs_reps: 1,
+        fsrs_lapses: 0,
+        fsrs_last_review: T,
+        version: 1,
+        updated_at: T,
+      },
+    }));
+    let release!: () => void;
+    const reached = new Promise<void>((sent) => {
+      pushReply = (m) => {
+        sent();
+        return new Promise((r) => {
+          release = () => r({ accepted: m.map((x) => x.op_id), rejected: [], canonical });
+        });
+      };
+    });
+    const push = runPushOnce();
+    await reached;
+    // The canonical loop starts only after the outbox row is deleted.
+    const applied = async () =>
+      (await a.outbox.count()) === 0 ? Math.max(1, await a.concept_progress.count()) : 0;
+    const b = await switchMidApply(applied, () => release());
+    await push;
+    expect(await b.concept_progress.count()).toBe(0);
+    a.close();
   });
 
   it("concurrent swaps to the same DB share one switch", async () => {

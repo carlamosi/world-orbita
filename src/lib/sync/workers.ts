@@ -228,11 +228,10 @@ async function pushBatch(d: OrbitaDB, name: string, due: OutboxRow[]) {
       }
     }
     // Canonical rows: country_progress after every accept, concept_progress on stale_review.
-    // apply.ts writes through db(), which is d here: swap() waits for tracked cycles.
     const uid = activeUserId(name);
     for (const c of canonical) {
       if (moved(name)) return;
-      await applyCanonical(String(c.entity), c.payload, uid);
+      await applyCanonical(d, String(c.entity), c.payload, uid);
     }
     useSyncStore.getState().setLastPush(Date.now());
     useSyncStore.getState().setError(null);
@@ -375,8 +374,7 @@ async function pullCycle(opts: { limit?: number }) {
       for (const [entity, payload] of Object.entries(result ?? {})) {
         if (!payload) continue;
         if (moved(name)) return;
-        // apply.ts writes through db(), which is d here: swap() waits for tracked cycles.
-        await applyPulledRows(entity, payload.rows ?? [], uid);
+        await applyPulledRows(d, entity, payload.rows ?? [], uid);
         if (moved(name)) return;
         const server = payload.cursor ?? null;
         next[entity] = server ?? send[entity] ?? null;
