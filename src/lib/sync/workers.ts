@@ -6,8 +6,11 @@ import { db } from "@/lib/db/orbita-db";
 import { currentDbName } from "@/lib/db/dbProvider";
 import { syncPush, syncPull } from "./sync.functions";
 import { useSyncStore } from "./useSyncStore";
-import type { Mutation, SyncEntity } from "./types";
-import { normalizeState } from "@/lib/fsrs/adapter";
+import { PERMANENT_REJECT_REASONS, type Mutation, type SyncEntity } from "./types";
+import type { OutboxRow } from "@/lib/db/orbita-db";
+import { isValidOpId } from "./opId";
+import { applyCanonical, applyPulledRows } from "./apply";
+import { cursorToStore, overlapCursor } from "./cursor";
 
 /** Derive the Supabase user_id from the active Dexie DB name. Returns null for guest DB. */
 function activeUserId(): string | null {
@@ -58,22 +61,175 @@ async function recoverInFlight() {
   }
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
- * Delete any outbox items whose op_id is not a valid UUID.
- * The sync_push RPC casts op_id with ::uuid — any non-UUID string throws
- * "invalid input syntax for type uuid" and gets permanently rejected.
- * Old versions of the code appended ":cp" to UUIDs for concept_progress items,
- * producing malformed op_ids that can never succeed.
+ * Mark outbox items whose op_id is not a UUID as dead. sync_push rejects them
+ * with invalid_op_id, so they can never succeed (old builds appended ":cp").
+ * They stay visible as dead letters instead of being silently dropped.
  */
 async function purgeBrokenOpIds() {
   try {
     await db()
-      .outbox.filter((r) => !UUID_RE.test(r.op_id))
-      .delete();
+      .outbox.filter((r) => r.status !== "dead" && !isValidOpId(r.op_id))
+      .modify({ status: "dead", last_error: "invalid_op_id" } as Partial<OutboxRow>);
   } catch {
     // ignore — non-critical
+  }
+}
+
+/** A user_id foreign-key failure means auth.users no longer has this user. */
+function isOrphanedSessionError(msg: string): boolean {
+  return /violates foreign key constraint/i.test(msg) && /_user_id_fkey|auth\.users/i.test(msg);
+}
+
+/** The server-function auth middleware rejected the token (e.g. deleted user). */
+function isAuthRejection(e: unknown): boolean {
+  const status = (e as { statusCode?: number; status?: number } | null)?.statusCode ??
+    (e as { status?: number } | null)?.status;
+  const msg = e instanceof Error ? e.message : "";
+  return status === 401 || /unauthorized/i.test(msg);
+}
+
+let signingOut = false;
+let checkingSession = false;
+
+/**
+ * Auth failure: never spend attempts. Ask GoTrue once whether the session is
+ * still valid; if the user is gone (or the session cannot be refreshed), sign
+ * out. If it is valid, it was a transient hiccup: just back off.
+ */
+async function handleAuthRejection(due: OutboxRow[], msg: string) {
+  await db()
+    .outbox.where("id")
+    .anyOf(due.map((d) => d.id!))
+    .modify({ status: "pending", next_attempt_at: backoff(3) } as Partial<OutboxRow>);
+  useSyncStore.getState().setError(msg);
+  await verifySessionOrSignOut();
+}
+
+async function verifySessionOrSignOut() {
+  if (checkingSession || signingOut) return;
+  checkingSession = true;
+  try {
+    const { supabase } = await import("@/integrations/supabase/client");
+    let gone = false;
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      gone = !!error || !data?.user;
+    } catch {
+      gone = true;
+    }
+    if (!gone) return;
+    signingOut = true;
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn("[sync] signOut after auth rejection failed:", err);
+    } finally {
+      signingOut = false;
+    }
+  } catch (err) {
+    console.warn("[sync] session check failed:", err);
+  } finally {
+    checkingSession = false;
+  }
+}
+
+/**
+ * The account was deleted (e.g. by the v2 reset) but this browser still holds
+ * its JWT. Retrying only burns attempts: keep every row pending, sign out once.
+ */
+async function handleOrphanedSession(due: OutboxRow[], msg: string) {
+  await db()
+    .outbox.where("id")
+    .anyOf(due.map((d) => d.id!))
+    .modify({ status: "pending" });
+  useSyncStore.getState().setError(msg);
+  if (signingOut) return;
+  signingOut = true;
+  try {
+    const { supabase } = await import("@/integrations/supabase/client");
+    await supabase.auth.signOut();
+  } catch (err) {
+    console.warn("[sync] signOut after orphaned session failed:", err);
+  } finally {
+    signingOut = false;
+  }
+}
+
+async function markRetry(r: OutboxRow, reason: string) {
+  const attempts = r.attempts + 1;
+  await db().outbox.update(r.id!, {
+    status: attempts >= MAX_ATTEMPTS ? "dead" : "pending",
+    attempts,
+    next_attempt_at: backoff(attempts),
+    last_error: reason,
+  } as Partial<OutboxRow>);
+}
+
+async function pushBatch(due: OutboxRow[]) {
+  const ids = due.map((d) => d.id!).filter((x) => x != null);
+  await db().outbox.where("id").anyOf(ids).modify({ status: "in_flight" });
+  const mutations: Mutation[] = due.map((r) => ({
+    op_id: r.op_id,
+    entity: r.entity,
+    op: r.op,
+    payload: r.payload,
+  }));
+  try {
+    const result = await syncPush({ data: { mutations } });
+    const accepted = Array.isArray(result?.accepted) ? result.accepted : [];
+    const rejected = Array.isArray(result?.rejected) ? result.rejected : [];
+    const canonical = Array.isArray(result?.canonical) ? result.canonical : [];
+    const orphaned = rejected.find((r) => isOrphanedSessionError(String(r.reason)));
+    if (orphaned) {
+      // sync_push reports the FK failure per item instead of raising.
+      await handleOrphanedSession(due, String(orphaned.reason));
+      return;
+    }
+    const acceptedSet = new Set(accepted);
+    const rejectedMap = new Map(rejected.map((r) => [r.op_id, String(r.reason)]));
+    for (const r of due) {
+      if (acceptedSet.has(r.op_id)) {
+        await db().outbox.delete(r.id!);
+      } else if (rejectedMap.has(r.op_id)) {
+        const reason = rejectedMap.get(r.op_id)!;
+        if (PERMANENT_REJECT_REASONS.includes(reason)) {
+          // Permanent: retrying the same payload can never succeed.
+          await db().outbox.update(r.id!, {
+            status: "dead",
+            attempts: r.attempts + 1,
+            last_error: reason,
+          } as Partial<OutboxRow>);
+        } else if (reason === "stale_review") {
+          // The server kept a newer review; its canonical row is applied below.
+          await db().outbox.delete(r.id!);
+        } else {
+          await markRetry(r, reason);
+        }
+      } else {
+        await db().outbox.update(r.id!, { status: "pending" } as Partial<OutboxRow>);
+      }
+    }
+    // Canonical rows: country_progress after every accept, concept_progress on stale_review.
+    const uid = activeUserId();
+    for (const c of canonical) {
+      await applyCanonical(String(c.entity), c.payload, uid);
+    }
+    useSyncStore.getState().setLastPush(Date.now());
+    useSyncStore.getState().setError(null);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "push failed";
+    if (isAuthRejection(e)) {
+      await handleAuthRejection(due, msg);
+      return;
+    }
+    if (isOrphanedSessionError(msg)) {
+      await handleOrphanedSession(due, msg);
+      return;
+    }
+    for (const r of due) await markRetry(r, msg);
+    useSyncStore.getState().setError(msg);
+    useSyncStore.getState().setStatus("error");
   }
 }
 
@@ -100,115 +256,20 @@ export async function runPushOnce() {
       return;
     }
     useSyncStore.getState().setStatus("syncing");
-    const ids = due.map((d) => d.id!).filter((x) => x != null);
-    await db().outbox.where("id").anyOf(ids).modify({ status: "in_flight" });
-    const mutations: Mutation[] = due.map((r) => ({
-      op_id: r.op_id,
-      entity: r.entity,
-      op: r.op,
-      payload: r.payload,
-    }));
-    try {
-      const result = await syncPush({ data: { mutations } });
-      const accepted = Array.isArray(result?.accepted) ? result.accepted : [];
-      const rejected = Array.isArray(result?.rejected) ? result.rejected : [];
-      const canonical = Array.isArray(result?.canonical) ? result.canonical : [];
-      const acceptedSet = new Set(accepted);
-      const rejectedMap = new Map(rejected.map((r) => [r.op_id, r.reason]));
-      // op_ids that were rejected but the server returned a canonical resolution
-      const canonicalOpIds = new Set(
-        canonical.map((c) => String((c as Record<string, unknown>).op_id))
-      );
-      for (const r of due) {
-        if (acceptedSet.has(r.op_id)) {
-          // Server accepted — remove from queue
-          await db().outbox.delete(r.id!);
-        } else if (rejectedMap.has(r.op_id)) {
-          if (canonicalOpIds.has(r.op_id)) {
-            // Server rejected but provided the authoritative canonical state.
-            // The canonical will be applied below, resolving the conflict.
-            // Delete the outbox item — retrying it would loop forever on the same
-            // version conflict since the payload version is already stale.
-            await db().outbox.delete(r.id!);
-          } else {
-            // Genuine rejection (e.g., validation error) — retry with backoff.
-            const reason = rejectedMap.get(r.op_id) ?? "rejected";
-            const attempts = r.attempts + 1;
-            if (attempts >= MAX_ATTEMPTS) {
-              await db().outbox.update(r.id!, {
-                status: "dead",
-                last_error: reason,
-                attempts,
-              } as Partial<typeof r>);
-            } else {
-              await db().outbox.update(r.id!, {
-                status: "pending",
-                attempts,
-                next_attempt_at: backoff(attempts),
-                last_error: reason,
-              } as Partial<typeof r>);
-            }
-          }
-        } else {
-          await db().outbox.update(r.id!, { status: "pending" } as Partial<typeof r>);
-        }
-      }
-      // apply canonical patches from server (conflict resolution)
-      for (const c of canonical) {
-        const row = (c as Record<string, unknown>).payload as Record<string, unknown> | undefined;
-        if (!row) continue;
-        try {
-          if (c.entity === "country_progress") {
-            const iso3 = String(row.country_code);
-            const skills = (row.skills ?? {}) as Record<string, unknown>;
-            const versions = (row.skill_versions ?? {}) as Record<string, number>;
-            const existing = await db().countryProgress.get(iso3);
-            await db().countryProgress.put({
-              iso3,
-              skills: skills as never,
-              skill_versions: versions as never,
-              lastSeenAt: existing?.lastSeenAt ?? Date.now(),
-              updated_at: Date.now(),
-              dirty: 0,
-            });
-          } else if (c.entity === "concept_progress") {
-            await db().concept_progress.put({
-              conceptId: String(row.conceptId),
-              iso3: String(row.iso3),
-              skill: String(row.skill),
-              user_id: activeUserId(),
-              fsrs_state: normalizeState(row.fsrs_state),
-              fsrs_stability: row.fsrs_stability != null ? Number(row.fsrs_stability) : null,
-              fsrs_difficulty: row.fsrs_difficulty != null ? Number(row.fsrs_difficulty) : null,
-              fsrs_due: Number(row.fsrs_due),
-              fsrs_reps: Number(row.fsrs_reps ?? 0),
-              fsrs_lapses: Number(row.fsrs_lapses ?? 0),
-              fsrs_last_review: Number(row.fsrs_last_review),
-              version: Number(row.version ?? 0),
-              updated_at: Number(row.updated_at ?? Date.now()),
-              dirty: 0,
-            });
-          }
-        } catch {
-          // ignore — canonical patches are best-effort
-        }
-      }
-      useSyncStore.getState().setLastPush(Date.now());
-      useSyncStore.getState().setError(null);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "push failed";
-      for (const r of due) {
-        const attempts = r.attempts + 1;
+    // Ruling 6d: a non-UUID op_id can never succeed; mark it dead locally and
+    // never send it, so it cannot fail the server-side validation of the batch.
+    const sendable: OutboxRow[] = [];
+    for (const r of due) {
+      if (isValidOpId(r.op_id)) sendable.push(r);
+      else {
         await db().outbox.update(r.id!, {
-          status: attempts >= MAX_ATTEMPTS ? "dead" : "pending",
-          attempts,
-          next_attempt_at: backoff(attempts),
-          last_error: msg,
-        } as Partial<typeof r>);
+          status: "dead",
+          attempts: r.attempts + 1,
+          last_error: "invalid_op_id",
+        } as Partial<OutboxRow>);
       }
-      useSyncStore.getState().setError(msg);
-      useSyncStore.getState().setStatus("error");
     }
+    if (sendable.length > 0) await pushBatch(sendable);
     await refreshQueued();
     const queued = useSyncStore.getState().queued;
     if (useSyncStore.getState().status !== "error") {
@@ -240,103 +301,51 @@ async function getCursors(): Promise<Record<string, string | null>> {
   return out;
 }
 
-async function runPullOnce() {
+/** Safety cap on has_more pages within one pull cycle. */
+export const MAX_PULL_PAGES = 20;
+
+/**
+ * One pull cycle. Page 1 sends every stored cursor moved back by the overlap
+ * (cursor.ts); while any entity reports has_more, the next page sends the
+ * server cursors exactly as returned. Stored cursors never move backwards.
+ */
+export async function runPullOnce(opts: { limit?: number } = {}) {
   if (pulling) return;
   if (!useSyncStore.getState().signedIn) return;
   if (typeof navigator !== "undefined" && !navigator.onLine) return;
   pulling = true;
   try {
-    const cursors = await getCursors();
-    const result = await syncPull({ data: { cursors } });
-    for (const [entity, payload] of Object.entries(result ?? {})) {
-      if (!payload) continue;
-      const rows = payload.rows ?? [];
-      if (entity === "country_progress") {
-        for (const r of rows) {
-          const row = r as Record<string, unknown>;
-          const iso3 = String(row.country_code);
+    const stored = await getCursors();
+    const uid = activeUserId();
+    let send: Record<string, string | null> = {};
+    for (const k of CURSOR_KEYS) send[k] = overlapCursor(stored[k] ?? null);
+    for (let pageNo = 0; pageNo < MAX_PULL_PAGES; pageNo++) {
+      const result = await syncPull({ data: { cursors: send, limit: opts.limit } });
+      const next: Record<string, string | null> = { ...send };
+      let more = false;
+      for (const [entity, payload] of Object.entries(result ?? {})) {
+        if (!payload) continue;
+        await applyPulledRows(entity, payload.rows ?? [], uid);
+        const server = payload.cursor ?? null;
+        next[entity] = server ?? send[entity] ?? null;
+        const keep = cursorToStore(stored[entity] ?? null, server);
+        if (keep !== (stored[entity] ?? null)) {
+          stored[entity] = keep;
           await db()
-            .countryProgress.put({
-              iso3,
-              skills: (row.skills ?? {}) as never,
-              skill_versions: (row.skill_versions ?? {}) as never,
-              lastSeenAt: row.last_seen_at ? Date.parse(String(row.last_seen_at)) : Date.now(),
-              updated_at: Date.now(),
-              dirty: 0,
-            })
+            .sync_meta.put({ key: `cursor_${entity}`, value: keep as string })
             .catch(() => {});
         }
-      } else if (entity === "unlocks") {
-        for (const r of rows) {
-          const row = r as Record<string, unknown>;
-          await db()
-            .unlocks.put({
-              key: String(row.key),
-              progress: Number(row.progress ?? 0),
-              unlockedAt: row.unlocked_at ? Date.parse(String(row.unlocked_at)) : null,
-              updatedAt: Date.now(),
-            })
-            .catch(() => {});
-        }
-      } else if (entity === "concept_progress") {
-        const uid = activeUserId();
-        for (const r of rows) {
-          const row = r as Record<string, unknown>;
-          const conceptId = String(row.conceptId);
-          // Only apply if the server version is newer than local
-          const local = await db().concept_progress.get(conceptId).catch(() => undefined);
-          const serverVersion = Number(row.version ?? 0);
-          if (!local || serverVersion > (local.version ?? 0)) {
-            await db()
-              .concept_progress.put({
-                conceptId,
-                iso3: String(row.iso3),
-                skill: String(row.skill),
-                user_id: uid,
-                fsrs_state: normalizeState(row.fsrs_state),
-                fsrs_stability: row.fsrs_stability != null ? Number(row.fsrs_stability) : null,
-                fsrs_difficulty: row.fsrs_difficulty != null ? Number(row.fsrs_difficulty) : null,
-                fsrs_due: Number(row.fsrs_due),
-                fsrs_reps: Number(row.fsrs_reps ?? 0),
-                fsrs_lapses: Number(row.fsrs_lapses ?? 0),
-                fsrs_last_review: Number(row.fsrs_last_review),
-                version: serverVersion,
-                updated_at: Number(row.updated_at ?? Date.now()),
-                dirty: 0,
-              })
-              .catch(() => {});
-          }
-        }
-      } else if (entity === "daily_summary") {
-        for (const r of rows) {
-          const row = r as Record<string, unknown>;
-          const dateKey = String(row.dateKey);
-          const local = await db().daily_summary.get(dateKey).catch(() => undefined);
-          if (!local || (local.dirty !== 1)) {
-            await db()
-              .daily_summary.put({
-                dateKey,
-                reviewsCount: Number(row.reviewsCount ?? 0),
-                correctCount: Number(row.correctCount ?? 0),
-                timeSpentMs: Number(row.timeSpentMs ?? 0),
-                updated_at: Number(row.updated_at ?? Date.now()),
-                dirty: 0,
-              })
-              .catch(() => {});
-          }
-        }
+        if (payload.has_more === true) more = true;
       }
-      // sessions_log / challenge_attempts / daily_streak / profiles are append-only;
-      // we keep cursor advancing but do not mirror to Dexie (local is authoritative).
-      await db()
-        .sync_meta.put({ key: `cursor_${entity}`, value: payload.cursor })
-        .catch(() => {});
+      if (!more) break;
+      send = next;
     }
     useSyncStore.getState().setLastPull(Date.now());
     useSyncStore.getState().setError(null);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "pull failed";
     useSyncStore.getState().setError(msg);
+    if (isAuthRejection(e)) await verifySessionOrSignOut();
   } finally {
     pulling = false;
   }

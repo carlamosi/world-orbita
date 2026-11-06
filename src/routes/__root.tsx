@@ -17,6 +17,7 @@ import { Starfield } from "@/components/atmosphere/Starfield";
 import { Toaster } from "@/components/ui/sonner";
 import { authDebug } from "@/lib/auth/debug";
 import { ensureUserProfile } from "@/lib/auth/profile";
+import { runLocalStorageEpochReset } from "@/lib/db/schemaEpoch";
 import { SaveProgressNudge } from "@/components/ui/SaveProgressNudge";
 
 function NotFoundComponent() {
@@ -138,6 +139,11 @@ function RootShell({ children }: { children: ReactNode }) {
     </html>
   );
 }
+
+// One-time v2 cleanup of orbita* localStorage keys (synchronous, client only,
+// never throws). Local IndexedDB databases are reset per DB at open time, in
+// createOrbitaDb, so nothing here has to be awaited.
+if (typeof window !== "undefined") runLocalStorageEpochReset();
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();

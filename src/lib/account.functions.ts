@@ -1,26 +1,28 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
+interface RpcClient {
+  rpc: (fn: "delete_account") => PromiseLike<{ error: { message: string } | null }>;
+}
+
 /**
- * Permanently delete the signed-in user's account.
- *
- * 1. Calls `delete_account` RPC (RLS-scoped, removes app rows for auth.uid()).
- * 2. Loads supabaseAdmin INSIDE the handler (never at module scope, since
- *    this file ships in client-reachable route chunks) and deletes the auth user.
+ * The `delete_account` RPC (SECURITY DEFINER) removes the caller's app rows
+ * AND the auth.users row in one transaction. Do not also call
+ * auth.admin.deleteUser: the user is already gone and it would fail with
+ * "user not found" after a successful delete.
+ */
+export async function runDeleteAccount(supabase: RpcClient): Promise<{ ok: true }> {
+  const { error } = await supabase.rpc("delete_account");
+  if (error) throw new Error(error.message);
+  return { ok: true };
+}
+
+/**
+ * Permanently delete the signed-in user's account. The client must then call
+ * finishAccountDeletion (accountCleanup.ts) to sign out and wipe local data.
  */
 export const deleteAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<{ ok: true }> => {
-    const { error: rpcErr } = await context.supabase.rpc("delete_account");
-    if (rpcErr) throw new Error(rpcErr.message);
-
-    const { supabaseAdmin } = await import(
-      "@/integrations/supabase/client.server"
-    );
-    const { error: adminErr } = await supabaseAdmin.auth.admin.deleteUser(
-      context.userId,
-    );
-    if (adminErr) throw new Error(adminErr.message);
-
-    return { ok: true };
-  });
+  .handler(async ({ context }): Promise<{ ok: true }> =>
+    runDeleteAccount(context.supabase as unknown as RpcClient),
+  );

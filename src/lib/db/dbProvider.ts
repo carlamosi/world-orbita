@@ -86,6 +86,9 @@ async function mergeLocalIntoUserDb(local: OrbitaDB, target: OrbitaDB) {
   if (targetCount > 0 || targetFsrsCount > 0) return;
 
   const { getClientId, newOpId } = await import("@/lib/sync/clientId");
+  const { countryProgressPayload, unlockPayload, conceptProgressPayload } = await import(
+    "@/lib/sync/payloads"
+  );
   const cid = getClientId();
   const now = Date.now();
 
@@ -108,13 +111,7 @@ async function mergeLocalIntoUserDb(local: OrbitaDB, target: OrbitaDB) {
       op_id: newOpId(),
       entity: "country_progress" as const,
       op: "upsert" as const,
-      payload: {
-        country_code: r.iso3,
-        skills: r.skills,
-        skill_versions: r.skill_versions ?? {},
-        last_seen_at: new Date(r.lastSeenAt || now).toISOString(),
-        client_id: cid,
-      },
+      payload: { ...countryProgressPayload(r, now), client_id: cid },
       created_at: now,
       attempts: 0,
       next_attempt_at: now,
@@ -124,43 +121,29 @@ async function mergeLocalIntoUserDb(local: OrbitaDB, target: OrbitaDB) {
       op_id: newOpId(),
       entity: "unlocks" as const,
       op: "upsert" as const,
-      payload: {
-        key: u.key,
-        progress: u.progress,
-        unlocked_at: u.unlockedAt ? new Date(u.unlockedAt).toISOString() : null,
-        client_id: cid,
-      },
+      payload: { ...unlockPayload(u), client_id: cid },
       created_at: now,
       attempts: 0,
       next_attempt_at: now,
       status: "pending" as const,
     })),
-    // Queue FSRS concept_progress for cloud sync
-    ...concepts.map((c) => ({
-      op_id: newOpId(),
-      entity: "concept_progress" as const,
-      op: "upsert" as const,
-      payload: {
-        conceptId: c.conceptId,
-        iso3: c.iso3,
-        skill: c.skill,
-        fsrs_state: c.fsrs_state,
-        fsrs_stability: c.fsrs_stability,
-        fsrs_difficulty: c.fsrs_difficulty,
-        fsrs_due: c.fsrs_due,
-        fsrs_reps: c.fsrs_reps,
-        fsrs_lapses: c.fsrs_lapses,
-        fsrs_last_review: c.fsrs_last_review,
-        fsrs_elapsed_days: c.fsrs_elapsed_days ?? 0,
-        fsrs_scheduled_days: c.fsrs_scheduled_days ?? 0,
-        version: c.version,
-        updated_at: c.updated_at,
-      },
-      created_at: now,
-      attempts: 0,
-      next_attempt_at: now,
-      status: "pending" as const,
-    })),
+    // Queue FSRS concept_progress for cloud sync (never-reviewed rows are skipped).
+    ...concepts.flatMap((c) => {
+      const payload = conceptProgressPayload(c);
+      if (!payload) return [];
+      return [
+        {
+          op_id: newOpId(),
+          entity: "concept_progress" as const,
+          op: "upsert" as const,
+          payload: { ...payload, client_id: cid },
+          created_at: now,
+          attempts: 0,
+          next_attempt_at: now,
+          status: "pending" as const,
+        },
+      ];
+    }),
   ];
   if (rows.length) await target.outbox.bulkPut(rows).catch(() => {});
 }

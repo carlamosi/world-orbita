@@ -16,15 +16,33 @@ export interface Mutation {
   payload: Record<string, unknown>;
 }
 
+/**
+ * sync_push rejection reasons (v2). The first three are permanent: the outbox
+ * row goes dead at once. stale_review comes with a canonical row to apply.
+ * Any other string is an unexpected server error and is retried.
+ */
+export type PermanentRejectReason = "invalid_payload" | "invalid_op_id" | "unknown_entity";
+export type RejectReason = PermanentRejectReason | "stale_review" | (string & {});
+
+export const PERMANENT_REJECT_REASONS: readonly string[] = [
+  "invalid_payload",
+  "invalid_op_id",
+  "unknown_entity",
+];
+
 export interface PushResult {
   accepted: string[];
-  rejected: { op_id: string; reason: string }[];
+  /** op_id is the raw string sent, or null when the item was not an object. */
+  rejected: { op_id: string | null; reason: RejectReason }[];
   canonical: { entity: SyncEntity; op_id: string; payload: Record<string, unknown> }[];
 }
 
 export interface PullEntityResult {
   rows: Record<string, unknown>[];
-  cursor: string;
+  /** Opaque "<epoch_ms>|<pk>" cursor: store and resend as-is. */
+  cursor: string | null;
+  /** True when more rows remain: pull again in the same cycle. */
+  has_more: boolean;
 }
 
 export type PullResult = Partial<Record<SyncEntity, PullEntityResult>>;

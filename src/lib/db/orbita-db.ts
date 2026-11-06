@@ -1,6 +1,7 @@
 import Dexie, { type Table } from "dexie";
 import { ensureDb, getDbSync } from "./dbProvider";
 import { State } from "ts-fsrs";
+import { resetDbBeforeOpen } from "./schemaEpoch";
 // BUG-01 FIX: Grade was imported from the legacy engine.ts (0-indexed: 0=Again)
 // which conflicts with ts-fsrs Rating (1-indexed: 1=Again). Store grade as
 // plain number to accept both legacy values and ts-fsrs Grade without mismatch.
@@ -65,6 +66,8 @@ export interface ConceptProgressRow {
   fsrs_last_review: number;
   fsrs_elapsed_days?: number;
   fsrs_scheduled_days?: number;
+  /** ts-fsrs short-term step index (FSRS-1). Optional: older rows lack it. */
+  fsrs_learning_steps?: number;
   updated_at: number;
   version: number;
   dirty: 0 | 1;
@@ -347,6 +350,7 @@ export class OrbitaDB extends Dexie {
 }
 
 export function createOrbitaDb(name: string): OrbitaDB {
+  resetDbBeforeOpen(name); // v2 epoch: delete stale local data before the first open
   const d = new OrbitaDB(name);
   d.meta
     .put({ id: "meta", schemaVersion: 9, lastOpenedAt: Date.now(), prefs: {} })

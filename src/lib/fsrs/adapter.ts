@@ -124,6 +124,7 @@ export function rowToCard(row: ConceptProgressRow): Card {
   card.lapses = row.fsrs_lapses ?? 0;
   card.elapsed_days = row.fsrs_elapsed_days ?? 0;
   card.scheduled_days = row.fsrs_scheduled_days ?? 0;
+  card.learning_steps = learningStepsOf(row, card.state);
 
   // Defensive fallback: if a card is marked as Review but has 0/null stability, reset to minimal viable stability
   if (card.state === State.Review && (!card.stability || card.stability <= 0)) {
@@ -135,6 +136,26 @@ export function rowToCard(row: ConceptProgressRow): Card {
   }
 
   return card;
+}
+
+const TEN_MIN_MS = 10 * 60_000;
+
+/**
+ * FSRS-1: the short-term step index. Rows written before the field existed are
+ * derived for Learning only: the default steps are 1m then 10m, so a gap
+ * of 10 min or more between last review and due means the card is at step 1.
+ */
+export function learningStepsOf(
+  row: ConceptProgressRow,
+  state: State = normalizeState(row.fsrs_state),
+): number {
+  const stored = row.fsrs_learning_steps;
+  if (typeof stored === "number" && Number.isFinite(stored) && stored >= 0) return stored;
+  // Relearning: the default relearning_steps is ['10m'], a single step, so a
+  // legacy row can only be at step 0 (deriving 1 would graduate Again/Hard).
+  if (state !== State.Learning) return 0;
+  if (!row.fsrs_last_review || !row.fsrs_due) return 0;
+  return row.fsrs_due - row.fsrs_last_review >= TEN_MIN_MS ? 1 : 0;
 }
 
 /** Normalize state from legacy string or official numeric to ts-fsrs State enum. */
@@ -188,6 +209,7 @@ export function cardToRowUpdates(
     fsrs_last_review: (card.last_review ?? new Date(now)).getTime(),
     fsrs_elapsed_days: card.elapsed_days,
     fsrs_scheduled_days: card.scheduled_days,
+    fsrs_learning_steps: card.learning_steps,
     updated_at: now,
     dirty,
     ...(bumpVersion ? { version: currentVersion + 1 } : {}),
