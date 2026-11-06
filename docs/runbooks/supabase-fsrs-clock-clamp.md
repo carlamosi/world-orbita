@@ -6,7 +6,7 @@ Aplica `supabase/migrations/20261107000000_sync_push_clamp_last_review.sql` en p
 
 ## Qué hace
 
-Gana siempre la revisión con `fsrs_last_review` más reciente. Un dispositivo con el reloj adelantado (días o años) fijaba ese valor y bloqueaba para siempre las revisiones de los demás dispositivos. La migración reemplaza `sync_push` (misma firma, `security invoker`, `search_path = public`, `auth.uid()`) y solo cambia una línea: el `fsrs_last_review` entrante se acota a `now() + 5 minutos` antes de guardarlo y de compararlo. No toca tablas ni datos, y los permisos de la función se conservan. Las filas que ya tengan una fecha futura no se corrigen solas.
+Gana siempre la revisión con `fsrs_last_review` más reciente. Un dispositivo con el reloj adelantado (días o años) fijaba ese valor y bloqueaba para siempre las revisiones de los demás dispositivos. La migración reemplaza `sync_push` (misma firma, `security invoker`, `search_path = public`, `auth.uid()`) y solo cambia dos líneas: el `fsrs_last_review` entrante se acota a `now() + 5 minutos` antes de guardarlo y de compararlo, y el `fsrs_due` se reduce en lo mismo que se recortó (no queda oculta la tarjeta a los demás dispositivos). No toca tablas ni datos, y los permisos de la función se conservan. Las filas que ya tengan una fecha futura no se corrigen solas.
 
 Requisito: el baseline v2 ya está aplicado (ver `supabase-v2-reset.md`).
 
@@ -40,7 +40,7 @@ select pg_get_functiondef('public.sync_push(jsonb)'::regprocedure)
   like '%now() + interval ''5 minutes''%';
 ```
 
-2. Sigue ejecutable solo por `authenticated` (el `proacl` debe contener `authenticated=X/postgres` y no `anon` ni una entrada `=X/...` vacía):
+2. El `proacl` esperado es exactamente `{postgres=X/postgres,service_role=X/postgres,authenticated=X/postgres}` (con `authenticated`, sin `anon` y sin una entrada `=X/...` vacía de PUBLIC):
 
 ```sql
 select proacl, prosecdef from pg_proc
