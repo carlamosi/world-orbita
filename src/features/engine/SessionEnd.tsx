@@ -23,9 +23,16 @@ export interface MissedItem {
 interface Props {
   show: boolean;
   score?: number;
-  masteredCount?: number;
+  /** Correct on a card's first slot; `total` is then the distinct card count. */
+  firstTryCorrect?: number;
   correct: number;
   total: number;
+  /** Session cards now mastered (Review, stability 21+ days). */
+  masteredNow?: number;
+  /** Cards forgotten 4+ times. */
+  trickyItems?: MissedItem[];
+  /** New cards answered as practice only: today's new-card limit was reached. */
+  practiceOnly?: number;
   wrong?: number;
   bestCombo?: number;
   durationMs?: number;
@@ -50,9 +57,12 @@ function formatSessionTime(durationMs: number): string {
 export function SessionEnd({
   show,
   score,
-  masteredCount,
+  firstTryCorrect,
   correct,
   total,
+  masteredNow = 0,
+  trickyItems = [],
+  practiceOnly = 0,
   durationMs = 0,
   isSpeedMode = false,
   qpm,
@@ -70,8 +80,8 @@ export function SessionEnd({
     return currentStreak(activeDays);
   }, [sessions]);
 
-  const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
-  const effectiveMastered = masteredCount ?? correct;
+  const firstTry = firstTryCorrect ?? correct;
+  const accuracy = total > 0 ? Math.round((firstTry / total) * 100) : 0;
   const timeFormatted = formatSessionTime(durationMs);
   const handleNext = () => {
     setExitStep("idle");
@@ -112,19 +122,29 @@ export function SessionEnd({
                 <div className="mt-4 font-display text-4xl sm:text-5xl text-white tracking-tight text-glow-violet">
                   {isSpeedMode ? (
                     <>
-                      {score ?? effectiveMastered}{" "}
+                      {score ?? firstTry}{" "}
                       <span className="text-[color:var(--cyan)] text-2xl font-sans font-normal">pts</span>
                     </>
                   ) : (
                     <>
-                      {effectiveMastered}{" "}
-                      <span className="text-[color:var(--cyan)] text-2xl font-sans font-normal">mastered</span>
+                      {firstTry}{" "}
+                      <span className="text-[color:var(--cyan)] text-2xl font-sans font-normal">correct first try</span>
                     </>
                   )}
                 </div>
                 <div className="mt-2 text-white/55 text-sm">
-                  {correct} of {total} correct ({accuracy}%)
+                  {firstTry} of {total} {isSpeedMode ? "correct" : "cards right first try"} ({accuracy}%)
                 </div>
+                {masteredNow > 0 && (
+                  <div className="mt-1 text-white/55 text-sm">
+                    {masteredNow} now mastered (stable for 21+ days)
+                  </div>
+                )}
+                {practiceOnly > 0 && (
+                  <div className="mt-1 text-white/55 text-sm">
+                    {practiceOnly} new {practiceOnly === 1 ? "card was" : "cards were"} practice only: today's new-card limit is reached.
+                  </div>
+                )}
 
                 {/* Key stats row - Accuracy and Time alongside with same visual hierarchy */}
                 <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-mono text-[11px] uppercase tracking-wider text-white/55">
@@ -137,7 +157,7 @@ export function SessionEnd({
                       value={`${qpm ?? Math.round((total / Math.max(1, durationMs)) * 60_000)} QPM`}
                     />
                   ) : (
-                    <Stat label="Score" value={score ?? effectiveMastered} />
+                    <Stat label="Score" value={score ?? firstTry} />
                   )}
                 </div>
 
@@ -180,6 +200,27 @@ export function SessionEnd({
                 ) : (
                   <div className="mt-6 p-3 rounded-2xl bg-[color:var(--neon)]/10 border border-[color:var(--neon)]/25 text-[color:var(--neon)] text-xs font-mono">
                     ✨ Flawless round! All {total} items answered correctly.
+                  </div>
+                )}
+
+                {trickyItems.length > 0 && (
+                  <div className="mt-4 text-left">
+                    <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40 mb-2 px-1">
+                      Tricky ({trickyItems.length}): forgotten 4+ times
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {trickyItems.map((item, idx) => (
+                        <span
+                          key={item.id ?? idx}
+                          className="glass rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-xs text-white border border-amber-400/25"
+                        >
+                          {item.flagIso2 && (
+                            <FlagImage iso2={item.flagIso2} alt="" className="w-5 h-3.5 shrink-0 rounded-[2px]" />
+                          )}
+                          {item.prompt}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
 

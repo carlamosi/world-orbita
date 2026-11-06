@@ -173,9 +173,11 @@ export default function CapitalsPage() {
         <SessionEnd
           show={finished}
           score={s.score}
-          masteredCount={s.masteredCount}
+          firstTryCorrect={s.firstTryCorrect}
+          masteredNow={s.masteredNow}
+          trickyItems={s.trickyItems}
           correct={s.correct}
-          total={s.queue.length}
+          total={s.cardCount}
           wrong={s.wrong}
           bestCombo={s.bestCombo}
           durationMs={(s.endedAt ?? 0) - s.startedAt}
@@ -251,9 +253,11 @@ export default function CapitalsPage() {
       <SessionEnd
         show={finished}
         score={s.score}
-        masteredCount={s.masteredCount}
+        firstTryCorrect={s.firstTryCorrect}
+        masteredNow={s.masteredNow}
+        trickyItems={s.trickyItems}
         correct={s.correct}
-        total={s.queue.length}
+        total={s.cardCount}
         wrong={s.wrong}
         bestCombo={s.bestCombo}
         durationMs={(s.endedAt ?? 0) - s.startedAt}

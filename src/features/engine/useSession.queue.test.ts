@@ -49,7 +49,12 @@ import { COUNTRIES } from "@/lib/countries";
 import type { SpainEntity } from "@/lib/spain/types";
 import { parseConceptId } from "@/lib/fsrs/concept";
 import { getRetrievability } from "@/lib/fsrs/adapter";
-import { MAX_NEW_PER_DAY, newCardsKey } from "@/features/engine/newCardLimit";
+import {
+  GLOBAL_NEW_BUCKET,
+  MAX_NEW_GLOBAL_PER_DAY,
+  MAX_NEW_PER_DAY,
+  newCardsKey,
+} from "@/features/engine/newCardLimit";
 
 const DAY = 86_400_000;
 function row(conceptId: string, entityId: string, dueOffsetDays: number): ConceptProgressRow {
@@ -632,5 +637,125 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
       store2.getState().submit(true, { retrievalMode: "hard" });
       expect(store2.getState().conceptQueue[0]!.fsrs_stability!).toBeGreaterThan(hardStab);
     });
+  });
+});
+
+describe("honest learning load and progress (Task 22)", () => {
+  const globalKey = () => newCardsKey(GLOBAL_NEW_BUCKET, Date.now());
+  const ccaaStore = () =>
+    createSessionStore<SpainEntity>({
+      mode: "find",
+      skill: "location",
+      domain: "spain",
+      dataset: SPAIN_CCAA,
+      getId: (e) => e.id,
+    });
+
+  beforeEach(() => {
+    rows.length = 0;
+    recorded.length = 0;
+    gates.length = 0;
+    meta.clear();
+  });
+
+  it("the global cap of 20 a day limits new cards across buckets", async () => {
+    expect(MAX_NEW_GLOBAL_PER_DAY).toBe(20);
+    meta.set(globalKey(), String(MAX_NEW_GLOBAL_PER_DAY - 2));
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    expect(store.getState().queue).toHaveLength(2);
+  });
+
+  it("global cap used up: empty with reason 'globalLimit'", async () => {
+    meta.set(globalKey(), String(MAX_NEW_GLOBAL_PER_DAY));
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    expect(store.getState().status).toBe("empty");
+    expect(store.getState().emptyReason).toBe("globalLimit");
+  });
+
+  it("the per-bucket cap of 10 still applies with global budget left", async () => {
+    meta.set(todayKey(), String(MAX_NEW_PER_DAY));
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    expect(store.getState().status).toBe("empty");
+    expect(store.getState().emptyReason).toBe("limit");
+  });
+
+  it("grading a new planner card spends both the bucket and the global budget", async () => {
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    store.getState().submit(true);
+    await flush();
+    expect(meta.get(todayKey())).toBe("1");
+    expect(meta.get(globalKey())).toBe("1");
+  });
+
+  it("Complete grades new entities only within the global budget, learned ones always", async () => {
+    meta.set(globalKey(), String(MAX_NEW_GLOBAL_PER_DAY - 2));
+    const learned = SPAIN_CCAA[0]!;
+    rows.push(row(findId(learned.id), learned.id, 3));
+    const store = ccaaStore();
+    await store.getState().start({ items: [...SPAIN_CCAA], subMode: "find" });
+    const n = store.getState().queue.length;
+    for (let i = 0; i < n; i++) {
+      store.getState().submit(true);
+      store.getState().next();
+    }
+    await flush();
+    const ids = recorded.map((r) => r.conceptId);
+    expect(ids).toContain(findId(learned.id));
+    expect(ids.filter((id) => id !== findId(learned.id))).toHaveLength(2);
+    expect(meta.get(globalKey())).toBe(String(MAX_NEW_GLOBAL_PER_DAY));
+    expect(store.getState().practiceOnlyIds.size).toBe(SPAIN_CCAA.length - 3);
+  });
+
+  it("new seeds come easy before hard, entities without difficulty last, stable", async () => {
+    type E = { id: string; name: string; difficulty?: "easy" | "medium" | "hard" };
+    const data: E[] = [
+      { id: "a", name: "A" },
+      { id: "b", name: "B", difficulty: "hard" },
+      { id: "c", name: "C", difficulty: "easy" },
+      { id: "d", name: "D", difficulty: "medium" },
+      { id: "e", name: "E", difficulty: "easy" },
+    ];
+    const store = createSessionStore<E>({ mode: "find", skill: "location", dataset: data, getId: (e) => e.id });
+    await store.getState().start({ subMode: "find" });
+    expect(store.getState().queue.map((e) => e.id)).toEqual(["c", "e", "d", "b", "a"]);
+
+    const flags = createSessionStore({ mode: "flag", skill: "flag" });
+    await flags.getState().start({ subMode: "flagToCountry" });
+    expect(flags.getState().queue.map((c) => c.iso3)).toEqual(
+      COUNTRIES.filter((c) => c.difficulty === "easy").slice(0, 10).map((c) => c.iso3),
+    );
+  });
+
+  it("summary counts first-try correct over distinct cards, not retry slots", async () => {
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    expect(store.getState().cardCount).toBe(10);
+    store.getState().submit(false);
+    store.getState().next();
+    while (store.getState().endedAt === null) {
+      store.getState().submit(true);
+      store.getState().next();
+    }
+    expect(store.getState().queue.length).toBeGreaterThan(10);
+    expect(store.getState().cardCount).toBe(10);
+    expect(store.getState().firstTryCorrect).toBe(9);
+  });
+
+  it("at the end, cards with 4+ lapses are tricky and mastered cards are counted", async () => {
+    const [p1, p2] = SPAIN_PROVINCES;
+    const tricky = { ...row(findId(p1!.id), p1!.id, -1), fsrs_stability: 1, fsrs_lapses: 4 } as ConceptProgressRow;
+    const solid = { ...row(findId(p2!.id), p2!.id, -1), fsrs_stability: 30 } as ConceptProgressRow;
+    const store = provinceStore();
+    await store.getState().start({ conceptRows: [tricky, solid] });
+    store.getState().submit(true);
+    store.getState().next();
+    store.getState().submit(true);
+    store.getState().next();
+    expect(store.getState().trickyItems.map((t) => t.prompt)).toEqual([p1!.name]);
+    expect(store.getState().masteredNow).toBe(1);
   });
 });

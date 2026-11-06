@@ -1,4 +1,4 @@
-import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
+import { COUNTRIES, pickDistractors } from "@/lib/countries";
 
 /**
  * Validates that when a continent filter is active, all 4 generated option choices
@@ -11,7 +11,7 @@ export function verifyContinentDistractors(): { success: boolean; errors: string
   for (const continent of continents) {
     const contCountries = COUNTRIES.filter((c) => c.continent === continent);
     for (const target of contCountries) {
-      const distractors = pickRandomCountries(3, new Set([target.iso3]), continent);
+      const distractors = pickDistractors(target, 3, continent);
       const options = [target, ...distractors];
       const wrongContinent = options.filter((o) => o.continent !== continent);
       if (wrongContinent.length > 0) {

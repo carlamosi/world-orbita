@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
+import { COUNTRIES, pickDistractors } from "@/lib/countries";
 import type { Country } from "@/types/country";
 import {
   SPAIN_ALL,
@@ -382,7 +382,7 @@ export default function ReviewPage() {
       const distractors = shuffleArray(pool.filter((e) => e.id !== current.id)).slice(0, 3);
       return shuffleArray([current, ...distractors]);
     }
-    const distractors = pickRandomCountries(3, new Set([current.iso3]), current.continent);
+    const distractors = pickDistractors(current, 3, current.continent);
     return shuffleArray([current, ...distractors]);
   }, [current, isLocationSkill]);
 
@@ -557,9 +557,11 @@ export default function ReviewPage() {
           show
           score={s.score}
           correct={s.correct}
-          total={s.queue.length}
+          total={s.cardCount}
           wrong={s.wrong}
-          masteredCount={s.masteredCount}
+          firstTryCorrect={s.firstTryCorrect}
+          masteredNow={s.masteredNow}
+          trickyItems={s.trickyItems}
           missedItems={s.missedItems}
           hasNextBlock={hasNextBlock}
           onNextBlock={loadNextBatch}

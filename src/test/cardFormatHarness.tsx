@@ -26,6 +26,7 @@ export const cardFormatMocks = {
         correct: 0,
         wrong: 0,
         missedItems: [],
+        practiceOnlyIds: new Set(),
         startedAt: 0,
         start: async (o?: { subMode?: string }) => {
           subMode = o?.subMode;

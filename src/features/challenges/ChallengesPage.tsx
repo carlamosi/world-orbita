@@ -12,7 +12,7 @@ import { recordSessionEnd, updateSkillProgress } from "@/lib/db/repo";
 import { confidenceAfter } from "@/lib/mastery";
 import { dateKey, weekKey } from "@/lib/streak";
 import type { Country } from "@/types/country";
-import { COUNTRY_BY_ISO3, pickRandomCountries } from "@/lib/countries";
+import { COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
@@ -410,7 +410,7 @@ function ChallengeEnd({ active, onExit }: { active: Active; onExit: () => void }
         correct={active.correct}
         total={active.set.items.length}
         wrong={active.wrong}
-        masteredCount={active.correct}
+        firstTryCorrect={active.correct}
         missedItems={active.missedItems}
         hasNextBlock={false}
         onReplay={onExit}
@@ -432,7 +432,7 @@ function ChallengeQuestion({
   const current = active.set.items[active.index];
   const options = useMemo(() => {
     if (!current) return [];
-    const others = pickRandomCountries(3, new Set([current.country.iso3]));
+    const others = pickDistractors(current.country, 3);
     return shuffle([current.country, ...others]);
   }, [current]);
 

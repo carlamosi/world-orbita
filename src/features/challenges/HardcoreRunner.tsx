@@ -141,7 +141,7 @@ export function HardcoreRunner({
         <SessionEnd
           show
           score={state.score}
-          masteredCount={state.correct}
+          firstTryCorrect={state.correct}
           correct={state.correct}
           total={state.queue.length}
           wrong={state.wrong}

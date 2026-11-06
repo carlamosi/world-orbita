@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { COUNTRY_BY_ISO3, pickRandomCountries } from "@/lib/countries";
+import { COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -74,11 +74,7 @@ export default function FlagsPage() {
 
   const options = useMemo(() => {
     if (!current || sub === "flagToType") return [];
-    const distractors = pickRandomCountries(
-      3,
-      new Set([current.iso3]),
-      continent === "All" ? undefined : continent,
-    );
+    const distractors = pickDistractors(current, 3, continent === "All" ? undefined : continent);
     return shuffle([current, ...distractors]);
   }, [current, sub, continent]);
 
@@ -185,9 +181,11 @@ export default function FlagsPage() {
       <SessionEnd
         show={finished}
         score={s.score}
-        masteredCount={s.masteredCount}
+        firstTryCorrect={s.firstTryCorrect}
+        masteredNow={s.masteredNow}
+        trickyItems={s.trickyItems}
         correct={s.correct}
-        total={s.queue.length}
+        total={s.cardCount}
         wrong={s.wrong}
         bestCombo={s.bestCombo}
         durationMs={(s.endedAt ?? 0) - s.startedAt}

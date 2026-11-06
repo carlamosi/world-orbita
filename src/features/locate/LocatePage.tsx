@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useCallback, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { COUNTRIES, COUNTRY_BY_ISO3, pickRandomCountries } from "@/lib/countries";
+import { COUNTRIES, COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -124,11 +124,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
   // Options for Name Easy Mode (filtered by continent per Task 2 fix)
   const nameOptions = useMemo(() => {
     if (!current || sub !== "name" || difficulty !== "easy") return [];
-    const others = pickRandomCountries(
-      3,
-      new Set([current.iso3]),
-      continent === "All" ? undefined : continent,
-    );
+    const others = pickDistractors(current, 3, continent === "All" ? undefined : continent);
     return shuffle([current, ...others]);
   }, [current, sub, difficulty, continent]);
 
@@ -300,9 +296,12 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
       <SessionEnd
         show={finished}
         score={s.score}
-        masteredCount={s.masteredCount}
+        firstTryCorrect={s.firstTryCorrect}
+        masteredNow={s.masteredNow}
+        trickyItems={s.trickyItems}
+        practiceOnly={s.practiceOnlyIds.size}
         correct={s.correct}
-        total={s.queue.length}
+        total={s.cardCount}
         wrong={s.wrong}
         bestCombo={s.bestCombo}
         durationMs={(s.endedAt ?? 0) - s.startedAt}
