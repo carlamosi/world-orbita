@@ -552,6 +552,7 @@ export default function SpainPage() {
                     <HardInput
                       target={current}
                       matchTarget={current.name}
+                      kind="spain"
                       placeholder="Type the autonomous community name…"
                       onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
                     />
@@ -579,6 +580,7 @@ export default function SpainPage() {
                     <HardInput
                       target={current}
                       matchTarget={current.capital ?? ""}
+                      kind="spainCapital"
                       placeholder="Type the capital city…"
                       onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
                     />
@@ -629,6 +631,7 @@ export default function SpainPage() {
                     <HardInput
                       target={current}
                       matchTarget={current.name}
+                      kind="spain"
                       placeholder="Type the region name…"
                       onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
                     />

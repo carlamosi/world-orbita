@@ -235,6 +235,7 @@ export function HardcoreRunner({
                 matchTarget={
                   current.type === "countryToCap" ? current.capital : current.countryName
                 }
+                kind={current.type === "countryToCap" ? "capital" : "country"}
                 onSubmit={(ok) => submitAnswer(ok)}
                 placeholder={
                   current.type === "countryToCap" ? "Type the capital…" : "Type the country…"

@@ -570,6 +570,7 @@ export default function ReviewPage() {
       <HardInput
         target={current}
         matchTarget={answersCapital ? (current.capital ?? current.name) : current.name}
+        kind={isSpainEntity(current) ? (answersCapital ? "spainCapital" : "spain") : answersCapital ? "capital" : "country"}
         onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}
         placeholder={answersCapital ? "Type the capital…" : "Type the name…"}
       />

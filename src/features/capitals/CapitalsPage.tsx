@@ -192,6 +192,7 @@ export default function CapitalsPage() {
                 <HardInput
                   target={current}
                   matchTarget={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
+                  kind={activeSub === "countryToCap" ? "capital" : "country"}
                   correctAnswer={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
                   answerState={s.answerState}
                   onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}

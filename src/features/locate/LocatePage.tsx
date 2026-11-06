@@ -261,6 +261,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               ) : (
                 <HardInput
                   target={current}
+                  kind="country"
                   answerState={s.answerState}
                   correctAnswer={current.name}
                   onSubmit={(ok, exact) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact })}

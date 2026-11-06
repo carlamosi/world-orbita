@@ -333,6 +333,7 @@ function FlagToType({
       <div className="w-full max-w-md mx-auto">
         <HardInput
           target={target}
+          kind="country"
           answerState={answerState}
           correctAnswer={target.name}
           onSubmit={onSubmit}

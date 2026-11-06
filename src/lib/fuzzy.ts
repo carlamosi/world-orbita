@@ -9,38 +9,51 @@ export function normalize(s: string): string {
     .trim();
 }
 
+/** Edit distance where swapping two adjacent letters ("Zambai") costs one edit. */
 export function levenshtein(a: string, b: string): number {
-  if (a === b) return 0;
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
-  const dp = new Array(b.length + 1);
-  for (let j = 0; j <= b.length; j++) dp[j] = j;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array<number>(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) d[0]![j] = j;
   for (let i = 1; i <= a.length; i++) {
-    let prev = dp[0];
-    dp[0] = i;
     for (let j = 1; j <= b.length; j++) {
-      const tmp = dp[j];
-      dp[j] = Math.min(
-        dp[j] + 1,
-        dp[j - 1] + 1,
-        prev + (a[i - 1] === b[j - 1] ? 0 : 1),
+      d[i]![j] = Math.min(
+        d[i - 1]![j]! + 1,
+        d[i]![j - 1]! + 1,
+        d[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
       );
-      prev = tmp;
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+      }
     }
   }
-  return dp[b.length];
+  return d[a.length]![b.length]!;
 }
 
-export function fuzzyMatch(guess: string, target: string, alts: string[] = []): boolean {
+/** `others` are names of other entities of the same kind: matching one exactly is a wrong answer, never a typo. */
+export function fuzzyMatch(
+  guess: string,
+  target: string,
+  alts: string[] = [],
+  others: string[] = [],
+): boolean {
   const g = normalize(guess);
   if (!g) return false;
   const candidates = [target, ...alts].map(normalize).filter(Boolean);
+  if (candidates.includes(g)) return true;
+  if (others.some((o) => normalize(o) === g)) return false;
   for (const c of candidates) {
-    if (g === c) return true;
     const tol = Math.max(1, Math.floor(c.length / 8));
     if (levenshtein(g, c) <= tol) return true;
   }
   return false;
+}
+
+/** True while the guess is a strict prefix of another name ("Niger" of "Nigeria"): do not auto-submit. */
+export function isPrefixOfOther(guess: string, others: string[]): boolean {
+  const g = normalize(guess);
+  return !!g && others.some((o) => {
+    const n = normalize(o);
+    return n.length > g.length && n.startsWith(g);
+  });
 }
 
 /** Strict normalized equality — used for instant typing validation. */
