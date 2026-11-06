@@ -9,6 +9,7 @@ import {
   getSpainFlagUrl,
   type SpainEntity,
   loadSpainCCAAFeatures,
+  loadSpainProvinceFeatures,
   type SpainFeatureCollection,
 } from "@/lib/spain";
 import { parseConceptId } from "@/lib/fsrs/concept";
@@ -245,9 +246,11 @@ export default function ReviewPage() {
   const [continent, setContinent] = useContinentPref();
   const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
   const [spainFeatures, setSpainFeatures] = useState<SpainFeatureCollection | null>(null);
+  const [provinceFeatures, setProvinceFeatures] = useState<SpainFeatureCollection | null>(null);
 
   useEffect(() => {
     void loadSpainCCAAFeatures().then(setSpainFeatures);
+    void loadSpainProvinceFeatures().then(setProvinceFeatures);
   }, []);
 
   // Persist session mode preference
@@ -459,28 +462,9 @@ export default function ReviewPage() {
           visual: null,
           subtitle: isSpain ? "Spain" : current.continent,
         };
-      case "name":
+      // Name cards render on the globe (see the map branch below), never here.
       default:
-        return {
-          prompt: isSpain ? "Name this region" : "Which country does this flag belong to?",
-          visual: isSpain ? (
-            <div className="w-full max-w-[420px] aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto border border-white/20">
-              <img
-                src={getSpainFlagUrl(current.flagCode)}
-                alt="Mystery flag"
-                className="w-full h-full object-cover"
-              />
-            </div>
-          ) : (
-            <FlagImage
-              iso2={current.iso2}
-              alt="Mystery flag"
-              size={640}
-              className="w-full max-w-[420px] h-auto aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto"
-            />
-          ),
-          subtitle: subTitle,
-        };
+        return null;
     }
   }, [current, skill, subMode]);
 
@@ -615,7 +599,7 @@ export default function ReviewPage() {
           current={current}
           answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
           onSubmit={handleGlobeClick}
-          spainFeatures={spainFeatures}
+          spainFeatures={isSpainEntity(current) && current.category === "province" ? provinceFeatures : spainFeatures}
           naming={isMapName}
         />
 

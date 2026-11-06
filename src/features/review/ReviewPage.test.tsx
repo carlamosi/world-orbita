@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { COUNTRIES } from "@/lib/countries";
-import { SPAIN_CCAA } from "@/lib/spain";
+import { SPAIN_CCAA, SPAIN_PROVINCES } from "@/lib/spain";
 
 // A due row whose entity is in no dataset: the Review batch fails lookup entirely.
 const orphanRow = {
@@ -29,8 +29,16 @@ vi.mock("@/lib/db/orbita-db", () => ({
   }),
 }));
 vi.mock("@/features/globe/Globe3D", () => ({
-  default: (p: { highlightIso3?: string | null }) => (
-    <div data-testid="globe" data-highlight={p.highlightIso3 ?? ""} />
+  default: (p: {
+    highlightIso3?: string | null;
+    highlightId?: string | null;
+    overlayPolygons?: { properties?: { id?: string } }[];
+  }) => (
+    <div
+      data-testid="globe"
+      data-highlight={p.highlightIso3 ?? p.highlightId ?? ""}
+      data-overlay={(p.overlayPolygons ?? []).map((f) => f.properties?.id).join(",")}
+    />
   ),
 }));
 const recordConceptAttempt = vi.hoisted(() => vi.fn(async () => {}));
@@ -121,8 +129,8 @@ describe("Review page when every row of the batch fails lookup", () => {
 
 const fra = COUNTRIES.find((c) => c.iso3 === "FRA")!;
 
-async function renderDue(conceptId: string, skill: string) {
-  due.rows = [{ ...orphanRow, conceptId, iso3: "FRA", skill }];
+async function renderDue(conceptId: string, skill: string, iso3 = "FRA") {
+  due.rows = [{ ...orphanRow, conceptId, iso3, skill }];
   recordConceptAttempt.mockClear();
   const host = document.createElement("div");
   document.body.appendChild(host);
@@ -204,6 +212,23 @@ describe("Review asks each card in its own format", () => {
       | { mode: string; grade: number; conceptId: string }
       | undefined;
     expect(attempt).toMatchObject({ conceptId: "FRA:capital:countryToCap", mode: "hard", grade: 1 });
+    r.cleanup();
+  });
+});
+
+describe("Review map for Spain cards", () => {
+  it.each([
+    ["province", SPAIN_PROVINCES[0]!],
+    ["autonomous community", SPAIN_CCAA[0]!],
+  ])("a %s Name card gets its own map collection with the region highlighted", async (_label, entity) => {
+    const r = await renderDue(`spain:${entity.id}:name:name`, "name", entity.id);
+    for (let i = 0; i < 50 && !r.globe()?.getAttribute("data-overlay"); i++) {
+      await act(async () => {
+        await new Promise((res) => setTimeout(res, 20));
+      });
+    }
+    expect(r.globe()?.getAttribute("data-highlight")).toBe(entity.id);
+    expect(r.globe()?.getAttribute("data-overlay")!.split(",")).toContain(entity.id);
     r.cleanup();
   });
 });
