@@ -31,6 +31,8 @@ export async function migrateGuestProgress(
   userDb: OrbitaDB,
   userId: string,
 ): Promise<{ migrated: number; skipped: number }> {
+  // Deleting orbita-local after a merge into itself would destroy the guest's data.
+  if (userDb.name !== `orbita-${userId}`) return { migrated: 0, skipped: 0 };
   if (!(await Dexie.exists(GUEST_DB_NAME))) {
     authDebug("migrate:no_guest_db", { userId });
     return { migrated: 0, skipped: 0 };

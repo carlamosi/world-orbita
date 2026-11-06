@@ -180,3 +180,13 @@ describe("migrateGuestProgress", () => {
     expect(await Dexie.exists("orbita-local")).toBe(false);
   });
 });
+
+describe("migrateGuestProgress guard", () => {
+  it("aborts if the db is not the user's, keeping orbita-local", async () => {
+    const other = createOrbitaDb("orbita-local");
+    const r = await migrateGuestProgress(other, UID);
+    other.close();
+    expect(r).toEqual({ migrated: 0, skipped: 0 });
+    expect(await Dexie.exists("orbita-local")).toBe(true);
+  });
+});
