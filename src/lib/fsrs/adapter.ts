@@ -253,7 +253,7 @@ export function processReview(
   reviewedAtMs: number,
 ): ProcessReviewResult {
   // ts-fsrs throws "Invalid delta_t" if the review predates last_review (fast clock elsewhere).
-  const now = new Date(Math.max(reviewedAtMs, currentCard.last_review?.getTime() ?? 0));
+  const now = new Date(Math.max(reviewedAtMs, (currentCard.last_review?.getTime() ?? -1) + 1));
 
   const grade: Grade = outcomeToGrade(outcome);
   const logItem = _fsrsInstance.next(currentCard, now, grade);

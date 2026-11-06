@@ -71,7 +71,7 @@ describe("review before last_review (future-dated row)", () => {
     let card = processReview(createNewCard(t0), "easy", t0).card;
     card = { ...card, last_review: new Date(t0 + 60 * MIN) };
     const out = processReview(card, "good", t0).card;
-    expect(out.last_review!.getTime()).toBeGreaterThanOrEqual(t0 + 60 * MIN);
+    expect(out.last_review!.getTime()).toBeGreaterThan(t0 + 60 * MIN); // strictly, or the server's `>` calls it stale
     expect(persist(out).fsrs_elapsed_days).toBeGreaterThanOrEqual(0);
   });
 });
