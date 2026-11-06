@@ -18,7 +18,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { auth: { getUser, signOut: vi.fn(async () => ({ error: null })) } },
 }));
 
-import { runPullOnce, runPushOnce } from "./workers";
+import { runPullOnce, runPushOnce, startSyncWorkers, stopSyncWorkers } from "./workers";
 import { useSyncStore } from "./useSyncStore";
 
 const T = Date.UTC(2026, 10, 6, 10, 0, 0);
@@ -232,6 +232,56 @@ describe("db binding", () => {
     expect(seen).toHaveLength(1);
     expect(x).toBe(getCurrent());
     expect(y).toBe(getCurrent());
+  });
+
+  describe("in_flight recovery", () => {
+    const inFlight = (ageMs: number): OutboxRow => ({
+      ...outbox(crypto.randomUUID()),
+      status: "in_flight",
+      next_attempt_at: Date.now() - ageMs,
+    });
+    const statusOf = async (d: ReturnType<typeof createOrbitaDb>, r: OutboxRow) =>
+      (await d.outbox.where("op_id").equals(r.op_id).first())?.status;
+
+    it("startup resets everything in the current db, a swap only stale leases", async () => {
+      useSyncStore.setState({ signedIn: false }); // no cycle may touch the rows
+      const cur = createOrbitaDb(currentDbName());
+      const crashed = inFlight(1_000);
+      await cur.outbox.add(crashed);
+
+      const uidB = crypto.randomUUID();
+      const pre = createOrbitaDb(`orbita-${uidB}`);
+      const [stale, fresh] = [inFlight(61_000), inFlight(5_000)];
+      await pre.outbox.bulkAdd([stale, fresh]);
+      pre.close();
+
+      startSyncWorkers();
+      try {
+        await vi.waitFor(async () => expect(await statusOf(cur, crashed)).toBe("pending"));
+        const b = await swap(uidB);
+        await vi.waitFor(async () => expect(await statusOf(b, stale)).toBe("pending"));
+        // Possibly still pushed by a live cycle: not ours to reset.
+        expect(await statusOf(b, fresh)).toBe("in_flight");
+      } finally {
+        stopSyncWorkers();
+        cur.close();
+      }
+    });
+
+    it("a stale lease is pushed again, a fresh one is not", async () => {
+      const a = createOrbitaDb(currentDbName());
+      const [stale, fresh] = [inFlight(61_000), inFlight(5_000)];
+      await a.outbox.bulkAdd([stale, fresh]);
+      const sent: string[] = [];
+      pushReply = async (m) => {
+        sent.push(...m.map((x) => x.op_id));
+        return { accepted: m.map((x) => x.op_id), rejected: [], canonical: [] };
+      };
+      await runPushOnce();
+      expect(sent).toEqual([stale.op_id]);
+      expect(await statusOf(a, fresh)).toBe("in_flight");
+      a.close();
+    });
   });
 
   it("outbox rows addressed by op_id", async () => {

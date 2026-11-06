@@ -3,7 +3,7 @@
  * They are explicitly fire-and-forget — failures never propagate to gameplay.
  */
 import { db, type OrbitaDB } from "@/lib/db/orbita-db";
-import { currentDbName, trackCycle } from "@/lib/db/dbProvider";
+import { currentDbName, onSwap, trackCycle } from "@/lib/db/dbProvider";
 import { syncPush, syncPull } from "./sync.functions";
 import { useSyncStore } from "./useSyncStore";
 import { PERMANENT_REJECT_REASONS, type Mutation, type SyncEntity } from "./types";
@@ -23,11 +23,14 @@ const moved = (name: string) => currentDbName() !== name;
 
 const MAX_ATTEMPTS = 10;
 const BATCH = 50;
+/** An in_flight row pushed longer ago than this is treated as pending again. */
+const LEASE_MS = 60_000;
 const PULL_INTERVAL_MS = 60_000;
 const PUSH_INTERVAL_MS = 4_000;
 
 let pushTimer: ReturnType<typeof setInterval> | null = null;
 let pullTimer: ReturnType<typeof setInterval> | null = null;
+let offSwap: (() => void) | null = null;
 let started = false;
 let pushing = false;
 let pulling = false;
@@ -48,16 +51,19 @@ async function refreshQueued() {
 }
 
 /**
- * On startup, reset any `in_flight` items back to `pending`.
- * These are items that were mid-push when the app was closed or crashed.
- * Without this, they remain stuck forever since runPushOnce only picks up `pending` items.
+ * Reset `in_flight` rows back to `pending`: they were mid-push when the app
+ * closed, crashed, or a timed-out swap closed their DB. Only runPushOnce picks
+ * up `pending`, so they would stay stuck. `all` (startup, before any cycle) resets
+ * every one; otherwise only stale leases, as a live cycle may still own a fresh one.
  */
-async function recoverInFlight() {
+async function recoverInFlight(d: OrbitaDB, all: boolean) {
   try {
-    await db()
-      .outbox.where("status")
+    const cutoff = Date.now() - LEASE_MS;
+    await d.outbox
+      .where("status")
       .equals("in_flight")
-      .modify({ status: "pending", next_attempt_at: 0 } as Partial<import("../db/orbita-db").OutboxRow>);
+      .filter((r) => all || r.next_attempt_at < cutoff)
+      .modify({ status: "pending", next_attempt_at: 0 } as Partial<OutboxRow>);
   } catch {
     // ignore — non-critical
   }
@@ -68,10 +74,10 @@ async function recoverInFlight() {
  * with invalid_op_id, so they can never succeed (old builds appended ":cp").
  * They stay visible as dead letters instead of being silently dropped.
  */
-async function purgeBrokenOpIds() {
+async function purgeBrokenOpIds(d: OrbitaDB) {
   try {
-    await db()
-      .outbox.filter((r) => r.status !== "dead" && !isValidOpId(r.op_id))
+    await d.outbox
+      .filter((r) => r.status !== "dead" && !isValidOpId(r.op_id))
       .modify({ status: "dead", last_error: "invalid_op_id" } as Partial<OutboxRow>);
   } catch {
     // ignore — non-critical
@@ -181,7 +187,7 @@ async function pushBatch(d: OrbitaDB, name: string, due: OutboxRow[]) {
   await d.outbox
     .where("op_id")
     .anyOf(due.map((r) => r.op_id))
-    .modify({ status: "in_flight" });
+    .modify({ status: "in_flight", next_attempt_at: Date.now() } as Partial<OutboxRow>); // lease start
   if (moved(name)) return;
   const mutations: Mutation[] = due.map((r) => ({
     op_id: r.op_id,
@@ -277,8 +283,10 @@ async function pushCycle() {
   const now = Date.now();
   const due = await d.outbox
     .where("status")
-    .equals("pending")
-    .filter((r) => r.next_attempt_at <= now)
+    .anyOf("pending", "in_flight")
+    .filter((r) =>
+      r.status === "pending" ? r.next_attempt_at <= now : r.next_attempt_at < now - LEASE_MS,
+    )
     .limit(BATCH)
     .toArray();
   if (moved(name)) return;
@@ -409,9 +417,12 @@ export function startSyncWorkers() {
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
   }
-  // On startup: purge permanently-broken op_ids, reset in_flight items,
-  // then run first push/pull cycle.
-  Promise.all([purgeBrokenOpIds(), recoverInFlight()]).then(() => {
+  // Every DB that becomes active gets the same recovery (lease only: a live
+  // cycle may own fresh in_flight rows).
+  offSwap = onSwap((d) => void Promise.all([purgeBrokenOpIds(d), recoverInFlight(d, false)]));
+  // On startup no cycle has run yet, so every in_flight row is orphaned.
+  const d = db();
+  Promise.all([purgeBrokenOpIds(d), recoverInFlight(d, true)]).then(() => {
     void runPullOnce();
     void runPushOnce();
   });
@@ -423,6 +434,8 @@ export function stopSyncWorkers() {
   if (pullTimer) clearInterval(pullTimer);
   pushTimer = null;
   pullTimer = null;
+  offSwap?.();
+  offSwap = null;
   if (typeof document !== "undefined") {
     document.removeEventListener("visibilitychange", onVisibility);
   }
