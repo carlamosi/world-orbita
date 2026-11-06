@@ -142,7 +142,7 @@ const TEN_MIN_MS = 10 * 60_000;
 
 /**
  * FSRS-1: the short-term step index. Rows written before the field existed are
- * derived for Learning/Relearning: the default steps are 1m then 10m, so a gap
+ * derived for Learning only: the default steps are 1m then 10m, so a gap
  * of 10 min or more between last review and due means the card is at step 1.
  */
 export function learningStepsOf(
@@ -151,7 +151,9 @@ export function learningStepsOf(
 ): number {
   const stored = row.fsrs_learning_steps;
   if (typeof stored === "number" && Number.isFinite(stored) && stored >= 0) return stored;
-  if (state !== State.Learning && state !== State.Relearning) return 0;
+  // Relearning: the default relearning_steps is ['10m'], a single step, so a
+  // legacy row can only be at step 0 (deriving 1 would graduate Again/Hard).
+  if (state !== State.Learning) return 0;
   if (!row.fsrs_last_review || !row.fsrs_due) return 0;
   return row.fsrs_due - row.fsrs_last_review >= TEN_MIN_MS ? 1 : 0;
 }

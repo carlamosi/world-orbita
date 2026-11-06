@@ -153,7 +153,13 @@ export async function applyCanonical(
   try {
     if (entity === "country_progress") await applyCountry(row);
     else if (entity === "concept_progress") {
-      await db().concept_progress.put(serverConceptToRow(row, userId));
+      // Same rule as the pull: a stale_review canonical can be older than the
+      // local row (e.g. a resent op after a lost response while the user kept
+      // answering), so never roll back a newer local review.
+      const local = await db().concept_progress.get(String(row.conceptId));
+      if (shouldApplyPulledConcept(local, row)) {
+        await db().concept_progress.put(serverConceptToRow(row, userId));
+      }
     }
   } catch {
     // ignore: canonical patches are best-effort

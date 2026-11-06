@@ -350,6 +350,26 @@ describe("push result handling", () => {
     });
   });
 
+  it("stale_review never rolls back a newer local review", async () => {
+    const op = crypto.randomUUID();
+    await mem.outbox.put(outbox(op, "concept_progress") as never);
+    const newer = { ...conceptServerRow({ fsrs_last_review: T + 60_000, fsrs_reps: 2 }), dirty: 1 };
+    await mem.concept_progress.put(newer as never);
+    pushReply = () => ({
+      accepted: [],
+      rejected: [{ op_id: op, reason: "stale_review" }],
+      canonical: [
+        { entity: "concept_progress", op_id: op, payload: conceptServerRow({ version: 8 }) },
+      ],
+    });
+    await runPushOnce();
+    expect(await allOutbox()).toHaveLength(0);
+    const r = (await mem.concept_progress.get(
+      "FRA:capital:countryToCap",
+    )) as unknown as ConceptProgressRow;
+    expect(r).toMatchObject({ fsrs_last_review: T + 60_000, fsrs_reps: 2, dirty: 1 });
+  });
+
   it("other reasons keep the retry behaviour", async () => {
     const op = crypto.randomUUID();
     await mem.outbox.put(outbox(op) as never);

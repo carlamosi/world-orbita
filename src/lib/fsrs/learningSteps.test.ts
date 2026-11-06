@@ -82,8 +82,14 @@ describe("legacy rows without fsrs_learning_steps", () => {
   it("Learning with a 1 min gap is derived as step 0", () => {
     expect(rowToCard(base(State.Learning, 1 * MIN)).learning_steps).toBe(0);
   });
-  it("Relearning uses the same derivation", () => {
-    expect(rowToCard(base(State.Relearning, 10 * MIN)).learning_steps).toBe(1);
+  it("Relearning always derives step 0 (default relearning_steps has one step)", () => {
+    expect(rowToCard(base(State.Relearning, 10 * MIN)).learning_steps).toBe(0);
+    expect(rowToCard(base(State.Relearning, 1 * MIN)).learning_steps).toBe(0);
+  });
+  it("a legacy Relearning card answered Again stays in Relearning", () => {
+    const row = { ...base(State.Relearning, 10 * MIN), fsrs_reps: 5, fsrs_lapses: 1 };
+    const at = row.fsrs_due + 1000;
+    expect(processReview(rowToCard(row), "again", at).card.state).toBe(State.Relearning);
   });
   it("Review rows default to 0", () => {
     expect(rowToCard(base(State.Review, 3 * 86_400_000)).learning_steps).toBe(0);
