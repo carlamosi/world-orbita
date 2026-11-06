@@ -46,7 +46,7 @@ Environment variables (see `.env`):
 Apply migrations locally or link to the hosted project:
 
 ```bash
-npx supabase link --project-ref iwnurgbgjjlegdtrqrwq
+npx supabase link --project-ref aqwfmmhfiqjvyaufjcsk
 npx supabase db push
 ```
 

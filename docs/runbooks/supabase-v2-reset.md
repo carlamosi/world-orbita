@@ -2,6 +2,8 @@
 
 Borra TODOS los usuarios y datos de producción y deja el esquema `baseline_v2`. Lo ejecuta una persona a mano; nada de esto lo hace el código.
 
+**Proyecto de producción: `aqwfmmhfiqjvyaufjcsk`** (es la URL que usa Vercel, ver `setup-vercel-env.ps1`). Antes de ejecutar nada, comprueba en el Dashboard que la URL del proyecto abierto contiene `aqwfmmhfiqjvyaufjcsk`. `iwnurgbgjjlegdtrqrwq` es un proyecto antiguo: no lo resetees por error.
+
 Archivos implicados:
 - `supabase/reset/2026-11-06-reset.sql` (borra todo lo de v1; se puede ejecutar dos veces)
 - `supabase/migrations/20261106000000_baseline_v2.sql` (el esquema nuevo)
@@ -30,7 +32,7 @@ on conflict (version) do nothing;
 
 ### Camino B: CLI
 
-1. Vincula el proyecto (la referencia está en el README): `npx supabase link --project-ref <ref>`.
+1. Vincula el proyecto de producción: `npx supabase link --project-ref aqwfmmhfiqjvyaufjcsk`. Comprueba con `npx supabase projects list` que el vinculado (marcado con ●) es `aqwfmmhfiqjvyaufjcsk` antes de seguir.
 2. Ejecuta `supabase/reset/2026-11-06-reset.sql` en el SQL editor (la CLI no tiene un comando directo para SQL arbitrario remoto). Este script ya vacía `schema_migrations`.
 3. El `repair` es redundante tras el paso 2, porque el reset ya vació el historial. Solo hace falta si NO ejecutaste reset.sql (por ejemplo, si borraste los datos por otra vía) y el historial remoto aún lista las 10 versiones antiguas. En ese caso márcalas como revertidas:
 
