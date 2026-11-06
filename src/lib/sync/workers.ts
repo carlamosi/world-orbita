@@ -94,8 +94,9 @@ let checkingSession = false;
 
 /**
  * Auth failure: never spend attempts. Ask GoTrue once whether the session is
- * still valid; if the user is gone (or the session cannot be refreshed), sign
- * out. If it is valid, it was a transient hiccup: just back off.
+ * still valid; sign out only on a definitive answer (session missing, 401/403/404,
+ * or no user and no error). If it is valid, or the check itself failed
+ * transiently (network, 5xx, 429), keep the session: just back off and retry.
  */
 async function handleAuthRejection(due: OutboxRow[], msg: string) {
   await db()
@@ -114,9 +115,14 @@ async function verifySessionOrSignOut() {
     let gone = false;
     try {
       const { data, error } = await supabase.auth.getUser();
-      gone = !!error || !data?.user;
+      // Classified by name/status (not instanceof): only definitive answers sign out.
+      // Network, 5xx, 429 or a missing status are unknown, so keep the session.
+      const e = error as { name?: string; status?: number } | null;
+      gone = e
+        ? e.name === "AuthSessionMissingError" || [401, 403, 404].includes(e.status as number)
+        : !data?.user;
     } catch {
-      gone = true;
+      gone = false; // getUser threw (e.g. offline): unknown, retry next cycle
     }
     if (!gone) return;
     signingOut = true;

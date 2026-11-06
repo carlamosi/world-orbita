@@ -471,6 +471,50 @@ describe("push result handling", () => {
       expect(r.next_attempt_at).toBeGreaterThan(Date.now());
     });
 
+    const expectKept = async () => {
+      const [r] = await allOutbox();
+      expect(r.status).toBe("pending");
+      expect(r.attempts).toBe(0);
+    };
+
+    it.each([
+      ["a retryable fetch error (503)", { name: "AuthRetryableFetchError", status: 503 }],
+      ["a rate limit (429)", { name: "AuthApiError", status: 429 }],
+    ])("does NOT sign out when getUser answers with %s", async (_label, error) => {
+      await mem.outbox.put(outbox(crypto.randomUUID()) as never);
+      authFail();
+      getUser.mockImplementation(async () => ({ data: { user: null }, error }));
+      await runPushOnce();
+      expect(getUser).toHaveBeenCalledTimes(1);
+      expect(signOut).not.toHaveBeenCalled();
+      await expectKept();
+    });
+
+    it("does NOT sign out when getUser throws (network down)", async () => {
+      await mem.outbox.put(outbox(crypto.randomUUID()) as never);
+      authFail();
+      getUser.mockImplementation(async () => {
+        throw new TypeError("Failed to fetch");
+      });
+      await runPushOnce();
+      expect(signOut).not.toHaveBeenCalled();
+      await expectKept();
+    });
+
+    it.each([
+      ["AuthSessionMissingError (400)", { name: "AuthSessionMissingError", status: 400 }, { user: null }],
+      ["status 401", { name: "AuthApiError", status: 401 }, { user: null }],
+      ["status 404", { name: "AuthApiError", status: 404 }, { user: null }],
+      ["no error and no user", null, { user: null }],
+    ])("signs out on a definitive answer: %s", async (_label, error, data) => {
+      await mem.outbox.put(outbox(crypto.randomUUID()) as never);
+      authFail();
+      getUser.mockImplementation(async () => ({ data, error }));
+      await runPushOnce();
+      expect(signOut).toHaveBeenCalledTimes(1);
+      await expectKept();
+    });
+
     it("a pull failing with the auth error also checks the session and signs out", async () => {
       authFail();
       const { syncPull } = await import("./sync.functions");
