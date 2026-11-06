@@ -508,7 +508,7 @@ function ConfidenceMap({ progress }: { progress: ConceptProgressRow[] }) {
           <span className="size-2 rounded-sm bg-[color:var(--cyan)]/60" />
           <span className="size-2 rounded-sm bg-[color:var(--neon)]/70" />
         </div>
-        <span>Mastered</span>
+        <span>Strong</span>
       </div>
     </div>
   );
