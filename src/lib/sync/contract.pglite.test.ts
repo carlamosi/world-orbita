@@ -22,6 +22,9 @@ vi.mock("./sync.functions", () => ({
     t.call("sync_pull", { _cursors: a.data.cursors, _limit: a.data.limit ?? 500 }),
 }));
 
+const signOut = vi.hoisted(() => vi.fn(async () => ({ error: null })));
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { signOut } } }));
+
 import { runPullOnce, runPushOnce } from "./workers";
 import { useSyncStore } from "./useSyncStore";
 import {
@@ -234,5 +237,29 @@ describe("client <-> v2 baseline", () => {
       _limit: 500,
     });
     expect(fromStart.question_history.rows.length).toBeGreaterThan(0);
+  });
+
+  it("an orphaned session (user deleted server-side) signs out and keeps the rows pending", async () => {
+    const ORPHAN = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    try {
+      await t.asUser(ORPHAN);
+      await t.asService();
+      await t.db.query("delete from auth.users where id = $1", [ORPHAN]);
+      // Same JWT claim as before the deletion, which is what a stale browser sends.
+      await t.db.exec(
+        `set role authenticated; select set_config('request.jwt.claim.sub', '${ORPHAN}', false);`,
+      );
+      signOut.mockClear();
+      const op = await queue("concept_progress", conceptProgressPayload(concept())!);
+      void op;
+      await runPushOnce();
+      expect(signOut).toHaveBeenCalledTimes(1);
+      const rows = await mem.outbox.toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("pending");
+      expect(rows[0].attempts).toBe(0);
+    } finally {
+      await t.asUser(USER);
+    }
   });
 });

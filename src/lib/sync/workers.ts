@@ -78,7 +78,31 @@ async function purgeBrokenOpIds() {
 
 /** A user_id foreign-key failure means auth.users no longer has this user. */
 function isOrphanedSessionError(msg: string): boolean {
-  return /foreign key constraint/i.test(msg) && /user_id|auth\.users|profiles?_id/i.test(msg);
+  return /violates foreign key constraint/i.test(msg) && /_user_id_fkey|auth\.users/i.test(msg);
+}
+
+let signingOut = false;
+
+/**
+ * The account was deleted (e.g. by the v2 reset) but this browser still holds
+ * its JWT. Retrying only burns attempts: keep every row pending, sign out once.
+ */
+async function handleOrphanedSession(due: OutboxRow[], msg: string) {
+  await db()
+    .outbox.where("id")
+    .anyOf(due.map((d) => d.id!))
+    .modify({ status: "pending" });
+  useSyncStore.getState().setError(msg);
+  if (signingOut) return;
+  signingOut = true;
+  try {
+    const { supabase } = await import("@/integrations/supabase/client");
+    await supabase.auth.signOut();
+  } catch (err) {
+    console.warn("[sync] signOut after orphaned session failed:", err);
+  } finally {
+    signingOut = false;
+  }
 }
 
 async function markRetry(r: OutboxRow, reason: string) {
@@ -105,6 +129,12 @@ async function pushBatch(due: OutboxRow[]) {
     const accepted = Array.isArray(result?.accepted) ? result.accepted : [];
     const rejected = Array.isArray(result?.rejected) ? result.rejected : [];
     const canonical = Array.isArray(result?.canonical) ? result.canonical : [];
+    const orphaned = rejected.find((r) => isOrphanedSessionError(String(r.reason)));
+    if (orphaned) {
+      // sync_push reports the FK failure per item instead of raising.
+      await handleOrphanedSession(due, String(orphaned.reason));
+      return;
+    }
     const acceptedSet = new Set(accepted);
     const rejectedMap = new Map(rejected.map((r) => [r.op_id, String(r.reason)]));
     for (const r of due) {
@@ -139,17 +169,7 @@ async function pushBatch(due: OutboxRow[]) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "push failed";
     if (isOrphanedSessionError(msg)) {
-      // The account was deleted (e.g. by the v2 reset) but this browser still
-      // holds its JWT. Retrying only burns attempts; sign out instead and keep
-      // the rows pending.
-      await db().outbox.where("id").anyOf(due.map((d) => d.id!)).modify({ status: "pending" });
-      try {
-        const { supabase } = await import("@/integrations/supabase/client");
-        await supabase.auth.signOut();
-      } catch (err) {
-        console.warn("[sync] signOut after orphaned session failed:", err);
-      }
-      useSyncStore.getState().setError(msg);
+      await handleOrphanedSession(due, msg);
       return;
     }
     for (const r of due) await markRetry(r, msg);

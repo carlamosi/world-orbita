@@ -401,6 +401,32 @@ describe("push result handling", () => {
     expect(r.attempts).toBe(0);
   });
 
+  it("a per-item user FK rejection (the real server shape) signs out once and keeps every row pending", async () => {
+    signOut.mockClear();
+    const ops = [crypto.randomUUID(), crypto.randomUUID()];
+    for (const op of ops) await mem.outbox.put(outbox(op) as never);
+    pushReply = (m) => ({
+      accepted: [],
+      rejected: [
+        {
+          op_id: m[0].op_id,
+          reason:
+            'insert or update on table "concept_progress" violates foreign key constraint "concept_progress_user_id_fkey"',
+        },
+        { op_id: m[1].op_id, reason: "invalid_payload" },
+      ],
+      canonical: [],
+    });
+    await runPushOnce();
+    expect(signOut).toHaveBeenCalledTimes(1);
+    const rows = await allOutbox();
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r.status).toBe("pending");
+      expect(r.attempts).toBe(0);
+    }
+  });
+
   it("other push errors keep retrying without signing out", async () => {
     signOut.mockClear();
     const op = crypto.randomUUID();
