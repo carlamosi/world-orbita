@@ -37,8 +37,11 @@ let started = false;
 let pushing = false;
 let pulling = false;
 
-function backoff(attempts: number): number {
-  const base = Math.min(60_000, 1_000 * 2 ** attempts);
+/** Consecutive transient push failures; drives backoff without spending attempts. */
+let transientStreak = 0;
+
+function backoff(attempts: number, cap = 60_000): number {
+  const base = Math.min(cap, 1_000 * 2 ** attempts);
   return Date.now() + base + Math.random() * 500;
 }
 
@@ -47,6 +50,7 @@ async function refreshQueued() {
     // Count only "pending" items — in_flight are mid-push (not stuck), dead are exhausted.
     const n = await db().outbox.where("status").equals("pending").count();
     useSyncStore.getState().setQueued(n);
+    useSyncStore.getState().setDead(await db().outbox.where("status").equals("dead").count());
   } catch {
     // ignore
   }
@@ -185,6 +189,15 @@ async function markRetry(d: OrbitaDB, r: OutboxRow, reason: string) {
     } as Partial<OutboxRow>);
 }
 
+/** Transport/5xx failure: never spends attempts or dead-letters, only backs off (max 5 min). */
+async function markTransient(d: OrbitaDB, due: OutboxRow[], reason: string) {
+  const next = backoff(transientStreak++, 300_000);
+  await d.outbox
+    .where("op_id")
+    .anyOf(due.map((r) => r.op_id))
+    .modify({ status: "pending", next_attempt_at: next, last_error: reason } as Partial<OutboxRow>);
+}
+
 async function pushBatch(d: OrbitaDB, name: string, due: OutboxRow[]) {
   await d.outbox
     .where("op_id")
@@ -241,6 +254,7 @@ async function pushBatch(d: OrbitaDB, name: string, due: OutboxRow[]) {
       if (moved(name)) return;
       await applyCanonical(d, String(c.entity), c.payload, uid);
     }
+    transientStreak = 0;
     useSyncStore.getState().setLastPush(Date.now());
     useSyncStore.getState().setError(null);
   } catch (e) {
@@ -254,10 +268,7 @@ async function pushBatch(d: OrbitaDB, name: string, due: OutboxRow[]) {
       await handleOrphanedSession(d, due, msg);
       return;
     }
-    for (const r of due) {
-      if (moved(name)) return;
-      await markRetry(d, r, msg);
-    }
+    await markTransient(d, due, msg);
     useSyncStore.getState().setError(msg);
     useSyncStore.getState().setStatus("error");
   }
@@ -453,14 +464,10 @@ export function stopSyncWorkers() {
 }
 
 function onVisibility() {
-  if (document.visibilityState === "visible") {
-    void runPullOnce();
-    void runPushOnce();
-  }
+  if (document.visibilityState === "visible") void forceSync();
 }
 function onOnline() {
-  void runPushOnce();
-  void runPullOnce();
+  void forceSync();
 }
 function onOffline() {
   useSyncStore.getState().setStatus("offline");
@@ -468,6 +475,7 @@ function onOffline() {
 
 export async function forceSync() {
   // Reset backoff on all pending items so they are immediately eligible.
+  transientStreak = 0;
   try {
     await db()
       .outbox.where("status")
@@ -497,6 +505,19 @@ export async function forceFullResync() {
 export async function clearDeadLetter() {
   try {
     await db().outbox.where("status").equals("dead").delete();
+    await refreshQueued();
+  } catch {
+    // ignore
+  }
+}
+
+/** Dead rows back to pending, attempts 0, due now. */
+export async function retryFailed() {
+  try {
+    await db()
+      .outbox.where("status")
+      .equals("dead")
+      .modify({ status: "pending", attempts: 0, next_attempt_at: 0 } as Partial<OutboxRow>);
     await refreshQueued();
   } catch {
     // ignore

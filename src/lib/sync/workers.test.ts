@@ -42,7 +42,7 @@ vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { signOut, 
 // The exact error thrown by requireSupabaseAuth when GoTrue rejects a deleted user.
 const AUTH_ERR = "Unauthorized: Invalid token";
 
-import { runPullOnce, runPushOnce, MAX_PULL_PAGES } from "./workers";
+import { runPullOnce, runPushOnce, retryFailed, MAX_PULL_PAGES } from "./workers";
 import { useSyncStore } from "./useSyncStore";
 import { PULL_OVERLAP_MS } from "./cursor";
 
@@ -540,7 +540,44 @@ describe("push result handling", () => {
     await runPushOnce();
     expect(signOut).not.toHaveBeenCalled();
     const [r] = await allOutbox();
-    expect(r.attempts).toBe(1);
+    expect(r.attempts).toBe(0);
+  });
+
+  it("20 network failures in a row never dead-letter, and backoff stays within 5 minutes", async () => {
+    await mem.outbox.put(outbox(crypto.randomUUID()) as never);
+    pushReply = () => {
+      throw new Error("network down");
+    };
+    for (let i = 0; i < 20; i++) {
+      await mem.outbox.filter(() => true).modify({ next_attempt_at: 0 });
+      await runPushOnce();
+    }
+    const [r] = await allOutbox();
+    expect(r.status).toBe("pending");
+    expect(r.attempts).toBe(0);
+    expect(r.next_attempt_at).toBeLessThanOrEqual(Date.now() + 300_000 + 500);
+  });
+
+  it("a server rejection 10 times ends in dead", async () => {
+    const op = crypto.randomUUID();
+    await mem.outbox.put(outbox(op) as never);
+    pushReply = () => ({ accepted: [], rejected: [{ op_id: op, reason: "deadlock detected" }], canonical: [] });
+    for (let i = 0; i < 10; i++) {
+      await mem.outbox.filter(() => true).modify({ next_attempt_at: 0 });
+      await runPushOnce();
+    }
+    const [r] = await allOutbox();
+    expect(r.status).toBe("dead");
+    expect(r.attempts).toBe(10);
+  });
+
+  it("Retry failed returns dead rows to pending, due now, with attempts 0", async () => {
+    await mem.outbox.put({ ...outbox(crypto.randomUUID()), status: "dead", attempts: 10, next_attempt_at: Date.now() + 1e6 } as never);
+    await retryFailed();
+    const [r] = await allOutbox();
+    expect(r).toMatchObject({ status: "pending", attempts: 0 });
+    expect(r.next_attempt_at).toBeLessThanOrEqual(Date.now());
+    expect(useSyncStore.getState().dead).toBe(0);
   });
 
   it("country_progress canonical uses the server last_seen_at", async () => {

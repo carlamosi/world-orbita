@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 export function SyncPill() {
   const status = useSyncStore((s) => s.status);
   const queued = useSyncStore((s) => s.queued);
+  const dead = useSyncStore((s) => s.dead);
   const signedIn = useSyncStore((s) => s.signedIn);
   const router = useRouter();
   const wasSyncing = useRef(false);
@@ -39,6 +40,7 @@ export function SyncPill() {
     status === "offline" ||
     status === "error" ||
     (status === "queued" && queued > 0) ||
+    dead > 0 ||
     justSynced;
 
   let Icon = RefreshCw;
@@ -51,6 +53,10 @@ export function SyncPill() {
   } else if (status === "error") {
     Icon = AlertCircle;
     label = "Sync error";
+    tone = "text-rose-300";
+  } else if (dead > 0) {
+    Icon = AlertCircle;
+    label = `Failed (${dead})`;
     tone = "text-rose-300";
   } else if (status === "queued") {
     Icon = RefreshCw;
