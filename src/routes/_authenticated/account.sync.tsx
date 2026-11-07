@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSyncStore } from "@/lib/sync/useSyncStore";
-import { forceSync, forceFullResync, clearDeadLetter } from "@/lib/sync/workers";
+import { forceSync, forceFullResync, clearDeadLetter, retryFailed } from "@/lib/sync/workers";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { db, type OutboxRow } from "@/lib/db/orbita-db";
 
 export const Route = createFileRoute("/_authenticated/account/sync")({
@@ -10,7 +21,7 @@ export const Route = createFileRoute("/_authenticated/account/sync")({
 });
 
 function fmt(ts: number | null) {
-  if (!ts) return "—";
+  if (!ts) return "Never";
   const s = Math.round((Date.now() - ts) / 1000);
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
@@ -65,7 +76,7 @@ function SyncPage() {
         <Stat label="Last push" value={fmt(lastPushAt)} />
         <Stat label="Last pull" value={fmt(lastPullAt)} />
         <Stat label="Dead-letter" value={String(dead)} />
-        <Stat label="Last error" value={lastError ?? "—"} />
+        <Stat label="Last error" value={lastError ?? "None"} />
       </section>
 
       <div className="mt-6 flex flex-wrap gap-2">
@@ -82,12 +93,35 @@ function SyncPage() {
           Force full resync
         </button>
         {dead > 0 && (
-          <button
-            onClick={() => void clearDeadLetter()}
-            className="inline-flex items-center rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-medium text-rose-300 hover:bg-rose-500/20"
-          >
-            Clear {dead} dead-letter {dead === 1 ? "item" : "items"}
-          </button>
+          <>
+            <button
+              onClick={() => void retryFailed()}
+              className="inline-flex items-center rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs font-medium text-white/80 hover:bg-white/10"
+            >
+              Retry failed ({dead})
+            </button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <button className="inline-flex items-center rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-medium text-rose-300 hover:bg-rose-500/20">
+                  Delete {dead} failed {dead === 1 ? "item" : "items"}
+                </button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete failed items?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    These changes were never synced and will be lost for good.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void clearDeadLetter()}>
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
         )}
       </div>
 

@@ -14,7 +14,10 @@ let mem: MemDb = createMemDb();
 let t: TestDb;
 
 vi.mock("@/lib/db/orbita-db", () => ({ db: () => mem }));
-vi.mock("@/lib/db/dbProvider", () => ({ currentDbName: () => `orbita-${USER}` }));
+vi.mock("@/lib/db/dbProvider", () => ({
+  currentDbName: () => `orbita-${USER}`,
+  trackCycle: <T>(p: Promise<T>) => p,
+}));
 vi.mock("./sync.functions", () => ({
   syncPush: (a: { data: { mutations: Mutation[] } }) =>
     t.call("sync_push", { _mutations: a.data.mutations }),

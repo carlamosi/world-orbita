@@ -5,12 +5,14 @@ export type SyncStatus = "idle" | "syncing" | "queued" | "synced" | "offline" | 
 interface SyncState {
   status: SyncStatus;
   queued: number;
+  dead: number;
   lastPushAt: number | null;
   lastPullAt: number | null;
   lastError: string | null;
   signedIn: boolean;
   setStatus: (s: SyncStatus) => void;
   setQueued: (n: number) => void;
+  setDead: (n: number) => void;
   setLastPush: (t: number) => void;
   setLastPull: (t: number) => void;
   setError: (e: string | null) => void;
@@ -20,12 +22,14 @@ interface SyncState {
 export const useSyncStore = create<SyncState>((set) => ({
   status: "idle",
   queued: 0,
+  dead: 0,
   lastPushAt: null,
   lastPullAt: null,
   lastError: null,
   signedIn: false,
   setStatus: (status) => set({ status }),
   setQueued: (queued) => set({ queued }),
+  setDead: (dead) => set({ dead }),
   setLastPush: (t) => set({ lastPushAt: t }),
   setLastPull: (t) => set({ lastPullAt: t }),
   setError: (lastError) => set({ lastError }),

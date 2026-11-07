@@ -5,8 +5,14 @@
  * re-reads up to 15 s of rows (see cursor.ts), so applying the same row twice
  * must leave Dexie unchanged. All server dates are epoch ms numbers.
  */
-import { db } from "@/lib/db/orbita-db";
-import type { ConceptProgressRow, DailySummaryRow, QuestionHistoryRow } from "@/lib/db/orbita-db";
+import type {
+  OrbitaDB,
+  ConceptProgressRow,
+  CountryProgressRow,
+  DailySummaryRow,
+  QuestionHistoryRow,
+  UnlockRow,
+} from "@/lib/db/orbita-db";
 import { normalizeState } from "@/lib/fsrs/adapter";
 
 type Row = Record<string, unknown>;
@@ -91,75 +97,124 @@ function serverHistoryToRow(row: Row): QuestionHistoryRow {
   };
 }
 
-async function applyCountry(row: Row) {
-  await db().countryProgress.put({
+/**
+ * Mirror of the server merge (sync_push country_progress): a pulled skill wins
+ * only with a strictly higher version, so unpushed local skills survive.
+ */
+export function mergeCountry(local: CountryProgressRow | undefined, row: Row): CountryProgressRow {
+  const pulled = (row.skills ?? {}) as Record<string, unknown>;
+  const pulledVer = (row.skill_versions ?? {}) as Record<string, unknown>;
+  const seen = row.last_seen_at != null ? num(row.last_seen_at, Date.now()) : Date.now();
+  const skills: Record<string, unknown> = { ...(local?.skills ?? {}) };
+  const versions: Record<string, number> = { ...(local?.skill_versions ?? {}) };
+  for (const k of Object.keys(pulled)) {
+    if (!(k in skills) || num(pulledVer[k]) > (versions[k] ?? 0)) {
+      skills[k] = pulled[k];
+      versions[k] = num(pulledVer[k]);
+    }
+  }
+  const ahead = Object.keys(versions).some((k) => versions[k] > num(pulledVer[k]));
+  return {
     iso3: String(row.country_code),
-    skills: (row.skills ?? {}) as never,
-    skill_versions: (row.skill_versions ?? {}) as never,
-    lastSeenAt: row.last_seen_at != null ? num(row.last_seen_at, Date.now()) : Date.now(),
+    skills: skills as never,
+    skill_versions: versions as never,
+    lastSeenAt: Math.max(local?.lastSeenAt ?? 0, seen),
     updated_at: Date.now(),
-    dirty: 0,
+    dirty: ahead ? 1 : 0,
+  };
+}
+
+/** Same merge as the server: progress only grows, the first unlock date stays. */
+export function mergeUnlock(local: UnlockRow | undefined, row: Row): UnlockRow {
+  const pulledAt = row.unlocked_at != null ? num(row.unlocked_at) : null;
+  const at = [local?.unlockedAt ?? null, pulledAt].filter((v): v is number => v != null);
+  return {
+    key: String(row.key),
+    progress: Math.max(local?.progress ?? 0, num(row.progress)),
+    unlockedAt: at.length ? Math.min(...at) : null,
+    updatedAt: Date.now(),
+  };
+}
+
+async function applyCountry(d: OrbitaDB, row: Row) {
+  await d.transaction("rw", d.countryProgress, async () => {
+    const local = await d.countryProgress.get(String(row.country_code));
+    await d.countryProgress.put(mergeCountry(local, row));
   });
 }
 
-/** Apply one pull page for one entity. Per-row failures are swallowed. */
+/**
+ * Concept apply shared by pull and canonical. A pending/in_flight op means an
+ * unpushed local change: it reaches the server first, which answers with a
+ * stale_review canonical if its row is newer, so skipping loses nothing. dirty
+ * alone does not block: nothing clears it after a push (and seeded rows carry
+ * it with no op), so it would block other devices' newer reviews forever.
+ */
+async function applyConcept(d: OrbitaDB, row: Row, userId: string | null) {
+  const id = String(row.conceptId);
+  await d.transaction("rw", d.concept_progress, d.outbox, async () => {
+    const queued = await d.outbox
+      .where("entity")
+      .equals("concept_progress")
+      .filter((r) => (r.status === "pending" || r.status === "in_flight") && r.payload?.conceptId === id)
+      .count();
+    if (queued > 0) return;
+    if (shouldApplyPulledConcept(await d.concept_progress.get(id), row)) {
+      await d.concept_progress.put(serverConceptToRow(row, userId));
+    }
+  });
+}
+
+/**
+ * Apply one pull page for one entity. Errors propagate so the caller does not
+ * advance the cursor past rows that were never written (SYNC-11).
+ */
 export async function applyPulledRows(
+  d: OrbitaDB,
   entity: string,
   rows: Row[],
   userId: string | null,
 ): Promise<void> {
   for (const row of rows) {
-    try {
-      if (entity === "country_progress") {
-        await applyCountry(row);
-      } else if (entity === "unlocks") {
-        await db().unlocks.put({
-          key: String(row.key),
-          progress: num(row.progress),
-          unlockedAt: row.unlocked_at != null ? num(row.unlocked_at) : null,
-          updatedAt: Date.now(),
-        });
-      } else if (entity === "concept_progress") {
-        const local = await db().concept_progress.get(String(row.conceptId));
-        if (shouldApplyPulledConcept(local, row)) {
-          await db().concept_progress.put(serverConceptToRow(row, userId));
-        }
-      } else if (entity === "question_history") {
-        // Append-only and keyed by op_id: keep an existing local row as-is.
-        const id = String(row.op_id);
-        if (!(await db().question_history.get(id))) {
-          await db().question_history.put(serverHistoryToRow(row));
-        }
-      } else if (entity === "daily_summary") {
-        const key = String(row.dateKey);
-        const local = await db().daily_summary.get(key);
-        await db().daily_summary.put(mergeDailySummary(local, row));
+    if (entity === "country_progress") {
+      await applyCountry(d, row);
+    } else if (entity === "unlocks") {
+      await d.transaction("rw", d.unlocks, async () => {
+        await d.unlocks.put(mergeUnlock(await d.unlocks.get(String(row.key)), row));
+      });
+    } else if (entity === "concept_progress") {
+      await applyConcept(d, row, userId);
+    } else if (entity === "question_history") {
+      // Append-only and keyed by op_id: keep an existing local row as-is.
+      const id = String(row.op_id);
+      if (!(await d.question_history.get(id))) {
+        await d.question_history.put(serverHistoryToRow(row));
       }
-      // sessions_log / challenge_attempts / daily_streak / profiles are not
-      // mirrored to Dexie (local is authoritative); their cursors still advance.
-    } catch {
-      // ignore: one bad row must not stop the page
+    } else if (entity === "daily_summary") {
+      const key = String(row.dateKey);
+      const local = await d.daily_summary.get(key);
+      await d.daily_summary.put(mergeDailySummary(local, row));
     }
+    // sessions_log / challenge_attempts / daily_streak / profiles are not
+    // mirrored to Dexie (local is authoritative); their cursors still advance.
   }
 }
 
 /** Apply a sync_push canonical entry (best-effort). */
 export async function applyCanonical(
+  d: OrbitaDB,
   entity: string,
   row: Row | undefined,
   userId: string | null,
 ): Promise<void> {
   if (!row) return;
   try {
-    if (entity === "country_progress") await applyCountry(row);
+    if (entity === "country_progress") await applyCountry(d, row);
     else if (entity === "concept_progress") {
       // Same rule as the pull: a stale_review canonical can be older than the
       // local row (e.g. a resent op after a lost response while the user kept
       // answering), so never roll back a newer local review.
-      const local = await db().concept_progress.get(String(row.conceptId));
-      if (shouldApplyPulledConcept(local, row)) {
-        await db().concept_progress.put(serverConceptToRow(row, userId));
-      }
+      await applyConcept(d, row, userId);
     }
   } catch {
     // ignore: canonical patches are best-effort

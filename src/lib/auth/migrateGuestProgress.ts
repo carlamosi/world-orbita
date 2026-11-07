@@ -1,26 +1,39 @@
 ﻿/**
  * migrateGuestProgress.ts
  *
- * When a user signs in or creates an account, any FSRS progress accumulated
- * as a guest (stored in `orbita-local` IndexedDB) is atomically merged into
- * their personal DB (`orbita-${userId}`).
+ * When a user signs in or creates an account, any progress accumulated as a
+ * guest (stored in `orbita-local` IndexedDB) is merged into their personal DB
+ * (`orbita-${userId}`) in one transaction that also queues an outbox op for
+ * every merged row. Merge rules are the pull's (sync/apply.ts).
  *
- * Conflict resolution: whichever row has more FSRS repetitions wins — this
- * represents more genuine memory work. The guest DB is deleted after a
- * successful migration to prevent double-importing on future logins.
+ * The guest DB is deleted only after that transaction commits. On failure it
+ * is kept (the next sign-in or page load retries) and
+ * `sync_meta.guest_merge_pending` is set. Only rows the merge changes are
+ * written and queued, so a rerun over the same guest data adds nothing.
  */
 import Dexie from "dexie";
-import { createOrbitaDb, type OrbitaDB } from "@/lib/db/orbita-db";
+import { createOrbitaDb, type OrbitaDB, type OutboxRow } from "@/lib/db/orbita-db";
 import { authDebug } from "@/lib/auth/debug";
+import { mergeCountry, mergeUnlock, shouldApplyPulledConcept } from "@/lib/sync/apply";
+import {
+  conceptProgressPayload,
+  countryProgressPayload,
+  questionHistoryPayload,
+  sessionsLogPayload,
+  unlockPayload,
+} from "@/lib/sync/payloads";
+import { buildEnqueueRow } from "@/lib/sync/queue";
 
 const GUEST_DB_NAME = "orbita-local";
+const PENDING_KEY = "guest_merge_pending";
 
 export async function migrateGuestProgress(
   userDb: OrbitaDB,
   userId: string,
 ): Promise<{ migrated: number; skipped: number }> {
-  const guestDbExists = await Dexie.exists(GUEST_DB_NAME);
-  if (!guestDbExists) {
+  // Deleting orbita-local after a merge into itself would destroy the guest's data.
+  if (userDb.name !== `orbita-${userId}`) return { migrated: 0, skipped: 0 };
+  if (!(await Dexie.exists(GUEST_DB_NAME))) {
     authDebug("migrate:no_guest_db", { userId });
     return { migrated: 0, skipped: 0 };
   }
@@ -28,109 +41,119 @@ export async function migrateGuestProgress(
   const guestDb = createOrbitaDb(GUEST_DB_NAME);
   let migrated = 0;
   let skipped = 0;
-
   try {
     authDebug("migrate:start", { userId });
+    // Read the guest first: the user transaction cannot span another DB.
+    const [concepts, history, sessions, countries, unlocks] = await Promise.all([
+      guestDb.concept_progress.toArray(),
+      guestDb.question_history.toArray(),
+      guestDb.gameSessions.toArray(),
+      guestDb.countryProgress.toArray(),
+      guestDb.unlocks.toArray(),
+    ]);
+    guestDb.close();
 
-    // 1. concept_progress: merge by FSRS reps (more reps = more work done)
-    const guestConcepts = await guestDb.concept_progress.toArray();
-    if (guestConcepts.length > 0) {
-      const existing = await userDb.concept_progress
-        .where("conceptId").anyOf(guestConcepts.map((c) => c.conceptId)).toArray();
-      const existingMap = new Map(existing.map((c) => [c.conceptId, c]));
+    const tables = [
+      userDb.concept_progress,
+      userDb.question_history,
+      userDb.gameSessions,
+      userDb.countryProgress,
+      userDb.unlocks,
+      userDb.outbox,
+      userDb.sync_meta,
+    ];
+    await userDb.transaction("rw", tables, async () => {
+      const ops: OutboxRow[] = [];
+      const now = Date.now();
 
-      const toUpsert = guestConcepts
-        .map((guest) => {
-          const ex = existingMap.get(guest.conceptId);
-          if (!ex || guest.fsrs_reps > ex.fsrs_reps) {
-            return { ...guest, user_id: userId, dirty: 1 as const };
-          }
+      for (const g of concepts) {
+        if (!shouldApplyPulledConcept(await userDb.concept_progress.get(g.conceptId), { ...g })) {
           skipped++;
-          return null;
-        })
-        .filter(Boolean) as typeof guestConcepts;
-
-      if (toUpsert.length > 0) {
-        await userDb.concept_progress.bulkPut(toUpsert);
-        migrated += toUpsert.length;
-      }
-      authDebug("migrate:concept_progress", { upserted: toUpsert.length, skipped, userId });
-    }
-
-    // 2. question_history: append-only; op_id UUID prevents duplicates
-    const guestHistory = await guestDb.question_history.toArray();
-    if (guestHistory.length > 0) {
-      await userDb.question_history.bulkPut(guestHistory).catch(() => {});
-      migrated += guestHistory.length;
-      authDebug("migrate:question_history", { count: guestHistory.length, userId });
-    }
-
-    // 3. gameSessions: strip auto-increment id; assign fresh op_id if missing
-    const guestSessions = await guestDb.gameSessions.toArray();
-    if (guestSessions.length > 0) {
-      const rows = guestSessions.map(({ id: _id, ...rest }) => ({
-        ...rest,
-        op_id: rest.op_id ?? crypto.randomUUID(),
-        dirty: 1 as const,
-      }));
-      await userDb.gameSessions.bulkPut(rows).catch(() => {});
-      migrated += rows.length;
-      authDebug("migrate:game_sessions", { count: rows.length, userId });
-    }
-
-    // 4. countryProgress (SM-2 legacy): merge skills, keep highest confidence
-    const guestCP = await guestDb.countryProgress.toArray();
-    if (guestCP.length > 0) {
-      const exCP = await userDb.countryProgress
-        .where("iso3").anyOf(guestCP.map((c) => c.iso3)).toArray();
-      const exMap = new Map(exCP.map((c) => [c.iso3, c]));
-
-      const rows = guestCP.map((guest) => {
-        const ex = exMap.get(guest.iso3);
-        if (!ex) return { ...guest, dirty: 1 as const };
-        const mergedSkills = { ...ex.skills };
-        for (const [skill, stat] of Object.entries(guest.skills)) {
-          const exStat = ex.skills[skill as keyof typeof ex.skills];
-          if (!exStat || (stat && stat.confidence > exStat.confidence)) {
-            (mergedSkills as Record<string, typeof stat>)[skill] = stat;
-          }
+          continue;
         }
-        return {
-          ...ex,
-          skills: mergedSkills,
-          lastSeenAt: Math.max(ex.lastSeenAt, guest.lastSeenAt),
-          dirty: 1 as const,
-        };
-      });
-      await userDb.countryProgress.bulkPut(rows).catch(() => {});
-      authDebug("migrate:country_progress", { count: rows.length, userId });
-    }
-
-    // 5. unlocks: keep the more advanced progress
-    const guestUnlocks = await guestDb.unlocks.toArray();
-    if (guestUnlocks.length > 0) {
-      const exUnlocks = await userDb.unlocks
-        .where("key").anyOf(guestUnlocks.map((u) => u.key)).toArray();
-      const exUnlockMap = new Map(exUnlocks.map((u) => [u.key, u]));
-      const toUpsert = guestUnlocks.filter((g) => {
-        const ex = exUnlockMap.get(g.key);
-        return !ex || g.progress > ex.progress;
-      });
-      if (toUpsert.length > 0) {
-        await userDb.unlocks.bulkPut(toUpsert).catch(() => {});
-        authDebug("migrate:unlocks", { count: toUpsert.length, userId });
+        const row = { ...g, user_id: userId, dirty: 1 as const, updated_at: now };
+        await userDb.concept_progress.put(row);
+        const payload = conceptProgressPayload(row);
+        if (payload) ops.push(buildEnqueueRow({ entity: "concept_progress", op: "upsert", payload }));
+        migrated++;
       }
-    }
 
-    // 6. Delete guest DB — prevents double-migration on future logins
-    await guestDb.close();
-    await Dexie.delete(GUEST_DB_NAME);
-    authDebug("migrate:complete", { userId, migrated, skipped });
-    return { migrated, skipped };
+      for (const h of history) {
+        if (await userDb.question_history.get(h.op_id)) {
+          skipped++;
+          continue;
+        }
+        await userDb.question_history.put(h);
+        ops.push(
+          buildEnqueueRow({
+            op_id: h.op_id,
+            entity: "question_history",
+            op: "insert",
+            payload: questionHistoryPayload(h),
+          }),
+        );
+        migrated++;
+      }
+
+      for (const { id: _id, ...s } of sessions) {
+        // shortcut: a row without op_id (no current writer makes one) gets a fresh id per run, so a rerun after a failed delete can duplicate it; persist the id first if such rows appear.
+        const op_id = s.op_id ?? crypto.randomUUID();
+        if (await userDb.gameSessions.where("op_id").equals(op_id).count()) {
+          skipped++;
+          continue;
+        }
+        await userDb.gameSessions.add({ ...s, op_id, dirty: 1 });
+        ops.push(buildEnqueueRow({ op_id, entity: "sessions_log", op: "insert", payload: sessionsLogPayload(s) }));
+        migrated++;
+      }
+
+      for (const g of countries) {
+        const local = await userDb.countryProgress.get(g.iso3);
+        const merged = mergeCountry(local, countryProgressPayload(g));
+        if (
+          local &&
+          JSON.stringify(merged.skills) === JSON.stringify(local.skills) &&
+          merged.lastSeenAt === local.lastSeenAt
+        ) {
+          skipped++;
+          continue;
+        }
+        await userDb.countryProgress.put({ ...merged, dirty: 1 });
+        ops.push(
+          buildEnqueueRow({ entity: "country_progress", op: "upsert", payload: countryProgressPayload(merged) }),
+        );
+        migrated++;
+      }
+
+      for (const g of unlocks) {
+        const local = await userDb.unlocks.get(g.key);
+        const merged = mergeUnlock(local, unlockPayload(g));
+        if (local && merged.progress === local.progress && merged.unlockedAt === local.unlockedAt) {
+          skipped++;
+          continue;
+        }
+        await userDb.unlocks.put(merged);
+        ops.push(buildEnqueueRow({ entity: "unlocks", op: "upsert", payload: unlockPayload(merged) }));
+        migrated++;
+      }
+
+      if (ops.length) await userDb.outbox.bulkAdd(ops);
+      await userDb.sync_meta.delete(PENDING_KEY);
+    });
   } catch (err) {
     authDebug("migrate:error", { userId, error: err instanceof Error ? err.message : String(err) });
-    return { migrated, skipped };
+    await userDb.sync_meta.put({ key: PENDING_KEY, value: "1" }).catch(() => {});
+    return { migrated: 0, skipped: 0 };
   } finally {
-    try { guestDb.close(); } catch { /* ignore */ }
+    guestDb.close();
   }
+
+  try {
+    await Dexie.delete(GUEST_DB_NAME);
+  } catch (err) {
+    // The merge is committed and a rerun adds nothing, so a failed delete is only retried later.
+    authDebug("migrate:delete_failed", { userId, error: err instanceof Error ? err.message : String(err) });
+  }
+  authDebug("migrate:complete", { userId, migrated, skipped });
+  return { migrated, skipped };
 }

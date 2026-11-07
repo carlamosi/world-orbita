@@ -11,7 +11,10 @@ let mem: MemDb = createMemDb();
 const USER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 vi.mock("@/lib/db/orbita-db", () => ({ db: () => mem }));
-vi.mock("@/lib/db/dbProvider", () => ({ currentDbName: () => `orbita-${USER}` }));
+vi.mock("@/lib/db/dbProvider", () => ({
+  currentDbName: () => `orbita-${USER}`,
+  trackCycle: <T>(p: Promise<T>) => p,
+}));
 
 const pullCalls: Record<string, string | null>[] = [];
 let pullPages: PullResult[] = [];
@@ -39,7 +42,7 @@ vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { signOut, 
 // The exact error thrown by requireSupabaseAuth when GoTrue rejects a deleted user.
 const AUTH_ERR = "Unauthorized: Invalid token";
 
-import { runPullOnce, runPushOnce, MAX_PULL_PAGES } from "./workers";
+import { runPullOnce, runPushOnce, retryFailed, MAX_PULL_PAGES } from "./workers";
 import { useSyncStore } from "./useSyncStore";
 import { PULL_OVERLAP_MS } from "./cursor";
 
@@ -287,6 +290,121 @@ describe("pull apply", () => {
   });
 });
 
+describe("pull never overwrites local changes", () => {
+  const ID = "FRA:capital:countryToCap";
+  const conceptOp = (status: OutboxRow["status"], conceptId = ID): OutboxRow => ({
+    ...outbox(crypto.randomUUID(), "concept_progress"),
+    payload: { conceptId },
+    status,
+  });
+  const local = async () => (await mem.concept_progress.get(ID)) as unknown as ConceptProgressRow;
+
+  it("pull never overwrites dirty row", async () => {
+    // What recordConceptAttempt leaves: dirty row + its op, here mid-push.
+    await mem.concept_progress.put({ ...conceptServerRow({ fsrs_last_review: T - 1000 }), dirty: 1 } as never);
+    await mem.outbox.put(conceptOp("in_flight") as never);
+    pullPages = [page("concept_progress", [conceptServerRow({ fsrs_last_review: T })], `${T}|x`)];
+    await runPullOnce();
+    expect(await local()).toMatchObject({ fsrs_last_review: T - 1000, dirty: 1 });
+  });
+
+  it("a pending op for the same key blocks the pulled row, one for another key does not", async () => {
+    await mem.concept_progress.put({ ...conceptServerRow({ fsrs_last_review: T - 1000 }), dirty: 0 } as never);
+    await mem.outbox.put(conceptOp("pending") as never);
+    await mem.outbox.put(conceptOp("pending", "DEU:capital:countryToCap") as never);
+    pullPages = [page("concept_progress", [conceptServerRow({ fsrs_last_review: T })], `${T}|x`)];
+    await runPullOnce();
+    expect((await local()).fsrs_last_review).toBe(T - 1000);
+
+    // Once the op is gone (here: dead), the newer review applies on the next pull.
+    const [mine] = (await allOutbox()).filter((r) => r.payload.conceptId === ID);
+    await mem.outbox.where("op_id").equals(mine.op_id).modify({ status: "dead" });
+    await runPullOnce();
+    expect((await local()).fsrs_last_review).toBe(T);
+  });
+
+  it("a canonical never overwrites a local row that still has an op queued", async () => {
+    const op = crypto.randomUUID();
+    await mem.outbox.put(outbox(op, "concept_progress") as never);
+    await mem.outbox.put({ ...conceptOp("pending"), next_attempt_at: Date.now() + 1e6 } as never);
+    await mem.concept_progress.put({ ...conceptServerRow({ fsrs_last_review: T - 1000 }), dirty: 1 } as never);
+    pushReply = () => ({
+      accepted: [],
+      rejected: [{ op_id: op, reason: "stale_review" }],
+      canonical: [{ entity: "concept_progress", op_id: op, payload: conceptServerRow() }],
+    });
+    await runPushOnce();
+    expect(await local()).toMatchObject({ fsrs_last_review: T - 1000, dirty: 1 });
+  });
+
+  it("country_progress merges per skill keeping the higher version", async () => {
+    await mem.countryProgress.put({
+      iso3: "FRA",
+      skills: { capital: { local: true }, flag: { local: true } },
+      skill_versions: { capital: 5, flag: 1 },
+      lastSeenAt: T + 1,
+      dirty: 1,
+    });
+    pullPages = [
+      page(
+        "country_progress",
+        [
+          {
+            country_code: "FRA",
+            skills: { capital: { server: true }, flag: { server: true }, location: { server: true } },
+            skill_versions: { capital: 4, flag: 2, location: 1 },
+            last_seen_at: T,
+          },
+        ],
+        `${T}|FRA`,
+      ),
+    ];
+    await runPullOnce();
+    expect(await mem.countryProgress.get("FRA")).toMatchObject({
+      skills: { capital: { local: true }, flag: { server: true }, location: { server: true } },
+      skill_versions: { capital: 5, flag: 2, location: 1 },
+      lastSeenAt: T + 1,
+      dirty: 1,
+    });
+  });
+
+  it("unlocks merge like the server: progress max, earliest unlock date", async () => {
+    await mem.unlocks.put({ key: "k", progress: 5, unlockedAt: null, updatedAt: T });
+    pullPages = [page("unlocks", [{ key: "k", progress: 3, unlocked_at: T }], `${T}|k`)];
+    await runPullOnce();
+    expect(await mem.unlocks.get("k")).toMatchObject({ progress: 5, unlockedAt: T });
+  });
+
+  it("a Dexie write failure does not advance the cursor", async () => {
+    mem.concept_progress.put = async () => {
+      throw new Error("QuotaExceededError");
+    };
+    pullPages = [page("concept_progress", [conceptServerRow()], `${T}|x`)];
+    await runPullOnce();
+    expect(await mem.sync_meta.get("cursor_concept_progress")).toBeUndefined();
+    expect(useSyncStore.getState().lastError).toMatch(/Quota/);
+  });
+
+  it("a failing entity only stalls its own cursor", async () => {
+    mem.concept_progress.put = async () => {
+      throw new Error("QuotaExceededError");
+    };
+    await mem.sync_meta.put({ key: "cursor_concept_progress", value: `${T - 1}|old` });
+    pullPages = [
+      {
+        country_progress: { rows: [], cursor: `${T}|FRA`, has_more: false },
+        concept_progress: { rows: [conceptServerRow()], cursor: `${T}|x`, has_more: false },
+        unlocks: { rows: [{ key: "k", progress: 1 }], cursor: `${T}|k`, has_more: false },
+      },
+    ];
+    await runPullOnce();
+    expect((await mem.sync_meta.get("cursor_concept_progress"))?.value).toBe(`${T - 1}|old`);
+    expect((await mem.sync_meta.get("cursor_unlocks"))?.value).toBe(`${T}|k`);
+    expect(await mem.unlocks.get("k")).toMatchObject({ progress: 1 });
+    expect(useSyncStore.getState().lastError).toMatch(/Quota/);
+  });
+});
+
 describe("push result handling", () => {
   it("an invalid op_id is marked dead locally and never reaches the RPC", async () => {
     await mem.outbox.put(outbox("abc:cp") as never);
@@ -471,6 +589,50 @@ describe("push result handling", () => {
       expect(r.next_attempt_at).toBeGreaterThan(Date.now());
     });
 
+    const expectKept = async () => {
+      const [r] = await allOutbox();
+      expect(r.status).toBe("pending");
+      expect(r.attempts).toBe(0);
+    };
+
+    it.each([
+      ["a retryable fetch error (503)", { name: "AuthRetryableFetchError", status: 503 }],
+      ["a rate limit (429)", { name: "AuthApiError", status: 429 }],
+    ])("does NOT sign out when getUser answers with %s", async (_label, error) => {
+      await mem.outbox.put(outbox(crypto.randomUUID()) as never);
+      authFail();
+      getUser.mockImplementation(async () => ({ data: { user: null }, error }));
+      await runPushOnce();
+      expect(getUser).toHaveBeenCalledTimes(1);
+      expect(signOut).not.toHaveBeenCalled();
+      await expectKept();
+    });
+
+    it("does NOT sign out when getUser throws (network down)", async () => {
+      await mem.outbox.put(outbox(crypto.randomUUID()) as never);
+      authFail();
+      getUser.mockImplementation(async () => {
+        throw new TypeError("Failed to fetch");
+      });
+      await runPushOnce();
+      expect(signOut).not.toHaveBeenCalled();
+      await expectKept();
+    });
+
+    it.each([
+      ["AuthSessionMissingError (400)", { name: "AuthSessionMissingError", status: 400 }, { user: null }],
+      ["status 401", { name: "AuthApiError", status: 401 }, { user: null }],
+      ["status 404", { name: "AuthApiError", status: 404 }, { user: null }],
+      ["no error and no user", null, { user: null }],
+    ])("signs out on a definitive answer: %s", async (_label, error, data) => {
+      await mem.outbox.put(outbox(crypto.randomUUID()) as never);
+      authFail();
+      getUser.mockImplementation(async () => ({ data, error }));
+      await runPushOnce();
+      expect(signOut).toHaveBeenCalledTimes(1);
+      await expectKept();
+    });
+
     it("a pull failing with the auth error also checks the session and signs out", async () => {
       authFail();
       const { syncPull } = await import("./sync.functions");
@@ -493,7 +655,44 @@ describe("push result handling", () => {
     await runPushOnce();
     expect(signOut).not.toHaveBeenCalled();
     const [r] = await allOutbox();
-    expect(r.attempts).toBe(1);
+    expect(r.attempts).toBe(0);
+  });
+
+  it("20 network failures in a row never dead-letter, and backoff stays within 5 minutes", async () => {
+    await mem.outbox.put(outbox(crypto.randomUUID()) as never);
+    pushReply = () => {
+      throw new Error("network down");
+    };
+    for (let i = 0; i < 20; i++) {
+      await mem.outbox.filter(() => true).modify({ next_attempt_at: 0 });
+      await runPushOnce();
+    }
+    const [r] = await allOutbox();
+    expect(r.status).toBe("pending");
+    expect(r.attempts).toBe(0);
+    expect(r.next_attempt_at).toBeLessThanOrEqual(Date.now() + 300_000 + 500);
+  });
+
+  it("a server rejection 10 times ends in dead", async () => {
+    const op = crypto.randomUUID();
+    await mem.outbox.put(outbox(op) as never);
+    pushReply = () => ({ accepted: [], rejected: [{ op_id: op, reason: "deadlock detected" }], canonical: [] });
+    for (let i = 0; i < 10; i++) {
+      await mem.outbox.filter(() => true).modify({ next_attempt_at: 0 });
+      await runPushOnce();
+    }
+    const [r] = await allOutbox();
+    expect(r.status).toBe("dead");
+    expect(r.attempts).toBe(10);
+  });
+
+  it("Retry failed returns dead rows to pending, due now, with attempts 0", async () => {
+    await mem.outbox.put({ ...outbox(crypto.randomUUID()), status: "dead", attempts: 10, next_attempt_at: Date.now() + 1e6 } as never);
+    await retryFailed();
+    const [r] = await allOutbox();
+    expect(r).toMatchObject({ status: "pending", attempts: 0 });
+    expect(r.next_attempt_at).toBeLessThanOrEqual(Date.now());
+    expect(useSyncStore.getState().dead).toBe(0);
   });
 
   it("country_progress canonical uses the server last_seen_at", async () => {
