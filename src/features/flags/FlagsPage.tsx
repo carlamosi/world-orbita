@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { Check, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
@@ -6,6 +7,7 @@ import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import { SessionEmpty } from "@/features/engine/SessionEmpty";
+import { SessionLoading } from "@/features/engine/SessionLoading";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { feedbackContext } from "@/features/engine/feedbackContext";
@@ -103,8 +105,8 @@ export default function FlagsPage() {
       {!finished && (current || s.loading) && (
         <>
           {s.loading && !current ? (
-            <div className="flex items-center justify-center min-h-[200px]">
-              <div className="size-8 rounded-full border-2 border-white/10 border-t-[color:var(--cyan)] animate-spin" />
+            <div className="w-full pt-16">
+              <SessionLoading />
             </div>
           ) : (
             <>
@@ -299,7 +301,7 @@ function FlagToCountry({
                   transition={{ duration: 0.18 }}
                   className="shrink-0 size-6 rounded-full bg-emerald-500/20 border border-emerald-500/60 text-emerald-400 flex items-center justify-center"
                 >
-                  <span className="text-sm font-bold leading-none">✓</span>
+                  <Check className="size-3.5" strokeWidth={2.75} aria-hidden />
                 </motion.div>
               )}
               {isWrongChoice && (
@@ -309,7 +311,7 @@ function FlagToCountry({
                   transition={{ duration: 0.18 }}
                   className="shrink-0 size-6 rounded-full bg-rose-500/20 border border-rose-500/60 text-rose-400 flex items-center justify-center"
                 >
-                  <span className="text-xs font-bold leading-none">✕</span>
+                  <X className="size-3.5" strokeWidth={2.75} aria-hidden />
                 </motion.div>
               )}
             </motion.button>
@@ -349,7 +351,6 @@ function FlagToType({
           target={target}
           kind="country"
           answerState={answerState}
-          correctAnswer={target.name}
           onSubmit={onSubmit}
           placeholder="Type the country…"
         />

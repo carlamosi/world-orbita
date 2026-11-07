@@ -129,7 +129,7 @@ export function SessionEnd({
                 <div className={`mt-6 grid ${isSpeedMode ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"} gap-2.5 font-mono text-[11px] uppercase tracking-wider text-white/55`}>
                   <Stat label="Accuracy" value={`${accuracy}%`} />
                   <Stat label="Time" value={timeFormatted} />
-                  <Stat label="Streak" value={`🔥 ${streak}d`} />
+                  <Stat label="Day streak" value={streak} />
                   {isSpeedMode && (
                     <Stat
                       label="Speed"

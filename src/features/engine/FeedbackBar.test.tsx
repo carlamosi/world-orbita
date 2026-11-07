@@ -138,7 +138,8 @@ describe("feedback after an answer (Task 21)", () => {
   it("the status region announces the result, not the buttons", () => {
     render("wrong");
     const region = host.querySelector('[role="status"][aria-live="polite"]')!;
-    expect(region.textContent).toContain("Not quite");
+    expect(region.textContent).toContain("Incorrect");
+    expect(host.textContent).not.toContain("Not quite");
     expect(region.textContent).not.toContain("Next");
   });
 

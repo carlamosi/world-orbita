@@ -60,6 +60,8 @@ interface Globe3DProps {
   autoRotate?: boolean;
   /** Speed of the ambient auto-rotation (default 0.35). Lower = slower drift. */
   autoRotateSpeed?: number;
+  /** Label the highlighted country (a hit). Off by default: in Name mode the highlight is the question. */
+  labelHighlight?: boolean;
   /**
    * Optional secondary polygon overlay (e.g. Spain CCAA / province features).
    * Rendered as react-globe.gl `customPolygonsData` — completely independent
@@ -183,6 +185,7 @@ export default function Globe3D({
   disableMicrostates = false,
   autoRotate,
   autoRotateSpeed,
+  labelHighlight = false,
   overlayPolygons,
   overlayCapColor,
   overlaySideColor,
@@ -199,6 +202,8 @@ export default function Globe3D({
   const handleFeatureClick = onFeatureClick ?? onCountryClick;
 
   const ref = useRef<GlobeMethods | undefined>(undefined);
+  // The camera pass needs the mounted globe: re-run it once the globe is ready (first question).
+  const [globeReady, setGlobeReady] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [dim, setDim] = useState({ w: 600, h: 600 });
   const [hoverIso3, setHoverIso3] = useState<string | null>(null);
@@ -623,7 +628,8 @@ export default function Globe3D({
       };
     }
     return null;
-  }, [missPair, effWrong, effReveal, effFocus, pointOfView, featureByIso3, countryByIso3]);
+  // effHighlight is a dependency: in Name mode the highlighted country is the question and must be in view.
+  }, [missPair, effWrong, effReveal, effHighlight, effFocus, pointOfView, featureByIso3, countryByIso3]);
 
   const lastCameraTargetKey = useRef<string | null>(null);
 
@@ -650,7 +656,7 @@ export default function Globe3D({
         );
       }
     }
-  }, [activeCameraTarget, autoRotate, effectiveQuality]);
+  }, [activeCameraTarget, autoRotate, effectiveQuality, globeReady]);
 
   // ---- Smooth Camera Rotation on Continent Selection (world mode only) -----------------
   const lastActiveContinent = useRef<string | null | undefined>(undefined);
@@ -681,7 +687,10 @@ export default function Globe3D({
     }
   }, [activeContinent, effectiveQuality, disableWorldPolygons, pointOfView]);
 
-  // ---- Explore-oriented camera logic for new questions ----------------
+  // ---- New question: a calm glide to a neutral view ----------------------
+  // Never toward the answer (that would hint its continent): back to the chosen
+  // region, or a world overview at the current longitude. A highlighted question
+  // (Name mode) is framed by the camera pass above instead.
   const lastQuestionKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -690,34 +699,23 @@ export default function Globe3D({
       return;
     }
     if (lastQuestionKey.current === questionKey) return;
+    const first = lastQuestionKey.current === null;
     lastQuestionKey.current = questionKey;
+    if (first || effHighlight) return;
 
     const g = ref.current;
-    const targetCountry = countryByIso3.get(questionKey);
-    if (!targetCountry) return;
-
     const pov = g.pointOfView();
-    const currentLat = pov.lat;
-    const currentLng = pov.lng;
-    const currentAlt = pov.altitude;
-
-    const targetLat = targetCountry.coordinates[0];
-    const targetLng = targetCountry.coordinates[1];
-
-    const dist = angularDistanceDeg(currentLat, currentLng, targetLat, targetLng);
-    const threshold = Math.min(75, 20 + currentAlt * 30);
-
-    if (dist > threshold) {
-      const continent = targetCountry.continent;
-      const center = CONTINENT_CENTERS[continent] || { lat: targetLat, lng: targetLng };
-      const altitude = Math.max(currentAlt * 1.15, 1.6);
-      g.pointOfView({ lat: center.lat, lng: center.lng, altitude }, 1400);
-    } else {
-      if (currentAlt < 0.8) {
-        g.pointOfView({ lat: currentLat, lng: currentLng, altitude: currentAlt * 1.35 }, 800);
-      }
-    }
-  }, [questionKey, countryByIso3, disableWorldPolygons, pointOfView]);
+    const center = activeContinent ? CONTINENT_CENTERS[activeContinent] : undefined;
+    const target = center ?? { lat: 18, lng: pov.lng, altitude: Math.max(pov.altitude, 2.2) };
+    const moved =
+      angularDistanceDeg(pov.lat, pov.lng, target.lat, target.lng) > 4 ||
+      Math.abs(pov.altitude - target.altitude) > 0.15;
+    if (!moved) return;
+    const reduced =
+      typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    g.pointOfView(target, effectiveQuality === "static" || reduced ? 0 : 1100);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionKey]);
 
   // ---- Click / hover handlers (active continent aware) ----------------
   const handlePolygonClick = useCallback(
@@ -928,20 +926,20 @@ export default function Globe3D({
     lat: number;
     lng: number;
     kind: "wrong" | "correct";
-    /** Wrong pill only: distance to the answer. */
-    km?: number;
   }
 
   const spatialPills = useMemo<SpatialPill[]>(() => {
     const pills: SpatialPill[] = [];
     if (effWrong) {
-      pills.push({ id: `wrong-${effWrong}`, iso3: effWrong, ...placeOf(effWrong), kind: "wrong", km: missPair?.km });
+      pills.push({ id: `wrong-${effWrong}`, iso3: effWrong, ...placeOf(effWrong), kind: "wrong" });
     }
-    if (effReveal) {
-      pills.push({ id: `reveal-${effReveal}`, iso3: effReveal, ...placeOf(effReveal), kind: "correct" });
+    // A hit is labelled too, but only when the page says so: in Name mode the highlight is the question.
+    const answerId = effReveal ?? (labelHighlight ? effHighlight : null);
+    if (answerId) {
+      pills.push({ id: `answer-${answerId}`, iso3: answerId, ...placeOf(answerId), kind: "correct" });
     }
     return pills;
-  }, [effWrong, effReveal, placeOf, missPair]);
+  }, [effWrong, effReveal, effHighlight, labelHighlight, placeOf]);
 
   /** Dashed arc from the click to the answer: the size and direction of the miss. */
   const missArcs = useMemo(
@@ -962,25 +960,21 @@ export default function Globe3D({
     const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const wrong = p.kind === "wrong";
     const rgb = wrong ? COLOR_WRONG : COLOR_REVEAL;
-    // Brand chip: glass, display-font name, mono meta. The answer sits a step forward.
+    // Quiet glass chip in the brand type: a status dot and the name. The answer reads first; the miss steps back.
     el.innerHTML = `
       <div style="
-        display:inline-flex;align-items:center;gap:8px;
-        padding:${wrong ? "5px 12px" : "7px 14px"};
-        background:rgba(8,8,14,${wrong ? 0.78 : 0.9});
-        border:1px solid rgba(${rgb},${wrong ? 0.55 : 0.85});
-        box-shadow:0 0 ${wrong ? 10 : 22}px rgba(${rgb},${wrong ? 0.25 : 0.4}),0 6px 18px rgba(0,0,0,0.55);
-        border-radius:9999px;backdrop-filter:blur(12px);white-space:nowrap;
-        ${reduced ? "" : `animation:${wrong ? "pillShake 0.24s" : "pillPop 0.28s 0.15s"} cubic-bezier(0.16,1,0.3,1) both;`}
+        display:inline-flex;align-items:center;gap:7px;
+        padding:5px 11px 5px 9px;margin-bottom:6px;
+        background:rgba(10,10,18,0.72);
+        border:1px solid rgba(255,255,255,${wrong ? 0.08 : 0.14});
+        box-shadow:0 8px 24px -8px rgba(0,0,0,0.7);
+        border-radius:9999px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);white-space:nowrap;
+        ${reduced ? "" : "animation:pillIn 0.32s cubic-bezier(0.16,1,0.3,1) both;"}
       ">
-        <span style="width:6px;height:6px;border-radius:50%;background:rgb(${rgb});box-shadow:0 0 8px rgb(${rgb});"></span>
-        <span style="font-family:var(--font-display);font-size:${wrong ? 12 : 14}px;font-weight:600;letter-spacing:-0.01em;color:${wrong ? "rgba(255,255,255,0.7)" : "#fff"};${wrong ? "text-decoration:line-through;text-decoration-color:rgba(" + rgb + ",0.7);" : ""}">${p.name}</span>
-        ${wrong && p.km ? `<span style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.08em;color:rgba(${rgb},0.9);">${p.km.toLocaleString("en-US")} KM OFF</span>` : ""}
+        <span style="width:6px;height:6px;border-radius:50%;background:rgb(${rgb});box-shadow:0 0 0 3px rgba(${rgb},0.16);"></span>
+        <span style="font-family:var(--font-display);font-size:${wrong ? 12 : 13}px;font-weight:500;letter-spacing:-0.005em;color:${wrong ? "rgba(255,255,255,0.5)" : "#fff"};${wrong ? `text-decoration:line-through;text-decoration-color:rgba(${rgb},0.6);` : ""}">${p.name}</span>
       </div>
-      <style>
-        @keyframes pillShake { 0%,100%{transform:translateX(0)} 25%,75%{transform:translateX(-3px)} 50%{transform:translateX(3px)} }
-        @keyframes pillPop { 0%{transform:scale(0.9);opacity:0} 100%{transform:scale(1);opacity:1} }
-      </style>
+      <style>@keyframes pillIn { 0%{transform:translateY(4px);opacity:0} 100%{transform:translateY(0);opacity:1} }</style>
     `;
     return el;
   }, []);
@@ -1050,6 +1044,7 @@ export default function Globe3D({
     >
       <Globe
         ref={ref}
+        onGlobeReady={() => setGlobeReady(true)}
         width={dim.w}
         height={dim.h}
         backgroundColor="rgba(0,0,0,0)"

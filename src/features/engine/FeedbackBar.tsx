@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/orbita-button";
 import { spring } from "@/lib/motion";
 import { useCallback, type ReactNode } from "react";
+import { Check, X } from "lucide-react";
 
 interface Props {
   show: boolean;
@@ -47,7 +48,8 @@ export function FeedbackBar({
     },
     [miss],
   );
-  const label = state === "correct" ? "Correct" : state === "wrong" ? "Not quite" : "Revealed";
+  // Screen readers only: the card itself shows the result through its two rows, with no label.
+  const label = state === "correct" ? "Correct" : "Incorrect";
   const answer = (
     <>
       {miss && chosen !== undefined && (chosen ? `You chose ${chosen} · Answer: ` : "Answer: ")}
@@ -68,32 +70,32 @@ export function FeedbackBar({
         {visible && (
           <motion.div
             key={state}
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
+            exit={{ opacity: 0, y: 16 }}
             transition={spring.crisp}
             className="px-4 w-full max-w-md mx-auto"
           >
-            <div
-              className={`glass-strong rounded-2xl px-6 py-4 flex items-center justify-between gap-4 border transition-all duration-300 ${
-                state === "wrong"
-                  ? "border-rose-500/30 shadow-[0_8px_32px_-4px_rgba(244,63,94,0.18)]"
-                  : "border-white/10 shadow-[0_8px_32px_-4px_rgba(0,0,0,0.36)]"
-              }`}
-            >
-              <div className="text-left min-w-0 flex-1" aria-hidden="true">
-                <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/45">
-                  {label}
-                </div>
-                <div className="font-display text-lg text-white flex items-center gap-2">
+            <div className="glass-strong rounded-2xl pl-5 pr-3 py-3.5 flex items-center gap-4 border border-white/10 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.6)]">
+              <div className="text-left min-w-0 flex-1 space-y-1.5" aria-hidden="true">
+                {/* What was picked: quiet, struck through. Nothing when the learner did not answer. */}
+                {chosen && (
+                  <div className="flex items-center gap-2.5 text-sm text-white/45">
+                    <Mark tone="wrong" />
+                    <span className="truncate line-through decoration-rose-400/70">{chosen}</span>
+                  </div>
+                )}
+                {/* The answer carries the weight. */}
+                <div className="flex items-center gap-2.5">
+                  <Mark tone="right" />
                   {flag}
-                  <span className="min-w-0">{answer}</span>
+                  <span className="font-display text-lg leading-tight text-white truncate">{title}</span>
                 </div>
-                {subtitle && <div className="text-[12px] text-white/55">{subtitle}</div>}
+                {subtitle && <div className="pl-[30px] text-[12px] leading-snug text-white/45">{subtitle}</div>}
               </div>
               {!hideNext && (
-                <Button size="sm" onClick={onNext} ref={focusNext} data-feedback-next="">
-                  Next →
+                <Button size="sm" variant="secondary" onClick={onNext} ref={focusNext} data-feedback-next="" className="shrink-0">
+                  Next
                 </Button>
               )}
             </div>
@@ -109,5 +111,20 @@ export function FeedbackBar({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function Mark({ tone }: { tone: "right" | "wrong" }) {
+  const Icon = tone === "right" ? Check : X;
+  return (
+    <span
+      className={`size-5 shrink-0 rounded-full grid place-items-center border ${
+        tone === "right"
+          ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300"
+          : "border-rose-400/35 bg-rose-400/10 text-rose-300"
+      }`}
+    >
+      <Icon className="size-3" strokeWidth={2.75} />
+    </span>
   );
 }

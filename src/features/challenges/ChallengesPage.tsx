@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { motion } from "framer-motion";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Skill } from "@/lib/db/orbita-db";
@@ -16,6 +17,7 @@ import { COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
+import { playAnswerSound } from "@/lib/audio";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { feedbackContext } from "@/features/engine/feedbackContext";
 
@@ -294,7 +296,7 @@ export default function ChallengesPage() {
               <div>
                 <div className="flex items-center justify-between">
                   <h3 className="font-display text-xl text-white tracking-tight flex items-center gap-2">
-                    <span>🇪🇸</span> Spain
+                    <FlagImage iso2="es" alt="" className="w-5 h-3.5 rounded-[2px] shrink-0" /> Spain
                   </h3>
                   <Badge tone="neon">Regional</Badge>
                 </div>
@@ -440,6 +442,7 @@ function ChallengeQuestion({
     (iso3: string) => {
       if (!current || active.answerState !== "idle") return;
       const correctPick = iso3 === current.country.iso3;
+      playAnswerSound(correctPick, active.combo);
       updateSkillProgress(current.country.iso3, current.skill as Skill, (prev) =>
         confidenceAfter(prev, correctPick),
       );
@@ -503,6 +506,7 @@ function ChallengeQuestion({
   useAnswerHotkeys(hotkeyItems, pick);
   useSkipHotkey(useCallback(() => {
     if (current && active.answerState === "idle") {
+      playAnswerSound(false);
       setActive({ ...active, answerState: "wrong", wrong: active.wrong + 1, combo: 0 });
     }
   }, [current, active, setActive]));
@@ -527,7 +531,8 @@ function ChallengeQuestion({
             onClick={onExit}
             aria-label="Exit challenge"
           >
-            ✕ Exit
+            <X className="size-3.5" aria-hidden />
+            Exit
           </Button>
         </div>
 

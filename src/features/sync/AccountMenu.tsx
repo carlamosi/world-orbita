@@ -17,7 +17,6 @@ import {
   AlertCircle,
   CloudOff,
   LogOut,
-  Sparkles,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,10 +48,9 @@ export function AccountMenu() {
       <Link
         to="/auth"
         search={{ mode: "signup" }}
-        className="inline-flex items-center gap-1.5 text-[12px] font-medium text-white/90 hover:text-white px-3.5 py-1.5 rounded-full border border-neon/30 bg-neon/10 hover:bg-neon/20 shadow-[0_0_16px_-4px_color-mix(in_oklab,var(--neon)_30%,transparent)] transition-all hover:scale-[1.02] active:scale-[0.98]"
+        className="inline-flex items-center text-[12px] font-medium text-white/90 hover:text-white px-3.5 py-1.5 rounded-full border border-neon/30 bg-neon/10 hover:bg-neon/20 shadow-[0_0_16px_-4px_color-mix(in_oklab,var(--neon)_30%,transparent)] transition-all hover:scale-[1.02] active:scale-[0.98]"
         title="Create an account to sync your progress"
       >
-        <Sparkles className="size-3.5 text-neon animate-pulse" aria-hidden />
         <span>Save progress</span>
       </Link>
     );

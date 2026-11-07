@@ -63,7 +63,7 @@ const MODES = [
   },
   {
     to: "/spain",
-    title: "Spain 🇪🇸",
+    title: "Spain",
     tagline: "19 autonomous communities, 50 provinces, flags, and capitals on the 3D globe.",
     tone: "neon" as const,
   },

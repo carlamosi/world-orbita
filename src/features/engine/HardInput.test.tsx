@@ -38,6 +38,16 @@ describe("HardInput matching", () => {
     expect(b.onSubmit).toHaveBeenCalledWith(false, false, "Gambia");
   });
 
+  it("Enter on an empty or blank field submits a miss with nothing chosen", () => {
+    const a = setup({ name: "Iran", id: "IRN" });
+    a.enter();
+    expect(a.onSubmit).toHaveBeenCalledWith(false, false, "");
+    const b = setup({ name: "Iran", id: "IRN" });
+    b.type("   ");
+    b.enter();
+    expect(b.onSubmit).toHaveBeenCalledWith(false, false, "");
+  });
+
   it("a real typo is accepted with exact=false", () => {
     const a = setup({ name: "Iran", id: "IRN" });
     a.type("Irann");
