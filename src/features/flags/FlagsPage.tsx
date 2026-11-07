@@ -59,7 +59,7 @@ export default function FlagsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continent, sub]);
 
-  useAutoAdvance({ answerState: s.answerState, finished, next: s.next });
+  useAutoAdvance({ answerState: s.answerState, finished, next: s.next, wrongDelayMs: s.missDelayMs });
 
   const onSkip = useCallback(() => {
     if (!finished && current && s.answerState === "idle") s.reveal();
@@ -87,7 +87,7 @@ export default function FlagsPage() {
     [options, s.answerState, sub],
   );
   const onHotkey = useCallback(
-    (id: string) => current && s.submit(id === current.iso3, { chosen: COUNTRY_BY_ISO3.get(id)?.name }),
+    (id: string) => current && s.submit(id === current.iso3, { chosen: COUNTRY_BY_ISO3.get(id)?.name, chosenId: id }),
     [current, s],
   );
   useAnswerHotkeys(hotkeyItems, onHotkey);
@@ -133,7 +133,7 @@ export default function FlagsPage() {
                       target={current}
                       options={options}
                       disabled={s.answerState !== "idle"}
-                      onPick={(iso3) => s.submit(iso3 === current.iso3, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name })}
+                      onPick={(iso3) => s.submit(iso3 === current.iso3, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name, chosenId: iso3 })}
                     />
                   ) : sub === "flagToCountry" ? null : (
                     current ? (

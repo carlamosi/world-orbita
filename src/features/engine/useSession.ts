@@ -15,6 +15,7 @@ import {
 import { recordConceptAttempt } from "@/lib/db/progressRepo";
 import { db, type ConceptProgressRow, type GameMode, type Skill } from "@/lib/db/orbita-db";
 import { recordSessionEnd } from "@/lib/db/repo";
+import { adaptiveNewLimit, missFeedbackMs, readRecentFirstTries } from "./learningLoad";
 import { playAnswerSound } from "@/lib/audio";
 import { State, ConvertStepUnitToMinutes } from "ts-fsrs";
 import { formatConceptId, parseConceptId } from "@/lib/fsrs/concept";
@@ -25,6 +26,10 @@ import type { GeoDomain } from "@/types/geo";
  * (default N=6, clamped to remaining queue room).
  */
 export const DEFAULT_RELEARNING_OFFSET = 6;
+
+/** A contrast question comes this many answered cards after the confusion, at most this often per session. */
+const CONTRAST_OFFSET = 2;
+const MAX_CONTRASTS = 3;
 
 function stepToQueueOffset(_stepUnit: string, remainingCards: number, countSpacing = DEFAULT_RELEARNING_OFFSET): number {
   return Math.max(2, Math.min(countSpacing, Math.max(2, remainingCards)));
@@ -123,6 +128,8 @@ export interface SessionState<TItem = Country> {
   answerState: AnswerState;
   /** What the learner picked or typed for the current answer (null: nothing identifiable). */
   chosen: string | null;
+  /** How long the current miss stays on screen (longer after a fast, confident miss). */
+  missDelayMs: number;
   startedAt: number;
   endedAt: number | null;
   loading: boolean;
@@ -174,7 +181,13 @@ export interface SessionState<TItem = Country> {
   /** `chosen`: the picked/typed label, shown as "You chose X" after a miss. Not graded. */
   submit(
     isCorrect: boolean,
-    opts?: { retrievalMode?: "easy" | "hard"; softCorrect?: boolean; chosen?: string },
+    opts?: {
+      retrievalMode?: "easy" | "hard";
+      softCorrect?: boolean;
+      chosen?: string;
+      /** Id of the picked entity (map click or option). A miss on another real entity queues a contrast question about it. */
+      chosenId?: string;
+    },
   ): void;
   reveal(): void;
   /** `allowIdle`: advance past an unanswered question (the "no capital, Skip" path). */
@@ -190,6 +203,30 @@ export interface CreateOpts<TItem = Country> {
   getId?: (item: TItem) => string;
   /** subModes a `subMode: "mixed"` session interleaves (e.g. both capital directions). */
   mixedSubModes?: readonly string[];
+  /**
+   * Which subMode to seed for an entity in a mixed session, from its saved rows
+   * by subMode; null seeds nothing for it. Default: a random one with no row.
+   */
+  mixedPick?: (rows: ReadonlyMap<string, ConceptProgressRow>) => string | null;
+}
+
+/** Days of recognition stability before an entity is also asked as recall. */
+export const RECALL_AFTER_DAYS = 7;
+
+/**
+ * Recognition first, then recall (generation effect): a new entity starts as
+ * choosing among options ("name"); once that card is stable for a week, it is
+ * also asked typed ("nameType"). In between, nothing is seeded: the planner
+ * brings the recognition card back when it is due.
+ */
+export function recognitionThenRecall(rows: ReadonlyMap<string, ConceptProgressRow>): string | null {
+  const recognition = rows.get("name");
+  if (!recognition) return "name";
+  if (rows.has("nameType")) return null;
+  const stable =
+    normalizeState(recognition.fsrs_state) === State.Review &&
+    (recognition.fsrs_stability ?? 0) >= RECALL_AFTER_DAYS;
+  return stable ? "nameType" : null;
 }
 
 /**
@@ -206,6 +243,7 @@ export function createSessionStore<TItem = Country>({
   dataset,
   getId,
   mixedSubModes,
+  mixedPick,
 }: CreateOpts<TItem>): UseBoundStore<StoreApi<SessionState<TItem>>> {
   const activeDataset = (dataset ?? COUNTRIES) as unknown as readonly TItem[];
   const resolveId = getId ?? ((item: TItem) => {
@@ -235,6 +273,26 @@ export function createSessionStore<TItem = Country>({
     location: "find",
   };
   const defaultSubMode = defaultSubModes[skill] ?? "";
+
+  /** A never-reviewed row for an entity; nothing is persisted until it is graded. */
+  const newConceptRow = (conceptId: string, item: TItem): ConceptProgressRow => {
+    const raw = item as unknown as SessionItemLike;
+    return {
+      conceptId,
+      iso3: raw.iso3 ?? resolveId(item),
+      skill,
+      fsrs_state: State.New as any,
+      fsrs_stability: null,
+      fsrs_difficulty: null,
+      fsrs_due: 0,
+      fsrs_reps: 0,
+      fsrs_lapses: 0,
+      fsrs_last_review: 0,
+      updated_at: Date.now(),
+      version: 1,
+      dirty: 0,
+    };
+  };
 
   type PlannerOpts = { continent?: string; subMode?: string };
   /** Filters of the last planner start(), reused by startPractice(). */
@@ -310,6 +368,16 @@ export function createSessionStore<TItem = Country>({
         return key(p.entityId, p.subMode ?? "");
       }),
     );
+    // Saved rows per entity and subMode, for a pick rule.
+    const rowsByEntity = new Map<string, Map<string, ConceptProgressRow>>();
+    if (mixed && mixedPick) {
+      for (const c of pool) {
+        const p = parseConceptId(c.conceptId);
+        const m = rowsByEntity.get(p.entityId) ?? new Map<string, ConceptProgressRow>();
+        m.set(p.subMode ?? "", c);
+        rowsByEntity.set(p.entityId, m);
+      }
+    }
     for (const c of seedOrder) {
       if (seeds.length >= limit) break;
       if (!inContinent(c, opts.continent)) continue;
@@ -318,7 +386,13 @@ export function createSessionStore<TItem = Country>({
       if (mixed) {
         const free = mixed.filter((m) => !used.has(key(entityId, m)));
         if (free.length === 0) continue;
-        sm = free[Math.floor(Math.random() * free.length)]!;
+        if (mixedPick) {
+          const pick = mixedPick(rowsByEntity.get(entityId) ?? new Map());
+          if (!pick || !free.includes(pick)) continue;
+          sm = pick;
+        } else {
+          sm = free[Math.floor(Math.random() * free.length)]!;
+        }
         // One slot per entity per session: mark every direction as taken.
         for (const m of mixed) used.add(key(entityId, m));
       } else if (used.has(entityId)) continue;
@@ -417,6 +491,13 @@ export function createSessionStore<TItem = Country>({
   };
 
   let mismatchLogged = false;
+  /**
+   * Every persisted row of this skill, loaded by the last start. Null when the
+   * session was built from someone else's rows (Due Today): then a contrast
+   * question could overwrite real progress, so none is added.
+   */
+  let knownRows: Map<string, ConceptProgressRow> | null = null;
+  let contrastsThisSession = 0;
   /** Bumped by every start(); a start that is no longer the latest must not touch the store. */
   let startGen = 0;
 
@@ -437,6 +518,7 @@ export function createSessionStore<TItem = Country>({
     missedItems: [],
     answerState: "idle",
     chosen: null,
+    missDelayMs: 2500,
     startedAt: 0,
     endedAt: null,
     loading: false,
@@ -455,6 +537,8 @@ export function createSessionStore<TItem = Country>({
     async start(opts) {
       const gen = ++startGen;
       set(loadingState());
+      knownRows = null;
+      contrastsThisSession = 0;
 
       let pairs: SessionPair<TItem>[] = [];
       let info: { hasSeen?: boolean } = {};
@@ -475,6 +559,7 @@ export function createSessionStore<TItem = Country>({
         const allDbConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
         if (gen !== startGen) return;
         const dbConceptMap = new Map(allDbConcepts.map((c) => [c.conceptId, c]));
+        knownRows = dbConceptMap;
 
         const sm = opts?.subMode && opts.subMode !== "mixed" ? opts.subMode : defaultSubMode;
 
@@ -509,19 +594,26 @@ export function createSessionStore<TItem = Country>({
         });
 
       } else {
-        // FSRS session planner: due and learning rows first, then new concepts
-        // up to the session size (no daily new-card cap).
+        // FSRS session planner: due and learning rows first, then new concepts.
+        // How many new ones follows the learner's recent success rate (aim ~85%).
         const plannerOpts: PlannerOpts = { continent: opts?.continent, subMode: opts?.subMode };
         lastPlannerOpts = plannerOpts;
-        const allConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
+        const [allConcepts, recent] = await Promise.all([
+          db().concept_progress.where("skill").equals(skill).toArray(),
+          readRecentFirstTries(),
+        ]);
         if (gen !== startGen) return;
+        knownRows = new Map(allConcepts.map((c) => [c.conceptId, c]));
         const pool = filterPool(allConcepts, plannerOpts);
+        const newLimit = adaptiveNewLimit(recent, questions);
 
         const planned = generateSessionQueue(pool, undefined, {
           sessionSize: questions,
-          maxNewPerSession: questions,
+          maxNewPerSession: newLimit,
         });
-        pairs = buildPairs([...planned, ...newSeeds(pool, plannerOpts, questions - planned.length)], lookupItem);
+        const plannedNew = planned.filter((c) => normalizeState(c.fsrs_state) === State.New).length;
+        const room = Math.min(questions - planned.length, newLimit - plannedNew);
+        pairs = buildPairs([...planned, ...newSeeds(pool, plannerOpts, room)], lookupItem);
         info = { hasSeen: pool.some(isSeen) };
       }
 
@@ -533,6 +625,8 @@ export function createSessionStore<TItem = Country>({
       set(loadingState());
       const allConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
       if (gen !== startGen) return;
+      knownRows = new Map(allConcepts.map((c) => [c.conceptId, c]));
+      contrastsThisSession = 0;
       const now = Date.now();
       const seen = filterPool(allConcepts, lastPlannerOpts)
         .filter(isSeen)
@@ -592,6 +686,10 @@ export function createSessionStore<TItem = Country>({
         updates.combo = 0;
         updates.wrong = s.wrong + 1;
         updates.answerState = "wrong";
+        // Only a real pick can be a confident error; a skip or empty Enter is "I don't know".
+        updates.missDelayMs = submitOpts?.chosen
+          ? missFeedbackMs(responseMs, targetConcept?.skill ?? skill, submitOpts.retrievalMode)
+          : 2500;
 
         // Track missed item details for end session review
         const conceptSkill = targetConcept?.skill ?? skill;
@@ -785,6 +883,39 @@ export function createSessionStore<TItem = Country>({
           const nextRetries = new Map(s.inSessionRetries);
           nextRetries.set(conceptId, retries + 1);
           updates.inSessionRetries = nextRetries;
+        }
+      }
+
+      // 4. Contrast question: a pick of another real entity is a confusion
+      //    (Niger for Nigeria). Asking about the picked one shortly after trains
+      //    the difference itself, not only the right answer.
+      if (!isCorrect && submitOpts?.chosenId && knownRows && contrastsThisSession < MAX_CONTRASTS) {
+        const chosenItem = itemMap.get(submitOpts.chosenId);
+        const parsed = parseConceptId(targetConcept.conceptId);
+        if (chosenItem && chosenItem !== target && parsed.skill === skill) {
+          const chosenEntity = resolveId(chosenItem);
+          const contrastId = formatConceptId({
+            domain: parsed.domain as GeoDomain,
+            entityId: chosenEntity,
+            skill,
+            subMode: parsed.subMode,
+          });
+          const base = updates.pairs ?? s.pairs;
+          const comingUp = base.slice(s.index + 1).some((p) => p.conceptId === contrastId);
+          if (!comingUp) {
+            // Latest copy first: this session may already have graded it.
+            const seenHere = [...base].reverse().find((p) => p.conceptId === contrastId)?.concept;
+            const concept = seenHere ?? knownRows.get(contrastId) ?? newConceptRow(contrastId, chosenItem);
+            const newPairs = [...base];
+            newPairs.splice(Math.min(s.index + 1 + CONTRAST_OFFSET, newPairs.length), 0, {
+              item: chosenItem,
+              conceptId: contrastId,
+              concept,
+            });
+            Object.assign(updates, fromPairs(newPairs));
+            if (!seenHere) updates.cardCount = (updates.cardCount ?? s.cardCount) + 1;
+            contrastsThisSession++;
+          }
         }
       }
 

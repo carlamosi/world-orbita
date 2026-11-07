@@ -87,7 +87,7 @@ const TIME_THRESHOLDS: Record<string, { veryFast: number; slow: number; verySlow
   _default: { veryFast: 2000,  slow: 7000,  verySlow: 14000 },
 };
 
-function categorizeSpeed(
+export function categorizeSpeed(
   responseMs: number,
   questionType: string,
   retrievalMode?: string,
