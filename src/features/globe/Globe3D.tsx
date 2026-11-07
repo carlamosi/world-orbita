@@ -119,6 +119,27 @@ function angularDistanceDeg(lat1: number, lng1: number, lat2: number, lng2: numb
   return Math.acos(Math.min(1, Math.max(-1, c))) * (180 / Math.PI);
 }
 
+type LatLng = { lat: number; lng: number };
+
+/** Centroid-to-centroid distance, not border to border (shortcut: fine as a "how far off" cue). */
+export function greatCircleKm(a: LatLng, b: LatLng): number {
+  return angularDistanceDeg(a.lat, a.lng, b.lat, b.lng) * (Math.PI / 180) * 6371;
+}
+
+/** Point halfway along the great circle from `a` to `b`. */
+export function midpoint(a: LatLng, b: LatLng): LatLng {
+  const r = Math.PI / 180;
+  const v = (p: LatLng) => [
+    Math.cos(p.lat * r) * Math.cos(p.lng * r),
+    Math.cos(p.lat * r) * Math.sin(p.lng * r),
+    Math.sin(p.lat * r),
+  ];
+  const [x, y, z] = v(a).map((n, i) => n + v(b)[i]!) as [number, number, number];
+  // Antipodal points have no unique midpoint: fall back to `a`.
+  if (Math.hypot(x, y, z) < 1e-9) return a;
+  return { lat: Math.atan2(z, Math.hypot(x, y)) / r, lng: Math.atan2(y, x) / r };
+}
+
 // Altitude bands → quantised so memos don't churn during every frame.
 function altitudeBand(alt: number): number {
   if (alt < 0.4) return 0;
@@ -479,8 +500,63 @@ export default function Globe3D({
     [disableHoverFeedback, disableHoverLabel, activeContinent, continentByIso3, overlayLabel],
   );
 
+  /** Name and label point of a country or overlay feature (world centroid, else overlay ring average). */
+  const placeOf = useCallback(
+    (id: string): { name: string; lat: number; lng: number } => {
+      const f = featureByIso3.get(id);
+      const c = countryByIso3.get(id);
+      let name = f?.properties.name ?? c?.name ?? id;
+      let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
+      let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
+      if (!f && !c && overlayPolygons) {
+        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
+          const fid = op.properties?.id ?? op.id ?? "";
+          if (fid !== id) continue;
+          name = op.properties?.name ?? fid;
+          try {
+            const geom = op.geometry;
+            if (geom) {
+              const ring = geom.type === "Polygon"
+                ? (geom.coordinates as number[][][])[0]
+                : (geom.coordinates as number[][][][])[0]?.[0];
+              if (ring && ring.length > 0) {
+                let sumLng = 0;
+                let sumLat = 0;
+                for (const pt of ring) {
+                  sumLng += pt[0] ?? 0;
+                  sumLat += pt[1] ?? 0;
+                }
+                lng = sumLng / ring.length;
+                lat = sumLat / ring.length;
+              }
+            }
+          } catch {
+            // fallback
+          }
+          break;
+        }
+      }
+      return { name, lat, lng };
+    },
+    [featureByIso3, countryByIso3, overlayPolygons],
+  );
+
+  /** After a miss: where the learner clicked and where the answer is. */
+  const missPair = useMemo(() => {
+    if (!effWrong || !effReveal) return null;
+    const from = placeOf(effWrong);
+    const to = placeOf(effReveal);
+    return { from, to, km: Math.round(greatCircleKm(from, to)) };
+  }, [effWrong, effReveal, placeOf]);
+
   // ---- Unified camera targeting pass ----------------------------------
   const activeCameraTarget = useMemo(() => {
+    if (missPair) {
+      // Frame both the click and the answer, so a far-off miss is visible at a glance.
+      const mid = midpoint(missPair.from, missPair.to);
+      const altitude = Math.max(0.6, Math.min(2.6, missPair.km / 3500 + 0.45));
+      return { ...mid, altitude, key: `miss:${effWrong}:${effReveal}`, duration: 1400 };
+    }
     if (effReveal) {
       const f = featureByIso3.get(effReveal);
       if (f) {
@@ -547,7 +623,7 @@ export default function Globe3D({
       };
     }
     return null;
-  }, [effReveal, effFocus, pointOfView, featureByIso3, countryByIso3]);
+  }, [missPair, effWrong, effReveal, effFocus, pointOfView, featureByIso3, countryByIso3]);
 
   const lastCameraTargetKey = useRef<string | null>(null);
 
@@ -813,21 +889,18 @@ export default function Globe3D({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveQuality]);
 
-  // ---- Single-State Ripple Shockwave (Error vs Success Isolation) ----
+  // ---- Ripples: a small red one on the miss, the green answer pulses so the eye lands there ----
   const rings = useMemo(() => {
     if (effectiveQuality === "static") return [];
     const res = [];
 
-    // Prioritize error state exclusively: when wrong, ONLY show the red mistake ripple
     if (effWrong) {
       const c = countryByIso3.get(effWrong);
       if (c) {
         res.push(
-          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 6, propagationSpeed: 4.5, repeatPeriod: 600, color: COLOR_WRONG },
-          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 10, propagationSpeed: 3.2, repeatPeriod: 750, color: COLOR_WRONG },
+          { lat: c.coordinates[0], lng: c.coordinates[1], maxR: 5, propagationSpeed: 4.5, repeatPeriod: 900, color: COLOR_WRONG },
         );
       }
-      return res; // NEVER mix with green reveal rings simultaneously
     }
 
     // Success / Reveal state
@@ -855,94 +928,29 @@ export default function Globe3D({
     lat: number;
     lng: number;
     kind: "wrong" | "correct";
+    /** Wrong pill only: distance to the answer. */
+    km?: number;
   }
 
   const spatialPills = useMemo<SpatialPill[]>(() => {
     const pills: SpatialPill[] = [];
-
     if (effWrong) {
-      const f = featureByIso3.get(effWrong);
-      const c = countryByIso3.get(effWrong);
-      let name = f?.properties.name ?? c?.name ?? effWrong;
-      let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
-      let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
-
-      // Check overlay polygons if not found in world dataset
-      if (!f && !c && overlayPolygons) {
-        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
-          const fid = op.properties?.id ?? op.id ?? "";
-          if (fid === effWrong) {
-            name = op.properties?.name ?? fid;
-            try {
-              const geom = op.geometry;
-              if (geom) {
-                const ring = geom.type === "Polygon"
-                  ? (geom.coordinates as number[][][])[0]
-                  : (geom.coordinates as number[][][][])[0]?.[0];
-                if (ring && ring.length > 0) {
-                  let sumLng = 0;
-                  let sumLat = 0;
-                  for (const pt of ring) {
-                    sumLng += pt[0] ?? 0;
-                    sumLat += pt[1] ?? 0;
-                  }
-                  lng = sumLng / ring.length;
-                  lat = sumLat / ring.length;
-                }
-              }
-            } catch {
-              // fallback
-            }
-            break;
-          }
-        }
-      }
-
-      pills.push({ id: `wrong-${effWrong}`, iso3: effWrong, name, lat, lng, kind: "wrong" });
+      pills.push({ id: `wrong-${effWrong}`, iso3: effWrong, ...placeOf(effWrong), kind: "wrong", km: missPair?.km });
     }
-
     if (effReveal) {
-      const f = featureByIso3.get(effReveal);
-      const c = countryByIso3.get(effReveal);
-      let name = f?.properties.name ?? c?.name ?? effReveal;
-      let lat = f ? f.properties.centroid[1] : c?.coordinates[0] ?? 0;
-      let lng = f ? f.properties.centroid[0] : c?.coordinates[1] ?? 0;
-
-      if (!f && !c && overlayPolygons) {
-        for (const op of overlayPolygons as Array<{ id?: string; properties?: { id?: string; name?: string }; geometry?: { type: string; coordinates: unknown[] } }>) {
-          const fid = op.properties?.id ?? op.id ?? "";
-          if (fid === effReveal) {
-            name = op.properties?.name ?? fid;
-            try {
-              const geom = op.geometry;
-              if (geom) {
-                const ring = geom.type === "Polygon"
-                  ? (geom.coordinates as number[][][])[0]
-                  : (geom.coordinates as number[][][][])[0]?.[0];
-                if (ring && ring.length > 0) {
-                  let sumLng = 0;
-                  let sumLat = 0;
-                  for (const pt of ring) {
-                    sumLng += pt[0] ?? 0;
-                    sumLat += pt[1] ?? 0;
-                  }
-                  lng = sumLng / ring.length;
-                  lat = sumLat / ring.length;
-                }
-              }
-            } catch {
-              // fallback
-            }
-            break;
-          }
-        }
-      }
-
-      pills.push({ id: `reveal-${effReveal}`, iso3: effReveal, name, lat, lng, kind: "correct" });
+      pills.push({ id: `reveal-${effReveal}`, iso3: effReveal, ...placeOf(effReveal), kind: "correct" });
     }
-
     return pills;
-  }, [effWrong, effReveal, featureByIso3, countryByIso3, overlayPolygons]);
+  }, [effWrong, effReveal, placeOf, missPair]);
+
+  /** Dashed arc from the click to the answer: the size and direction of the miss. */
+  const missArcs = useMemo(
+    () =>
+      missPair
+        ? [{ startLat: missPair.from.lat, startLng: missPair.from.lng, endLat: missPair.to.lat, endLng: missPair.to.lng }]
+        : [],
+    [missPair],
+  );
 
   const htmlElementFn = useCallback((d: object) => {
     const p = d as SpatialPill;
@@ -950,74 +958,30 @@ export default function Globe3D({
     el.style.pointerEvents = "none";
     el.style.userSelect = "none";
     el.style.transform = "translate(-50%, -100%)";
-    el.style.transition = "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease";
 
-    const isReducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-
-    if (p.kind === "wrong") {
-      el.innerHTML = `
-        <div style="
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 6px 14px;
-          background: rgba(15, 6, 10, 0.92);
-          border: 1.5px solid rgba(244, 63, 94, 0.9);
-          box-shadow: 0 0 16px rgba(244, 63, 94, 0.45), 0 4px 12px rgba(0,0,0,0.6);
-          border-radius: 9999px;
-          color: #fff;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 12px;
-          font-weight: 700;
-          letter-spacing: 0.02em;
-          backdrop-filter: blur(12px);
-          white-space: nowrap;
-          ${isReducedMotion ? "" : "animation: wrongShake 0.2s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;"}
-        ">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:rgba(244,63,94,0.3);border-radius:50%;color:#fb7185;font-size:11px;font-weight:900;">
-            ✕
-          </span>
-          <span style="color:#fecdd3;text-transform:uppercase;">${p.name}</span>
-        </div>
-        <style>
-          @keyframes wrongShake {
-            0%, 100% { transform: translate3d(0, 0, 0); }
-            20%, 60% { transform: translate3d(-3.5px, 0, 0); }
-            40%, 80% { transform: translate3d(3.5px, 0, 0); }
-          }
-        </style>
-      `;
-    } else {
-      // Reveal correct country: clean, single-line badge with ONLY the country name
-      el.innerHTML = `
-        <div style="
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 6px 14px;
-          background: rgba(4, 18, 12, 0.92);
-          border: 1.5px solid rgba(16, 185, 129, 0.85);
-          box-shadow: 0 0 18px rgba(16, 185, 129, 0.4), 0 4px 14px rgba(0,0,0,0.6);
-          border-radius: 9999px;
-          color: #fff;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          backdrop-filter: blur(12px);
-          white-space: nowrap;
-          ${isReducedMotion ? "" : "animation: correctPop 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;"}
-        ">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;background:rgba(16,185,129,0.3);border-radius:50%;color:#6ee7b7;font-size:10px;font-weight:900;">
-            ✓
-          </span>
-          <span style="color:#6ee7b7;font-size:12px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;">${p.name}</span>
-        </div>
-        <style>
-          @keyframes correctPop {
-            0% { transform: scale(0.92); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
-          }
-        </style>
-      `;
-    }
+    const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const wrong = p.kind === "wrong";
+    const rgb = wrong ? COLOR_WRONG : COLOR_REVEAL;
+    // Brand chip: glass, display-font name, mono meta. The answer sits a step forward.
+    el.innerHTML = `
+      <div style="
+        display:inline-flex;align-items:center;gap:8px;
+        padding:${wrong ? "5px 12px" : "7px 14px"};
+        background:rgba(8,8,14,${wrong ? 0.78 : 0.9});
+        border:1px solid rgba(${rgb},${wrong ? 0.55 : 0.85});
+        box-shadow:0 0 ${wrong ? 10 : 22}px rgba(${rgb},${wrong ? 0.25 : 0.4}),0 6px 18px rgba(0,0,0,0.55);
+        border-radius:9999px;backdrop-filter:blur(12px);white-space:nowrap;
+        ${reduced ? "" : `animation:${wrong ? "pillShake 0.24s" : "pillPop 0.28s 0.15s"} cubic-bezier(0.16,1,0.3,1) both;`}
+      ">
+        <span style="width:6px;height:6px;border-radius:50%;background:rgb(${rgb});box-shadow:0 0 8px rgb(${rgb});"></span>
+        <span style="font-family:var(--font-display);font-size:${wrong ? 12 : 14}px;font-weight:600;letter-spacing:-0.01em;color:${wrong ? "rgba(255,255,255,0.7)" : "#fff"};${wrong ? "text-decoration:line-through;text-decoration-color:rgba(" + rgb + ",0.7);" : ""}">${p.name}</span>
+        ${wrong && p.km ? `<span style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.08em;color:rgba(${rgb},0.9);">${p.km.toLocaleString("en-US")} KM OFF</span>` : ""}
+      </div>
+      <style>
+        @keyframes pillShake { 0%,100%{transform:translateX(0)} 25%,75%{transform:translateX(-3px)} 50%{transform:translateX(3px)} }
+        @keyframes pillPop { 0%{transform:scale(0.9);opacity:0} 100%{transform:scale(1);opacity:1} }
+      </style>
+    `;
     return el;
   }, []);
 
@@ -1134,6 +1098,15 @@ export default function Globe3D({
         ringMaxRadius="maxR"
         ringPropagationSpeed="propagationSpeed"
         ringRepeatPeriod="repeatPeriod"
+        arcsData={missArcs}
+        arcColor={() => [`rgba(${COLOR_WRONG}, 0.85)`, `rgba(${COLOR_REVEAL}, 0.95)`]}
+        arcStroke={0.45}
+        arcDashLength={0.35}
+        arcDashGap={0.12}
+        arcDashInitialGap={1}
+        arcDashAnimateTime={effectiveQuality === "static" ? 0 : 1100}
+        arcAltitudeAutoScale={0.35}
+        arcsTransitionDuration={0}
       />
 
       {/* Zoom controls overlay */}
