@@ -31,8 +31,6 @@ interface Props {
   masteredNow?: number;
   /** Cards forgotten 4+ times. */
   trickyItems?: MissedItem[];
-  /** New cards answered as practice only: today's new-card limit was reached. */
-  practiceOnly?: number;
   wrong?: number;
   bestCombo?: number;
   durationMs?: number;
@@ -62,7 +60,6 @@ export function SessionEnd({
   total,
   masteredNow = 0,
   trickyItems = [],
-  practiceOnly = 0,
   durationMs = 0,
   isSpeedMode = false,
   qpm,
@@ -71,7 +68,7 @@ export function SessionEnd({
   onNextBlock,
   onReplay,
 }: Props) {
-  const [exitStep, setExitStep] = useState<"idle" | "confirm" | "motivate">("idle");
+  const [exitStep, setExitStep] = useState<"idle" | "confirm">("idle");
 
   const sessions = useLiveQuery(() => db().gameSessions.toArray(), []) ?? [];
   const streak = useMemo(() => {
@@ -111,61 +108,41 @@ export function SessionEnd({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
               >
-                <div className="flex items-center justify-center gap-2">
-                  <Badge tone="cyan">{isSpeedMode ? "Run Complete" : "Session Complete"}</Badge>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-mono tracking-wider bg-amber-500/15 border border-amber-500/30 text-amber-300">
-                    🔥 {streak} {streak === 1 ? "day streak" : "day streak"}
-                  </span>
-                </div>
+                <Badge tone="cyan">{isSpeedMode ? "Run complete" : "Session complete"}</Badge>
 
-                {/* Headline learning-relevant metric */}
-                <div className="mt-4 font-display text-4xl sm:text-5xl text-white tracking-tight text-glow-violet">
-                  {isSpeedMode ? (
-                    <>
-                      {score ?? firstTry}{" "}
-                      <span className="text-[color:var(--cyan)] text-2xl font-sans font-normal">pts</span>
-                    </>
-                  ) : (
-                    <>
-                      {firstTry}{" "}
-                      <span className="text-[color:var(--cyan)] text-2xl font-sans font-normal">correct first try</span>
-                    </>
-                  )}
+                {/* One number: first-try recall (or points in a speed run). The stats row carries the rest. */}
+                <div className="mt-5 flex items-baseline justify-center gap-1 font-display tracking-tight">
+                  <span className="text-6xl sm:text-7xl text-white text-glow-violet tabular-nums">
+                    {isSpeedMode ? (score ?? firstTry) : firstTry}
+                  </span>
+                  {!isSpeedMode && <span className="text-3xl text-white/30 tabular-nums">/{total}</span>}
                 </div>
-                <div className="mt-2 text-white/55 text-sm">
-                  {firstTry} of {total} {isSpeedMode ? "correct" : "cards right first try"} ({accuracy}%)
+                <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.25em] text-white/45">
+                  {isSpeedMode ? "Points" : "First try"}
                 </div>
                 {masteredNow > 0 && (
-                  <div className="mt-1 text-white/55 text-sm">
+                  <div className="mt-3 text-white/55 text-sm">
                     {masteredNow} now mastered (stable for 21+ days)
                   </div>
                 )}
-                {practiceOnly > 0 && (
-                  <div className="mt-1 text-white/55 text-sm">
-                    {practiceOnly} new {practiceOnly === 1 ? "card was" : "cards were"} practice only: today's new-card limit is reached.
-                  </div>
-                )}
-
                 {/* Key stats row - Accuracy and Time alongside with same visual hierarchy */}
-                <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-mono text-[11px] uppercase tracking-wider text-white/55">
+                <div className={`mt-6 grid ${isSpeedMode ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"} gap-2.5 font-mono text-[11px] uppercase tracking-wider text-white/55`}>
                   <Stat label="Accuracy" value={`${accuracy}%`} />
                   <Stat label="Time" value={timeFormatted} />
                   <Stat label="Streak" value={`🔥 ${streak}d`} />
-                  {isSpeedMode ? (
+                  {isSpeedMode && (
                     <Stat
                       label="Speed"
                       value={`${qpm ?? Math.round((total / Math.max(1, durationMs)) * 60_000)} QPM`}
                     />
-                  ) : (
-                    <Stat label="Score" value={score ?? firstTry} />
                   )}
                 </div>
 
                 {/* Missed items list */}
-                {missedItems.length > 0 ? (
+                {missedItems.length > 0 && (
                   <div className="mt-6 text-left">
                     <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40 mb-2 px-1">
-                      Missed Items ({missedItems.length})
+                      Missed ({missedItems.length})
                     </div>
                     <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
                       {missedItems.map((item, idx) => {
@@ -196,10 +173,6 @@ export function SessionEnd({
                         );
                       })}
                     </div>
-                  </div>
-                ) : (
-                  <div className="mt-6 p-3 rounded-2xl bg-[color:var(--neon)]/10 border border-[color:var(--neon)]/25 text-[color:var(--neon)] text-xs font-mono">
-                    ✨ Flawless round! All {total} items answered correctly.
                   </div>
                 )}
 
@@ -251,48 +224,11 @@ export function SessionEnd({
                 transition={spring.soft}
                 className="py-4"
               >
-                <div className="size-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-4 text-xl">
-                  🚀
-                </div>
                 <h3 className="font-display text-2xl font-semibold text-white tracking-tight">
                   Stop studying for today?
                 </h3>
                 <p className="mt-2 text-sm text-white/60 max-w-sm mx-auto leading-relaxed">
                   Consistent practice strengthens long-term memory retention. Ready to wrap up?
-                </p>
-
-                <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
-                  <Button onClick={handleNext} className="flex-1 font-medium">
-                    Keep studying
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setExitStep("motivate")}
-                    className="flex-1"
-                  >
-                    Finish for today
-                  </Button>
-                </div>
-              </motion.div>
-            )}
-
-            {exitStep === "motivate" && (
-              <motion.div
-                key="motivate"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={spring.soft}
-                className="py-4"
-              >
-                <div className="size-12 rounded-full bg-amber-400/10 border border-amber-400/30 flex items-center justify-center mx-auto mb-4 text-xl">
-                  ✨
-                </div>
-                <h3 className="font-display text-2xl font-semibold text-white tracking-tight leading-snug">
-                  Hey… but don't you want to see a smile on your James exam? 😊
-                </h3>
-                <p className="mt-2 text-sm text-white/60 max-w-sm mx-auto leading-relaxed">
-                  Every question you answer today builds unbreakable mastery.
                 </p>
 
                 <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
@@ -307,6 +243,7 @@ export function SessionEnd({
                 </div>
               </motion.div>
             )}
+
           </motion.div>
         </motion.div>
       )}

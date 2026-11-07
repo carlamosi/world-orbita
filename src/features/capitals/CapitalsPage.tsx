@@ -21,22 +21,26 @@ import {
 import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
 import { getPref, setPref } from "@/lib/db/repo";
+import { parseConceptId } from "@/lib/fsrs/concept";
 
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
-const useCapSession = createSessionStore({ mode: "capital", skill: "capital" });
+const useCapSession = createSessionStore({
+  mode: "capital",
+  skill: "capital",
+  mixedSubModes: ["countryToCap", "capToCountry"],
+});
 
-type SubMode = "countryToCap" | "capToCountry" | "locator";
+type SubMode = "mixed" | "locator";
 
 const SUB_MODE_OPTIONS = [
-  { value: "countryToCap" as const, label: "Country → Cap" },
-  { value: "capToCountry" as const, label: "Cap → Country" },
+  { value: "mixed" as const, label: "Mixed" },
   { value: "locator" as const, label: "Globe Locator" },
 ];
 
 export default function CapitalsPage() {
   const s = useCapSession();
-  const [sub, setSub] = useState<SubMode>("countryToCap");
+  const [sub, setSub] = useState<SubMode>("mixed");
   const [continent, setContinent] = useContinentPref();
   const [lastWrongIso3, setLastWrongIso3] = useState<string | null>(null);
 
@@ -44,12 +48,13 @@ export default function CapitalsPage() {
   const finished = s.endedAt !== null;
   const empty = !finished && s.status === "empty";
 
-  // activeSub is always the chosen sub-mode (mixed removed)
-  const activeSub = sub;
+  // In Mixed each question carries its own direction, from the concept it grades.
+  const askCapital =
+    parseConceptId(s.pairs[s.index]?.conceptId ?? "").subMode !== "capToCountry";
 
-  // Persist sub-mode preference
+  // Persist sub-mode preference; the old single-direction modes became Mixed.
   useEffect(() => {
-    getPref("capitals.sub").then((sb) => sb && setSub(sb as SubMode));
+    getPref("capitals.sub").then((sb) => sb && setSub(sb === "locator" ? "locator" : "mixed"));
   }, []);
   useEffect(() => {
     setPref("capitals.sub", sub);
@@ -104,17 +109,17 @@ export default function CapitalsPage() {
         <FeedbackBar
           show={s.answerState !== "idle"}
           state={s.answerState === "idle" ? "correct" : s.answerState}
-          title={(activeSub === "countryToCap" ? current.capital : current.name) ?? ""}
+          title={(askCapital ? current.capital : current.name) ?? ""}
           subtitle={feedbackContext(current)}
           chosen={s.chosen}
           onNext={() => s.next()}
-          hideNext={s.answerState === "correct"}
+          srOnly={sub === "locator"}
         />
       </div>
     </div>
   );
 
-  if (activeSub === "locator") {
+  if (sub === "locator") {
     return (
       <div className="relative min-h-dvh pt-20">
         <div className="absolute inset-0">
@@ -200,7 +205,7 @@ export default function CapitalsPage() {
               index={s.index}
               total={s.queue.length}
               title={
-                activeSub === "countryToCap" ? (
+                askCapital ? (
                   <>What's the capital of <span className="text-glow-cyan">{current.name}</span>?</>
                 ) : (
                   <>Which country's capital is <span className="text-glow-cyan">{current.capital}</span>?</>
@@ -211,13 +216,15 @@ export default function CapitalsPage() {
             <div className="w-full flex justify-center">
               <div className="w-full max-w-md mx-auto">
                 <HardInput
+                  // Mixed can ask the same country in both directions: reset per slot, not per country.
+                  key={s.index}
                   target={current}
-                  matchTarget={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
-                  kind={activeSub === "countryToCap" ? "capital" : "country"}
-                  correctAnswer={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
+                  matchTarget={askCapital ? (current.capital ?? undefined) : current.name}
+                  kind={askCapital ? "capital" : "country"}
+                  correctAnswer={askCapital ? (current.capital ?? undefined) : current.name}
                   answerState={s.answerState}
                   onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
-                  placeholder={activeSub === "countryToCap" ? "Type the capital…" : "Type the country…"}
+                  placeholder={askCapital ? "Type the capital…" : "Type the country…"}
                 />
               </div>
             </div>

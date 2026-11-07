@@ -274,7 +274,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               subtitle={feedbackContext(current)}
               chosen={s.chosen}
               onNext={() => s.next()}
-              hideNext={s.answerState === "correct"}
+              srOnly
             />
           </div>
         </>
@@ -299,7 +299,6 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
         firstTryCorrect={s.firstTryCorrect}
         masteredNow={s.masteredNow}
         trickyItems={s.trickyItems}
-        practiceOnly={s.practiceOnlyIds.size}
         correct={s.correct}
         total={s.cardCount}
         wrong={s.wrong}

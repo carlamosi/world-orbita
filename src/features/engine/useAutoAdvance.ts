@@ -10,38 +10,30 @@ interface Opts {
   next: () => void;
   /** Optional override; default 1200ms. */
   correctDelayMs?: number;
-  /** Used only when `waitAfterMiss` is false. */
+  /** Delay after a wrong/revealed answer: long enough to see the correction (and the globe fly to it). */
   wrongDelayMs?: number;
-  /**
-   * After a wrong/revealed answer, wait for Next (button, Enter or Space) instead
-   * of a timer: the learner needs time to read the correction (and WCAG 2.2.1).
-   */
-  waitAfterMiss?: boolean;
   /** Allow callers to opt out (e.g. paused, modal open). */
   enabled?: boolean;
 }
 
 /**
- * Auto-advances a session shortly after a correct answer. After a miss it waits
- * for the learner: Enter or Space advances (the Next button has focus).
+ * Auto-advances a session after every answer. After a miss, Enter or Space
+ * advances early (the Next button, when shown, has focus).
  */
 export function useAutoAdvance({
   answerState,
   finished,
   next,
   correctDelayMs = 1200,
-  wrongDelayMs = 2800,
-  waitAfterMiss = true,
+  wrongDelayMs = 2500,
   enabled = true,
 }: Opts) {
   useEffect(() => {
     if (!enabled || finished) return;
     if (answerState === "idle") return;
-    if (answerState === "correct" || !waitAfterMiss) {
-      const delay = answerState === "correct" ? correctDelayMs : wrongDelayMs;
-      const id = window.setTimeout(() => next(), delay);
-      return () => window.clearTimeout(id);
-    }
+    const miss = answerState !== "correct";
+    const id = window.setTimeout(() => next(), miss ? wrongDelayMs : correctDelayMs);
+    if (!miss) return () => window.clearTimeout(id);
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Enter" && e.key !== " ") return;
       if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -51,9 +43,13 @@ export function useAutoAdvance({
       if (document.querySelector('[role="dialog"][data-state="open"]')) return;
       // Also cancels the focused Next button's native click, so one key = one next().
       e.preventDefault();
+      window.clearTimeout(id);
       next();
     }
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [answerState, finished, next, correctDelayMs, wrongDelayMs, waitAfterMiss, enabled]);
+    return () => {
+      window.clearTimeout(id);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [answerState, finished, next, correctDelayMs, wrongDelayMs, enabled]);
 }

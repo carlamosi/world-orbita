@@ -19,6 +19,8 @@ interface Props {
   chosen?: string | null;
   /** Small flag of the correct answer, on pages that show flags. */
   flag?: ReactNode;
+  /** Announce to screen readers only: the page shows the result itself (the globe). */
+  srOnly?: boolean;
 }
 
 export function FeedbackBar({
@@ -31,8 +33,11 @@ export function FeedbackBar({
   hideNext,
   chosen,
   flag,
+  srOnly,
 }: Props) {
   const miss = state !== "correct";
+  // A hit is already clear from the sound and the green answer: no card for it.
+  const visible = show && miss && !srOnly;
   // Focus Next after a miss so Enter/Space continue without the mouse. autoFocus is lost in real
   // browsers (the clicked option is disabled in the same commit), so focus a tick after mount.
   // Stable so a re-render never pulls focus back from another control.
@@ -42,7 +47,7 @@ export function FeedbackBar({
     },
     [miss],
   );
-  const label = state === "correct" ? "Nailed it" : state === "wrong" ? "Not quite" : "Revealed";
+  const label = state === "correct" ? "Correct" : state === "wrong" ? "Not quite" : "Revealed";
   const answer = (
     <>
       {miss && chosen !== undefined && (chosen ? `You chose ${chosen} · Answer: ` : "Answer: ")}
@@ -60,7 +65,7 @@ export function FeedbackBar({
         )}
       </div>
       <AnimatePresence mode="wait">
-        {show && (
+        {visible && (
           <motion.div
             key={state}
             initial={{ opacity: 0, y: 30 }}
@@ -71,9 +76,7 @@ export function FeedbackBar({
           >
             <div
               className={`glass-strong rounded-2xl px-6 py-4 flex items-center justify-between gap-4 border transition-all duration-300 ${
-                state === "correct"
-                  ? "border-emerald-500/30 shadow-[0_8px_32px_-4px_rgba(16,185,129,0.18)]"
-                  : state === "wrong"
+                state === "wrong"
                   ? "border-rose-500/30 shadow-[0_8px_32px_-4px_rgba(244,63,94,0.18)]"
                   : "border-white/10 shadow-[0_8px_32px_-4px_rgba(0,0,0,0.36)]"
               }`}

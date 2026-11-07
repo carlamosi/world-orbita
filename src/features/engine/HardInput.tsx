@@ -73,7 +73,8 @@ export function HardInput({
             ? { opacity: 1, y: 0, x: [0, -4, 4, -2, 2, 0] }
             : { opacity: 1, y: 0 }
         }
-        transition={spring.soft}
+        // Springs take only two keyframes: the shake and pulse need a tween, or framer throws and freezes the page.
+        transition={{ ...spring.soft, x: { duration: 0.35 }, scale: { duration: 0.3 } }}
         className={cn(
           "w-full glass-strong rounded-2xl p-4 flex items-center justify-between gap-3 border transition-all duration-300",
           !isAnswered && "border-white/10 focus-within:border-white/25",

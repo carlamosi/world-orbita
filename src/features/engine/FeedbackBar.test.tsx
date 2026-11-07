@@ -53,11 +53,35 @@ describe("feedback after an answer (Task 21)", () => {
     vi.useRealTimers();
   });
 
-  it("a wrong answer does not auto-advance and focuses Next", () => {
+  it("a wrong answer focuses Next and auto-advances once after the correction is shown", () => {
     render("wrong");
-    act(() => vi.advanceTimersByTime(10_000));
+    act(() => vi.advanceTimersByTime(1_000));
     expect(next).not.toHaveBeenCalled();
     expect(document.activeElement?.textContent).toContain("Next");
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("Enter after a miss advances early and cancels the timer", () => {
+    render("wrong");
+    key("Enter");
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("a correct answer shows no card, only a screen-reader announcement", () => {
+    render("correct");
+    expect(host.querySelector("[data-feedback-next]")).toBeNull();
+    expect(host.querySelector(".glass-strong")).toBeNull();
+    expect(host.querySelector('[role="status"]')!.textContent).toContain("Correct");
+  });
+
+  it("srOnly announces a miss without rendering the card", () => {
+    act(() =>
+      root.render(<FeedbackBar show srOnly state="wrong" title="Iraq" chosen="Iran" onNext={next} />),
+    );
+    expect(host.querySelector("[data-feedback-next]")).toBeNull();
+    expect(host.querySelector('[role="status"]')!.textContent).toContain("You chose Iran · Answer: Iraq");
   });
 
   it("focuses Next when the bar appears after a miss (idle → wrong, as in the pages)", () => {
