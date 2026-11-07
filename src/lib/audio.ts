@@ -5,7 +5,7 @@
  * tailored for Orbita's dark-space aesthetic.
  *
  * - Correct: Crystalline harmonic two-tone chime (E5 -> B5 sine blend)
- * - Incorrect: Instant subtle low damped tone (160Hz -> 115Hz triangle wave)
+ * - Incorrect: Two soft descending notes (A3 -> E3 triangle, low-passed)
  * - Zero external asset dependency, zero network delay, zero re-render duplicates.
  */
 
@@ -51,7 +51,7 @@ export function playCorrectSound(): void {
 
     // Master gain for correct chime
     const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.18, now);
+    masterGain.gain.setValueAtTime(0.28, now);
     masterGain.connect(ctx.destination);
 
     // Primary tone (E5: ~659.25Hz)
@@ -89,8 +89,8 @@ export function playCorrectSound(): void {
 }
 
 /**
- * Play an immediate, subtle, restrained incorrect answer tone.
- * Operates with 0ms perceptible delay.
+ * Incorrect answer: two soft descending notes (A3 then E3), warm and short.
+ * A low-pass keeps it rounded rather than buzzy; a little louder than the old single tone.
  */
 export function playIncorrectSound(): void {
   try {
@@ -100,25 +100,31 @@ export function playIncorrectSound(): void {
     const now = ctx.currentTime;
 
     const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.15, now);
+    masterGain.gain.setValueAtTime(0.32, now);
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = "lowpass";
+    lowpass.frequency.setValueAtTime(1400, now);
+    lowpass.Q.setValueAtTime(0.7, now);
+    lowpass.connect(masterGain);
     masterGain.connect(ctx.destination);
 
-    // Subtle low-pitched damped tone (160Hz -> 115Hz)
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(160, now);
-    osc.frequency.exponentialRampToValueAtTime(115, now + 0.16);
+    const note = (freq: number, start: number, length: number, peak: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, start);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.94, start + length);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(peak, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+      osc.connect(gain);
+      gain.connect(lowpass);
+      osc.start(start);
+      osc.stop(start + length + 0.02);
+    };
 
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.exponentialRampToValueAtTime(0.3, now + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-
-    osc.connect(gain);
-    gain.connect(masterGain);
-
-    osc.start(now);
-    osc.stop(now + 0.2);
+    note(220, now, 0.14, 0.42);
+    note(164.81, now + 0.09, 0.22, 0.38);
   } catch (err) {
     console.warn("[Orbita Audio] Failed to play incorrect sound", err);
   }

@@ -16,6 +16,7 @@ import { COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
+import { playAnswerSound } from "@/lib/audio";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { feedbackContext } from "@/features/engine/feedbackContext";
 
@@ -440,6 +441,7 @@ function ChallengeQuestion({
     (iso3: string) => {
       if (!current || active.answerState !== "idle") return;
       const correctPick = iso3 === current.country.iso3;
+      playAnswerSound(correctPick);
       updateSkillProgress(current.country.iso3, current.skill as Skill, (prev) =>
         confidenceAfter(prev, correctPick),
       );
@@ -503,6 +505,7 @@ function ChallengeQuestion({
   useAnswerHotkeys(hotkeyItems, pick);
   useSkipHotkey(useCallback(() => {
     if (current && active.answerState === "idle") {
+      playAnswerSound(false);
       setActive({ ...active, answerState: "wrong", wrong: active.wrong + 1, combo: 0 });
     }
   }, [current, active, setActive]));
