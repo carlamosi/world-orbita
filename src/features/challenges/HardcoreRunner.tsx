@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { GlobeFallback } from "@/features/globe/GlobeFallback";
 import { COUNTRIES } from "@/lib/countries";
 import {
   type HardcoreExamState,
@@ -42,7 +43,7 @@ export function HardcoreRunner({
     (isCorrect: boolean) => {
       if (answerState !== "idle" || !current) return;
 
-      playAnswerSound(isCorrect);
+      playAnswerSound(isCorrect, state.combo);
 
       const nextAnswerState = isCorrect ? "correct" : "wrong";
       setAnswerState(nextAnswerState);
@@ -65,7 +66,7 @@ export function HardcoreRunner({
         };
       });
     },
-    [answerState, current],
+    [answerState, current, state.combo],
   );
 
   const nextQuestion = useCallback(() => {
@@ -261,14 +262,6 @@ export function HardcoreRunner({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function GlobeFallback() {
-  return (
-    <div className="size-full grid place-items-center">
-      <div className="size-40 rounded-full bg-gradient-to-br from-coral/30 to-violet/20 animate-breathe blur-2xl" />
     </div>
   );
 }

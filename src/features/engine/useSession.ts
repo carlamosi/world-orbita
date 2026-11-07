@@ -552,7 +552,7 @@ export function createSessionStore<TItem = Country>({
     submit(isCorrect, submitOpts) {
       const s = get();
       if (s.answerState !== "idle") return;
-      playAnswerSound(isCorrect);
+      playAnswerSound(isCorrect, s.combo);
       const pair = s.pairs[s.index];
       if (!pair) return;
       const target = pair.item;

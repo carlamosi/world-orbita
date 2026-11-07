@@ -221,7 +221,7 @@ export const useSpeedRuntime = create<SpeedState>((set, get) => ({
     const item = s.queue[s.index];
     if (!item) return;
     const isCorrect = item.country.iso3 === iso3;
-    playAnswerSound(isCorrect);
+    playAnswerSound(isCorrect, s.combo);
     if (isCorrect) {
       const combo = s.combo + 1;
       const mult = Math.min(5, 1 + Math.floor((combo - 1) / 3));

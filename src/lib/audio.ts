@@ -39,10 +39,19 @@ if (typeof window !== "undefined") {
   window.addEventListener("touchstart", unlock, { once: true, passive: true });
 }
 
+/** Major pentatonic steps in semitones: every streak step stays consonant. */
+const STREAK_STEPS = [0, 2, 4, 7, 9];
+
+/** Pitch ratio for a streak: rises one pentatonic step per hit in a row, then starts over. */
+export function streakRatio(streak: number): number {
+  const step = STREAK_STEPS[Math.max(0, Math.floor(streak)) % STREAK_STEPS.length]!;
+  return 2 ** (step / 12);
+}
+
 /**
- * Play a polished, elegant correct answer chime.
+ * Play a polished, elegant correct answer chime. `streak`: hits in a row before this one.
  */
-export function playCorrectSound(): void {
+export function playCorrectSound(streak = 0): void {
   try {
     const ctx = getAudioContext();
     if (!ctx) return;
@@ -58,7 +67,8 @@ export function playCorrectSound(): void {
     const osc1 = ctx.createOscillator();
     const gain1 = ctx.createGain();
     osc1.type = "sine";
-    osc1.frequency.setValueAtTime(659.25, now);
+    const ratio = streakRatio(streak);
+    osc1.frequency.setValueAtTime(659.25 * ratio, now);
     gain1.gain.setValueAtTime(0.001, now);
     gain1.gain.exponentialRampToValueAtTime(0.35, now + 0.015);
     gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
@@ -70,7 +80,7 @@ export function playCorrectSound(): void {
     const osc2 = ctx.createOscillator();
     const gain2 = ctx.createGain();
     osc2.type = "sine";
-    osc2.frequency.setValueAtTime(987.77, now + 0.04);
+    osc2.frequency.setValueAtTime(987.77 * ratio, now + 0.04);
     gain2.gain.setValueAtTime(0.001, now);
     gain2.gain.setValueAtTime(0.001, now + 0.04);
     gain2.gain.exponentialRampToValueAtTime(0.28, now + 0.055);
@@ -133,9 +143,9 @@ export function playIncorrectSound(): void {
 /**
  * Unified answer audio dispatcher.
  */
-export function playAnswerSound(isCorrect: boolean): void {
+export function playAnswerSound(isCorrect: boolean, streak = 0): void {
   if (isCorrect) {
-    playCorrectSound();
+    playCorrectSound(streak);
   } else {
     playIncorrectSound();
   }
