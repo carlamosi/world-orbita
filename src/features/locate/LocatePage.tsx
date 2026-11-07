@@ -216,6 +216,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                 : undefined
             }
             disableHoverLabel
+            labelHighlight={s.answerState === "correct"}
             questionKey={current?.iso3 ?? null}
             activeContinent={continent === "All" ? null : continent}
             autoRotateSpeed={sub === "name" ? 0.05 : undefined}
@@ -262,7 +263,6 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                   target={current}
                   kind="country"
                   answerState={s.answerState}
-                  correctAnswer={current.name}
                   onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                 />
               )

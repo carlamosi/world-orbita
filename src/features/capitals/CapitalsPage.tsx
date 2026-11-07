@@ -143,6 +143,7 @@ export default function CapitalsPage() {
                 }
               }}
               disableHoverLabel
+              labelHighlight={s.answerState === "correct"}
               questionKey={current?.iso3 ?? null}
               activeContinent={continent === "All" ? null : continent}
             />
@@ -221,7 +222,6 @@ export default function CapitalsPage() {
                   target={current}
                   matchTarget={askCapital ? (current.capital ?? undefined) : current.name}
                   kind={askCapital ? "capital" : "country"}
-                  correctAnswer={askCapital ? (current.capital ?? undefined) : current.name}
                   answerState={s.answerState}
                   onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                   placeholder={askCapital ? "Type the capital…" : "Type the country…"}
