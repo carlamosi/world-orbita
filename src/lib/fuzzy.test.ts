@@ -13,6 +13,13 @@ describe("fuzzyMatch with other entity names", () => {
     expect(fuzzyMatch("Zambai", "Zambia", [], others)).toBe(true);
     expect(fuzzyMatch("iran", "Iran", [], others)).toBe(true);
   });
+  it("rejects a typo that is as close to another entity as to the target", () => {
+    // "Nigeri" is one edit from Niger and one from Nigeria: ambiguous, so not a typo of Niger.
+    expect(fuzzyMatch("Nigeri", "Niger", [], others)).toBe(false);
+    expect(fuzzyMatch("Nigeri", "Nigeria", [], others)).toBe(false);
+    // One edit from Nigeria but two from Niger: still a typo of Nigeria.
+    expect(fuzzyMatch("Nigerai", "Nigeria", [], others)).toBe(true);
+  });
   it("accepts an alternative name exactly", () => {
     expect(fuzzyMatch("Ivory Coast", "Cote d'Ivoire", ["Ivory Coast"], others)).toBe(true);
   });

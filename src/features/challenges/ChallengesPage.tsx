@@ -19,7 +19,6 @@ import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { playAnswerSound } from "@/lib/audio";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
-import { feedbackContext } from "@/features/engine/feedbackContext";
 
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import { Link } from "@tanstack/react-router";
@@ -581,7 +580,6 @@ function ChallengeQuestion({
             show={active.answerState !== "idle"}
             state={active.answerState === "wrong" ? "wrong" : "correct"}
             title={current.skill === "capital" ? (current.country.capital ?? current.country.name) : current.country.name}
-            subtitle={feedbackContext(current.country)}
             chosen={active.chosen ?? null}
             flag={<FlagImage iso2={current.country.iso2} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />}
             onNext={next}

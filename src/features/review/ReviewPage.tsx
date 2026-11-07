@@ -23,7 +23,6 @@ import { SessionEnd } from "@/features/engine/SessionEnd";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
-import { feedbackContext } from "@/features/engine/feedbackContext";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { db, type ConceptProgressRow, ALL_SKILLS } from "@/lib/db/orbita-db";
 import { generateDueTodayQueue } from "@/lib/fsrs/planner";
@@ -663,7 +662,6 @@ export default function ReviewPage() {
               show={s.answerState !== "idle"}
               state={s.answerState as "correct" | "wrong" | "revealed"}
               title={displayName}
-              subtitle={feedbackContext(current) ?? (isSpainEntity(current) ? "Spain" : current.continent)}
               chosen={s.chosen}
               onNext={() => s.next()}
               hideNext={s.answerState === "correct"}
@@ -751,7 +749,6 @@ export default function ReviewPage() {
             show={s.answerState !== "idle"}
             state={s.answerState as "correct" | "wrong" | "revealed"}
             title={answer}
-            subtitle={(current && feedbackContext(current)) ?? questionMeta?.subtitle ?? ""}
             chosen={s.chosen}
             flag={
               current && skill === "flag" ? (

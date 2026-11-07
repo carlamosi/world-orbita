@@ -60,8 +60,8 @@ interface Globe3DProps {
   autoRotate?: boolean;
   /** Speed of the ambient auto-rotation (default 0.35). Lower = slower drift. */
   autoRotateSpeed?: number;
-  /** Label the highlighted country (a hit). Off by default: in Name mode the highlight is the question. */
-  labelHighlight?: boolean;
+  /** The highlight marks a hit the learner just clicked: keep the camera still. Off in Name mode, where the highlight is the question. */
+  highlightIsHit?: boolean;
   /**
    * Optional secondary polygon overlay (e.g. Spain CCAA / province features).
    * Rendered as react-globe.gl `customPolygonsData` — completely independent
@@ -185,7 +185,7 @@ export default function Globe3D({
   disableMicrostates = false,
   autoRotate,
   autoRotateSpeed,
-  labelHighlight = false,
+  highlightIsHit = false,
   overlayPolygons,
   overlayCapColor,
   overlaySideColor,
@@ -556,11 +556,36 @@ export default function Globe3D({
 
   // ---- Unified camera targeting pass ----------------------------------
   const activeCameraTarget = useMemo(() => {
+    // A page-fixed view (Spain) never moves for answers: the inset and colours carry the feedback.
+    if (pointOfView) {
+      const lat = pointOfView.lat;
+      const lng = pointOfView.lng;
+      const altitude = pointOfView.altitude ?? 0.32;
+      return {
+        lat,
+        lng,
+        altitude,
+        key: `pov:${lat.toFixed(2)},${lng.toFixed(2)},${altitude.toFixed(2)}`,
+        duration: 800,
+      };
+    }
     if (missPair) {
-      // Frame both the click and the answer, so a far-off miss is visible at a glance.
-      const mid = midpoint(missPair.from, missPair.to);
-      const altitude = Math.max(0.6, Math.min(2.6, missPair.km / 3500 + 0.45));
-      return { ...mid, altitude, key: `miss:${effWrong}:${effReveal}`, duration: 1400 };
+      // Frame both the click and the answer, but only when one is out of comfortable view,
+      // and never zoom in: neighbours (Ukraine/Moldova) need no camera move at all.
+      const pov = ref.current?.pointOfView();
+      const comfortDeg = (alt: number) => (Math.acos(1 / (1 + alt)) * 180) / Math.PI * 0.55;
+      if (
+        pov &&
+        [missPair.from, missPair.to].every(
+          (p) => angularDistanceDeg(pov.lat, pov.lng, p.lat, p.lng) < comfortDeg(pov.altitude),
+        )
+      ) {
+        return null;
+      }
+      const halfSpanDeg = missPair.km / 111 / 2 + 6;
+      const needed = 1 / Math.cos((Math.min(80, halfSpanDeg / 0.55) * Math.PI) / 180) - 1;
+      const altitude = Math.max(pov?.altitude ?? 0, Math.min(2.6, Math.max(0.9, needed)));
+      return { ...midpoint(missPair.from, missPair.to), altitude, key: `miss:${effWrong}:${effReveal}`, duration: 2000 };
     }
     if (effReveal) {
       const f = featureByIso3.get(effReveal);
@@ -576,16 +601,17 @@ export default function Globe3D({
         // enough to see the country, preserve their zoom. Otherwise zoom out
         // just enough. Never zoom in closer than frameAlt.
         const altitude = Math.max(frameAlt, Math.min(liveAlt * 1.25, 1.8));
-        return { lat: clat, lng: clng, altitude, key: `reveal:${effReveal}`, duration: 1600 };
+        return { lat: clat, lng: clng, altitude, key: `reveal:${effReveal}`, duration: 2000 };
       }
       const c = countryByIso3.get(effReveal);
       if (c) {
         const liveAlt = ref.current ? ref.current.pointOfView().altitude : 1.4;
         const altitude = Math.min(Math.max(liveAlt, 1.0), 1.6);
-        return { lat: c.coordinates[0], lng: c.coordinates[1], altitude, key: `reveal:${effReveal}`, duration: 1600 };
+        return { lat: c.coordinates[0], lng: c.coordinates[1], altitude, key: `reveal:${effReveal}`, duration: 2000 };
       }
     }
-    if (effHighlight) {
+    // A hit was just clicked, so it is in view already: no camera move.
+    if (effHighlight && !highlightIsHit) {
       const f = featureByIso3.get(effHighlight);
       if (f) {
         const [clng, clat] = f.properties.centroid;
@@ -615,21 +641,9 @@ export default function Globe3D({
         return { lat: c.coordinates[0], lng: c.coordinates[1], altitude: 1.4, key: `focus:${effFocus}`, duration: 1200 };
       }
     }
-    if (pointOfView) {
-      const lat = pointOfView.lat;
-      const lng = pointOfView.lng;
-      const altitude = pointOfView.altitude ?? 0.32;
-      return {
-        lat,
-        lng,
-        altitude,
-        key: `pov:${lat.toFixed(2)},${lng.toFixed(2)},${altitude.toFixed(2)}`,
-        duration: 800,
-      };
-    }
     return null;
   // effHighlight is a dependency: in Name mode the highlighted country is the question and must be in view.
-  }, [missPair, effWrong, effReveal, effHighlight, effFocus, pointOfView, featureByIso3, countryByIso3]);
+  }, [missPair, effWrong, effReveal, effHighlight, highlightIsHit, effFocus, pointOfView, featureByIso3, countryByIso3]);
 
   const lastCameraTargetKey = useRef<string | null>(null);
 
@@ -706,14 +720,16 @@ export default function Globe3D({
     const g = ref.current;
     const pov = g.pointOfView();
     const center = activeContinent ? CONTINENT_CENTERS[activeContinent] : undefined;
-    const target = center ?? { lat: 18, lng: pov.lng, altitude: Math.max(pov.altitude, 2.2) };
+    // World view: stay put unless a reveal left the camera zoomed in. Less motion, less jolt.
+    if (!center && pov.altitude >= 1.6) return;
+    const target = center ?? { lat: pov.lat * 0.5 + 9, lng: pov.lng, altitude: 2.2 };
     const moved =
       angularDistanceDeg(pov.lat, pov.lng, target.lat, target.lng) > 4 ||
       Math.abs(pov.altitude - target.altitude) > 0.15;
     if (!moved) return;
     const reduced =
       typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    g.pointOfView(target, effectiveQuality === "static" || reduced ? 0 : 1100);
+    g.pointOfView(target, effectiveQuality === "static" || reduced ? 0 : 1800);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionKey]);
 
@@ -933,46 +949,36 @@ export default function Globe3D({
     if (effWrong) {
       pills.push({ id: `wrong-${effWrong}`, iso3: effWrong, ...placeOf(effWrong), kind: "wrong" });
     }
-    // A hit is labelled too, but only when the page says so: in Name mode the highlight is the question.
-    const answerId = effReveal ?? (labelHighlight ? effHighlight : null);
-    if (answerId) {
-      pills.push({ id: `answer-${answerId}`, iso3: answerId, ...placeOf(answerId), kind: "correct" });
+    if (effReveal) {
+      pills.push({ id: `answer-${effReveal}`, iso3: effReveal, ...placeOf(effReveal), kind: "correct" });
     }
     return pills;
-  }, [effWrong, effReveal, effHighlight, labelHighlight, placeOf]);
-
-  /** Dashed arc from the click to the answer: the size and direction of the miss. */
-  const missArcs = useMemo(
-    () =>
-      missPair
-        ? [{ startLat: missPair.from.lat, startLng: missPair.from.lng, endLat: missPair.to.lat, endLng: missPair.to.lng }]
-        : [],
-    [missPair],
-  );
+  }, [effWrong, effReveal, placeOf]);
 
   const htmlElementFn = useCallback((d: object) => {
     const p = d as SpatialPill;
     const el = document.createElement("div");
     el.style.pointerEvents = "none";
     el.style.userSelect = "none";
-    el.style.transform = "translate(-50%, -100%)";
+    const wrong = p.kind === "wrong";
+    // The answer sits above its point and the miss hangs below its own: neighbours never stack.
+    el.style.transform = wrong ? "translate(-50%, 4px)" : "translate(-50%, calc(-100% - 4px))";
 
     const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const wrong = p.kind === "wrong";
     const rgb = wrong ? COLOR_WRONG : COLOR_REVEAL;
     // Quiet glass chip in the brand type: a status dot and the name. The answer reads first; the miss steps back.
     el.innerHTML = `
       <div style="
-        display:inline-flex;align-items:center;gap:7px;
-        padding:5px 11px 5px 9px;margin-bottom:6px;
+        display:inline-flex;align-items:center;gap:5px;
+        padding:3px 8px 3px 7px;
         background:rgba(10,10,18,0.72);
         border:1px solid rgba(255,255,255,${wrong ? 0.08 : 0.14});
         box-shadow:0 8px 24px -8px rgba(0,0,0,0.7);
         border-radius:9999px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);white-space:nowrap;
         ${reduced ? "" : "animation:pillIn 0.32s cubic-bezier(0.16,1,0.3,1) both;"}
       ">
-        <span style="width:6px;height:6px;border-radius:50%;background:rgb(${rgb});box-shadow:0 0 0 3px rgba(${rgb},0.16);"></span>
-        <span style="font-family:var(--font-display);font-size:${wrong ? 12 : 13}px;font-weight:500;letter-spacing:-0.005em;color:${wrong ? "rgba(255,255,255,0.5)" : "#fff"};${wrong ? `text-decoration:line-through;text-decoration-color:rgba(${rgb},0.6);` : ""}">${p.name}</span>
+        <span style="width:5px;height:5px;border-radius:50%;background:rgb(${rgb});box-shadow:0 0 0 2px rgba(${rgb},0.18);"></span>
+        <span style="font-family:var(--font-display);font-size:${wrong ? 10.5 : 11.5}px;font-weight:500;letter-spacing:-0.005em;color:${wrong ? "rgba(255,255,255,0.5)" : "#fff"};${wrong ? `text-decoration:line-through;text-decoration-color:rgba(${rgb},0.6);` : ""}">${p.name}</span>
       </div>
       <style>@keyframes pillIn { 0%{transform:translateY(4px);opacity:0} 100%{transform:translateY(0);opacity:1} }</style>
     `;
@@ -1093,15 +1099,6 @@ export default function Globe3D({
         ringMaxRadius="maxR"
         ringPropagationSpeed="propagationSpeed"
         ringRepeatPeriod="repeatPeriod"
-        arcsData={missArcs}
-        arcColor={() => [`rgba(${COLOR_WRONG}, 0.85)`, `rgba(${COLOR_REVEAL}, 0.95)`]}
-        arcStroke={0.45}
-        arcDashLength={0.35}
-        arcDashGap={0.12}
-        arcDashInitialGap={1}
-        arcDashAnimateTime={effectiveQuality === "static" ? 0 : 1100}
-        arcAltitudeAutoScale={0.35}
-        arcsTransitionDuration={0}
       />
 
       {/* Zoom controls overlay */}

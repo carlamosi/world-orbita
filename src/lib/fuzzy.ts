@@ -39,10 +39,13 @@ export function fuzzyMatch(
   if (!g) return false;
   const candidates = [target, ...alts].map(normalize).filter(Boolean);
   if (candidates.includes(g)) return true;
-  if (others.some((o) => normalize(o) === g)) return false;
+  const otherNames = others.map(normalize).filter(Boolean);
+  if (otherNames.includes(g)) return false;
   for (const c of candidates) {
     const tol = Math.max(1, Math.floor(c.length / 8));
-    if (levenshtein(g, c) <= tol) return true;
+    const dist = levenshtein(g, c);
+    // A typo must be closer to the target than to any other name ("Nigeri" is as close to Nigeria as to Niger).
+    if (dist <= tol && otherNames.every((o) => o === c || levenshtein(g, o) > dist)) return true;
   }
   return false;
 }

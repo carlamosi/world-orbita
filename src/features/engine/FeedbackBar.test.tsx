@@ -4,10 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { FeedbackBar } from "./FeedbackBar";
 import { useAutoAdvance } from "./useAutoAdvance";
-import { feedbackContext } from "./feedbackContext";
 import type { AnswerState } from "./useSession";
 import { COUNTRY_BY_ISO3 } from "@/lib/countries";
-import { SPAIN_PROVINCES } from "@/lib/spain";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -20,7 +18,6 @@ function Harness({ state, next }: { state: AnswerState; next: () => void }) {
       show={state !== "idle"}
       state={state === "idle" ? "correct" : state}
       title={IRAQ.name}
-      subtitle={feedbackContext(IRAQ)}
       chosen="Iran"
       onNext={next}
       hideNext={state === "correct"}
@@ -149,29 +146,14 @@ describe("feedback after an answer (Task 21)", () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  it("shows what was chosen, the answer and a context line in a polite status region", () => {
+  it("shows what was chosen and the answer, with no region or neighbours line", () => {
     render("idle");
     const region = host.querySelector('[role="status"][aria-live="polite"]');
     expect(region).not.toBeNull();
     render("wrong");
     const text = region!.textContent ?? "";
     expect(text).toContain("You chose Iran · Answer: Iraq");
-    expect(text).toContain("Western Asia · Neighbours: Iran, Jordan, Kuwait");
-    expect(text).not.toContain("Saudi Arabia");
-  });
-});
-
-describe("feedbackContext", () => {
-  it("a country without borders gives only its subregion", () => {
-    expect(feedbackContext(COUNTRY_BY_ISO3.get("ATG")!)).toBe("Caribbean");
-  });
-
-  it("an empty subregion leaves no leading separator", () => {
-    expect(feedbackContext({ ...IRAQ, subregion: "" })).toBe("Neighbours: Iran, Jordan, Kuwait");
-  });
-
-  it("a Spanish province names its autonomous community", () => {
-    const almeria = SPAIN_PROVINCES.find((p) => p.id === "ES-AL")!;
-    expect(feedbackContext(almeria)).toBe("In Andalucía");
+    expect(host.textContent).not.toContain("Neighbours");
+    expect(host.textContent).not.toContain("Western Asia");
   });
 });

@@ -250,11 +250,6 @@ export function HardcoreRunner({
               show
               state={answerState as "correct" | "wrong" | "revealed"}
               title={`${current.countryName} ${current.capital ? `— ${current.capital}` : ""}`}
-              subtitle={
-                current.type === "countryToCap"
-                  ? `Capital: ${current.capital}`
-                  : `Country: ${current.countryName}`
-              }
               onNext={nextQuestion}
               onSkip={answerState === "wrong" ? revealAnswer : undefined}
               hideNext
