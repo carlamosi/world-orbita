@@ -124,6 +124,14 @@ h1, h2, h3, h4 {
 
 /* ============== Atmosphere utilities ============== */
 
+/* Scrollable row without a visible scrollbar (the navbar links): a bar would make the navbar taller. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @utility glass {
   background: linear-gradient(
     180deg,

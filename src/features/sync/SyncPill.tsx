@@ -68,27 +68,30 @@ export function SyncPill() {
     tone = "text-emerald-300";
   }
 
+  // A fixed icon-sized slot: the status never changes the navbar's width.
   return (
-    <AnimatePresence>
-      {show && (
-        <motion.button
-          key="sync-pill"
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, transition: { duration: 0.6 } }}
-          transition={{ duration: 0.25 }}
-          onClick={() => router.navigate({ to: "/account/sync" })}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px]",
-            tone,
-          )}
-          title="Cloud sync"
-        >
-          <Icon className={cn("size-3", status === "syncing" && "animate-spin")} />
-          <span>{label}</span>
-        </motion.button>
-      )}
-    </AnimatePresence>
+    <span className="relative inline-flex size-7 shrink-0 items-center justify-center">
+      <AnimatePresence>
+        {show && (
+          <motion.button
+            key="sync-pill"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, transition: { duration: 0.6 } }}
+            transition={{ duration: 0.25 }}
+            onClick={() => router.navigate({ to: "/account/sync" })}
+            className={cn(
+              "absolute inset-0 inline-flex items-center justify-center rounded-full border border-white/10 bg-white/5",
+              tone,
+            )}
+            title={label}
+            aria-label={`Cloud sync: ${label}`}
+          >
+            <Icon className={cn("size-3.5", status === "syncing" && "animate-spin")} />
+          </motion.button>
+        )}
+      </AnimatePresence>
+    </span>
   );
 }
 
