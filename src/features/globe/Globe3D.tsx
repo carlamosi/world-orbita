@@ -202,6 +202,8 @@ export default function Globe3D({
   const handleFeatureClick = onFeatureClick ?? onCountryClick;
 
   const ref = useRef<GlobeMethods | undefined>(undefined);
+  // The camera pass needs the mounted globe: re-run it once the globe is ready (first question).
+  const [globeReady, setGlobeReady] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [dim, setDim] = useState({ w: 600, h: 600 });
   const [hoverIso3, setHoverIso3] = useState<string | null>(null);
@@ -626,7 +628,8 @@ export default function Globe3D({
       };
     }
     return null;
-  }, [missPair, effWrong, effReveal, effFocus, pointOfView, featureByIso3, countryByIso3]);
+  // effHighlight is a dependency: in Name mode the highlighted country is the question and must be in view.
+  }, [missPair, effWrong, effReveal, effHighlight, effFocus, pointOfView, featureByIso3, countryByIso3]);
 
   const lastCameraTargetKey = useRef<string | null>(null);
 
@@ -653,7 +656,7 @@ export default function Globe3D({
         );
       }
     }
-  }, [activeCameraTarget, autoRotate, effectiveQuality]);
+  }, [activeCameraTarget, autoRotate, effectiveQuality, globeReady]);
 
   // ---- Smooth Camera Rotation on Continent Selection (world mode only) -----------------
   const lastActiveContinent = useRef<string | null | undefined>(undefined);
@@ -684,7 +687,10 @@ export default function Globe3D({
     }
   }, [activeContinent, effectiveQuality, disableWorldPolygons, pointOfView]);
 
-  // ---- Explore-oriented camera logic for new questions ----------------
+  // ---- New question: a calm glide to a neutral view ----------------------
+  // Never toward the answer (that would hint its continent): back to the chosen
+  // region, or a world overview at the current longitude. A highlighted question
+  // (Name mode) is framed by the camera pass above instead.
   const lastQuestionKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -693,34 +699,23 @@ export default function Globe3D({
       return;
     }
     if (lastQuestionKey.current === questionKey) return;
+    const first = lastQuestionKey.current === null;
     lastQuestionKey.current = questionKey;
+    if (first || effHighlight) return;
 
     const g = ref.current;
-    const targetCountry = countryByIso3.get(questionKey);
-    if (!targetCountry) return;
-
     const pov = g.pointOfView();
-    const currentLat = pov.lat;
-    const currentLng = pov.lng;
-    const currentAlt = pov.altitude;
-
-    const targetLat = targetCountry.coordinates[0];
-    const targetLng = targetCountry.coordinates[1];
-
-    const dist = angularDistanceDeg(currentLat, currentLng, targetLat, targetLng);
-    const threshold = Math.min(75, 20 + currentAlt * 30);
-
-    if (dist > threshold) {
-      const continent = targetCountry.continent;
-      const center = CONTINENT_CENTERS[continent] || { lat: targetLat, lng: targetLng };
-      const altitude = Math.max(currentAlt * 1.15, 1.6);
-      g.pointOfView({ lat: center.lat, lng: center.lng, altitude }, 1400);
-    } else {
-      if (currentAlt < 0.8) {
-        g.pointOfView({ lat: currentLat, lng: currentLng, altitude: currentAlt * 1.35 }, 800);
-      }
-    }
-  }, [questionKey, countryByIso3, disableWorldPolygons, pointOfView]);
+    const center = activeContinent ? CONTINENT_CENTERS[activeContinent] : undefined;
+    const target = center ?? { lat: 18, lng: pov.lng, altitude: Math.max(pov.altitude, 2.2) };
+    const moved =
+      angularDistanceDeg(pov.lat, pov.lng, target.lat, target.lng) > 4 ||
+      Math.abs(pov.altitude - target.altitude) > 0.15;
+    if (!moved) return;
+    const reduced =
+      typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    g.pointOfView(target, effectiveQuality === "static" || reduced ? 0 : 1100);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionKey]);
 
   // ---- Click / hover handlers (active continent aware) ----------------
   const handlePolygonClick = useCallback(
@@ -1049,6 +1044,7 @@ export default function Globe3D({
     >
       <Globe
         ref={ref}
+        onGlobeReady={() => setGlobeReady(true)}
         width={dim.w}
         height={dim.h}
         backgroundColor="rgba(0,0,0,0)"
