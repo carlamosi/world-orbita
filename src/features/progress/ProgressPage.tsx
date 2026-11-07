@@ -15,6 +15,25 @@ import { State } from "ts-fsrs";
 
 const CONTINENTS = ["Africa", "Americas", "Asia", "Europe", "Oceania"] as const;
 
+/** Countries with at least 3 learned skills, every card of each mastered (the "Mastered" count). */
+function masteredIso3(progress: ConceptProgressRow[]): Set<string> {
+  const byIsoSkill = new Map<string, Map<string, boolean>>();
+  for (const p of progress) {
+    if (normalizeState(p.fsrs_state) === State.New) continue;
+    let skillMap = byIsoSkill.get(p.iso3);
+    if (!skillMap) {
+      skillMap = new Map<string, boolean>();
+      byIsoSkill.set(p.iso3, skillMap);
+    }
+    skillMap.set(p.skill, (skillMap.get(p.skill) ?? true) && isMastered(p));
+  }
+  const out = new Set<string>();
+  for (const [iso3, skillMap] of byIsoSkill) {
+    if (skillMap.size >= 3 && [...skillMap.values()].every(Boolean)) out.add(iso3);
+  }
+  return out;
+}
+
 export default function ProgressPage() {
   const conceptProgress = useLiveQuery(() => db().concept_progress.toArray(), []) ?? [];
   const sessions = useLiveQuery(() => db().gameSessions.toArray(), []) ?? [];
@@ -28,29 +47,8 @@ export default function ProgressPage() {
   const totalAnswered = sessions.reduce((a, s) => a + s.totalQuestions, 0);
   const minutes = Math.round(sessions.reduce((a, s) => a + s.durationMs, 0) / 60_000);
 
-  const mastered = useMemo(() => {
-    // iso3 -> skill -> every card of that skill is mastered
-    const byIsoSkill = new Map<string, Map<string, boolean>>();
-    
-    for (const p of conceptProgress) {
-      if (normalizeState(p.fsrs_state) === State.New) continue;
-      
-      let skillMap = byIsoSkill.get(p.iso3);
-      if (!skillMap) {
-        skillMap = new Map<string, boolean>();
-        byIsoSkill.set(p.iso3, skillMap);
-      }
-      
-      skillMap.set(p.skill, (skillMap.get(p.skill) ?? true) && isMastered(p));
-    }
-    
-    let count = 0;
-    for (const skillMap of byIsoSkill.values()) {
-      if (skillMap.size < 3) continue; // Must have learned at least 3 distinct skills
-      if ([...skillMap.values()].every(Boolean)) count++;
-    }
-    return count;
-  }, [conceptProgress]);
+  const masteredSet = useMemo(() => masteredIso3(conceptProgress), [conceptProgress]);
+  const mastered = masteredSet.size;
 
   const cs = currentStreak(activeDays);
   const ls = longestStreak(activeDays);
@@ -87,7 +85,7 @@ export default function ProgressPage() {
 
         <section className="mt-10">
           <SectionTitle>Confidence map</SectionTitle>
-          <ConfidenceMap progress={conceptProgress} />
+          <ConfidenceMap progress={conceptProgress} mastered={masteredSet} />
         </section>
 
 
@@ -185,27 +183,9 @@ export default function ProgressPage() {
           <SectionTitle>By continent</SectionTitle>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             {(() => {
-              // Build the grouping map once for all continents
-              const byIsoSkill = new Map<string, Map<string, boolean>>();
-              for (const p of conceptProgress) {
-                if (normalizeState(p.fsrs_state) === State.New) continue;
-                let skillMap = byIsoSkill.get(p.iso3);
-                if (!skillMap) {
-                  skillMap = new Map<string, boolean>();
-                  byIsoSkill.set(p.iso3, skillMap);
-                }
-                skillMap.set(p.skill, (skillMap.get(p.skill) ?? true) && isMastered(p));
-              }
-
               return CONTINENTS.map((cont) => {
                 const list = COUNTRIES.filter((c) => c.continent === cont);
-                let masteredCount = 0;
-                
-                for (const c of list) {
-                  const skillMap = byIsoSkill.get(c.iso3);
-                  if (!skillMap || skillMap.size < 3) continue;
-                  if ([...skillMap.values()].every(Boolean)) masteredCount++;
-                }
+                const masteredCount = list.filter((c) => masteredSet.has(c.iso3)).length;
 
                 const pct = list.length > 0 ? masteredCount / list.length : 0;
                 
@@ -466,7 +446,14 @@ function HeroStat({
   );
 }
 
-function ConfidenceMap({ progress }: { progress: ConceptProgressRow[] }) {
+function ConfidenceMap({
+  progress,
+  mastered,
+}: {
+  progress: ConceptProgressRow[];
+  /** Mastered countries get a violet edge and a soft glow. */
+  mastered: Set<string>;
+}) {
   const grouped = new Map<string, number[]>();
   for (const p of progress) {
     if (normalizeState(p.fsrs_state) === State.New) continue;
@@ -488,8 +475,12 @@ function ConfidenceMap({ progress }: { progress: ConceptProgressRow[] }) {
         {cells.map(({ c, avg }) => (
           <div
             key={c.iso3}
-            title={`${c.name} · ${Math.round(avg * 100)}%`}
-            className="aspect-square rounded-[4px]"
+            title={`${c.name} · ${Math.round(avg * 100)}%${mastered.has(c.iso3) ? " · Mastered" : ""}`}
+            className={cn(
+              "aspect-square rounded-[4px]",
+              mastered.has(c.iso3) &&
+                "ring-1 ring-[color:var(--violet)] shadow-[0_0_10px_-1px_color-mix(in_oklab,var(--violet)_75%,transparent)]",
+            )}
             style={{
               background:
                 avg <= 0
@@ -509,6 +500,10 @@ function ConfidenceMap({ progress }: { progress: ConceptProgressRow[] }) {
           <span className="size-2 rounded-sm bg-[color:var(--neon)]/70" />
         </div>
         <span>Strong</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-2 rounded-sm ring-1 ring-[color:var(--violet)] shadow-[0_0_6px_color-mix(in_oklab,var(--violet)_75%,transparent)]" />
+          Mastered
+        </span>
       </div>
     </div>
   );
