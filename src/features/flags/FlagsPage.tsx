@@ -349,7 +349,6 @@ function FlagToType({
           target={target}
           kind="country"
           answerState={answerState}
-          correctAnswer={target.name}
           onSubmit={onSubmit}
           placeholder="Type the country…"
         />

@@ -20,7 +20,6 @@ interface Props {
   matchTarget?: string;
   /** What kind of name is typed; drives alternative names and the other-entity checks. */
   kind: NameKind;
-  correctAnswer?: string;
   answerState?: "idle" | "correct" | "wrong" | "revealed";
   /** `exact` is false when Enter accepted a typo through the fuzzy matcher; `typed` is the text sent with Enter. */
   onSubmit: (ok: boolean, exact?: boolean, typed?: string) => void;
@@ -33,13 +32,12 @@ interface Props {
  * - Instant validation on every keystroke via `exactMatch` (correct => submit).
  * - Enter still works as a fallback (uses `fuzzyMatch` to be forgiving).
  * - When answered, transitions smoothly to green (correct) or red (incorrect) while keeping typed answer visible.
- * - If incorrect, renders a subtle green reveal rectangle underneath with only the correct answer.
+ * - Enter on an empty field means "I don't know": graded wrong, the answer card shows the answer.
  */
 export function HardInput({
   target,
   matchTarget,
   kind,
-  correctAnswer,
   answerState = "idle",
   onSubmit,
   placeholder = "Type the country…",
@@ -54,7 +52,6 @@ export function HardInput({
 
   const expectedText = matchTarget ?? target.name;
   const { alts, others } = answerNames(kind, target);
-  const revealAnswer = correctAnswer ?? expectedText;
 
   // Re-focus and clear when target changes
   useEffect(() => {
@@ -99,7 +96,9 @@ export function HardInput({
             if (isAnswered) return;
             if (e.key === "Enter") {
               e.preventDefault();
-              if (val.trim()) onSubmit(fuzzyMatch(val, expectedText, alts, others), exactMatch(val, expectedText, alts), val.trim());
+              const typed = val.trim();
+              if (!typed) onSubmit(false, false, "");
+              else onSubmit(fuzzyMatch(val, expectedText, alts, others), exactMatch(val, expectedText, alts), typed);
             }
           }}
           placeholder={placeholder}
@@ -136,25 +135,6 @@ export function HardInput({
         </AnimatePresence>
       </motion.div>
 
-      {/* Correct answer reveal underneath on error */}
-      <AnimatePresence>
-        {isWrong && (
-          <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.96 }}
-            transition={spring.soft}
-            className="w-full glass rounded-xl px-4 py-3 border border-emerald-500/40 bg-emerald-950/30 flex items-center justify-between gap-3 shadow-[0_4px_20px_-5px_rgba(16,185,129,0.2)]"
-          >
-            <div className="font-mono text-[11px] uppercase tracking-wider text-emerald-400/80">
-              Correct answer
-            </div>
-            <div className="font-display text-base font-medium text-emerald-200 tracking-tight">
-              {revealAnswer}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
