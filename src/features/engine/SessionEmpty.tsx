@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/orbita-badge";
 import { Button } from "@/components/ui/orbita-button";
-import type { EmptyReason } from "./useSession";
+import { MAX_NEW_GLOBAL_PER_DAY, type EmptyReason } from "./useSession";
 
 interface Props {
   /** Why the queue is empty (store `emptyReason`). */
@@ -13,6 +13,10 @@ interface Props {
 }
 
 function bodyCopy(reason: EmptyReason | null, hasSeen: boolean): string {
+  if (reason === "globalLimit") {
+    const due = hasSeen ? " Nothing is due here." : "";
+    return `You've started ${MAX_NEW_GLOBAL_PER_DAY} new cards today across all modes.${due} Come back tomorrow for new cards.`;
+  }
   if (!hasSeen) return "Come back tomorrow for new cards.";
   if (reason === "seenAll") {
     return "You've seen everything here and nothing is due yet. Come back later.";

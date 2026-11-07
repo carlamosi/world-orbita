@@ -90,7 +90,7 @@ describe("Spain Database & FSRS Persistence Verification", () => {
       direction: "flag->answer",
     });
 
-    expect(assessment.outcome).toBe("easy");
+    expect(assessment.outcome).toBe("good");
 
     const now = Date.now();
     const card = rowToCard(initialRow);

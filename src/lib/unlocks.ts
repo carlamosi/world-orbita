@@ -2,8 +2,7 @@ import type { ConceptProgressRow, GameSessionRow, UnlockRow } from "@/lib/db/orb
 import { COUNTRIES } from "@/lib/countries";
 import { currentStreak } from "@/lib/streak";
 import { dateKey } from "@/lib/streak";
-import { getRetrievability, normalizeState } from "@/lib/fsrs/adapter";
-import { State } from "ts-fsrs";
+import { isMastered } from "@/lib/fsrs/adapter";
 
 /**
  * Pure unlock evaluator.
@@ -31,11 +30,11 @@ export const DEFINITIONS: readonly UnlockDef[] = [
   { key: "streak_3", title: "On a roll", description: "Practice 3 days in a row.", category: "streak" },
   { key: "streak_7", title: "Orbital habit", description: "Practice 7 days in a row.", category: "streak" },
   { key: "speed_demon", title: "Speed demon", description: "Score 30+ in a 60s Speed Round.", category: "speed" },
-  { key: "africa_mastered", title: "Africa mastered", description: "Reach 80% retention on every African country (any skill).", category: "region" },
-  { key: "europe_mastered", title: "Europe mastered", description: "Reach 80% retention on every European country (any skill).", category: "region" },
-  { key: "asia_mastered", title: "Asia mastered", description: "Reach 80% retention on every Asian country (any skill).", category: "region" },
-  { key: "americas_mastered", title: "Americas mastered", description: "Reach 80% retention on every American country (any skill).", category: "region" },
-  { key: "oceania_mastered", title: "Oceania mastered", description: "Reach 80% retention on every Oceanian country (any skill).", category: "region" },
+  { key: "africa_mastered", title: "Africa mastered", description: "Master every African country in any skill (stable for 21+ days).", category: "region" },
+  { key: "europe_mastered", title: "Europe mastered", description: "Master every European country in any skill (stable for 21+ days).", category: "region" },
+  { key: "asia_mastered", title: "Asia mastered", description: "Master every Asian country in any skill (stable for 21+ days).", category: "region" },
+  { key: "americas_mastered", title: "Americas mastered", description: "Master every American country in any skill (stable for 21+ days).", category: "region" },
+  { key: "oceania_mastered", title: "Oceania mastered", description: "Master every Oceanian country in any skill (stable for 21+ days).", category: "region" },
 ];
 
 export interface UnlockEvalInput {
@@ -65,24 +64,13 @@ export function evaluateUnlocks(input: UnlockEvalInput): UnlockRow[] {
   const activeDays = new Set(input.sessions.map((s) => dateKey(s.createdAt)));
   const streak = currentStreak(activeDays, dateKey(input.now));
 
-  // Group concept progress by iso3 to find if *any* skill for that country is mastered
-  const byIso = new Map<string, number[]>();
-  for (const p of input.progress) {
-    if (normalizeState(p.fsrs_state) === State.New) continue;
-    const r = getRetrievability(p, input.now);
-    const arr = byIso.get(p.iso3) || [];
-    arr.push(r);
-    byIso.set(p.iso3, arr);
-  }
+  // A country counts once any of its cards is mastered. Earned unlocks are kept below.
+  const masteredIso = new Set(input.progress.filter(isMastered).map((p) => p.iso3));
 
   function regionMastered(continent: string): number {
     const list = COUNTRIES.filter((c) => c.continent === continent);
     if (list.length === 0) return 0;
-    const mastered = list.filter((c) => {
-      const rs = byIso.get(c.iso3) || [];
-      return rs.some((r) => r >= 0.8);
-    }).length;
-    return mastered / list.length;
+    return list.filter((c) => masteredIso.has(c.iso3)).length / list.length;
   }
 
   const candidates: Array<{ key: string; progress: number; unlocked: boolean }> = [

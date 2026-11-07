@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useCallback, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { COUNTRIES, COUNTRY_BY_ISO3, pickRandomCountries } from "@/lib/countries";
+import { COUNTRIES, COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
@@ -8,6 +8,8 @@ import { SessionEnd } from "@/features/engine/SessionEnd";
 import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { HardInput } from "@/features/engine/HardInput";
+import { FeedbackBar } from "@/features/engine/FeedbackBar";
+import { feedbackContext } from "@/features/engine/feedbackContext";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
@@ -80,7 +82,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 
   // Start / restart session logic
   const startSession = useCallback(
-    (c: ContinentChoice, sMode: SubMode, findLength: SessionMode) => {
+    (c: ContinentChoice, sMode: SubMode, findLength: SessionMode, diff: NameDifficulty) => {
       setLastWrongIso3(null); // Reset differential feedback state
       if (sMode === "find" && findLength === "complete") {
         const all = selectAllForContinent(c === "All" ? null : c);
@@ -88,16 +90,18 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
       } else if (sMode === "find") {
         void findSession.start({ continent: c === "All" ? undefined : c, subMode: sMode });
       } else {
-        void nameSession.start({ continent: c === "All" ? undefined : c, subMode: sMode });
+        // Choosing among 4 is recognition, typing is recall: each is its own card.
+        const subMode = diff === "hard" ? "nameType" : "name";
+        void nameSession.start({ continent: c === "All" ? undefined : c, subMode });
       }
     },
     [findSession, nameSession],
   );
 
   useEffect(() => {
-    startSession(continent, sub, sessionMode);
+    startSession(continent, sub, sessionMode, difficulty);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [continent, sub, sessionMode]);
+  }, [continent, sub, sessionMode, difficulty]);
 
   useAutoAdvance({
     answerState: s.answerState,
@@ -120,20 +124,9 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
   // Options for Name Easy Mode (filtered by continent per Task 2 fix)
   const nameOptions = useMemo(() => {
     if (!current || sub !== "name" || difficulty !== "easy") return [];
-    const others = pickRandomCountries(
-      3,
-      new Set([current.iso3]),
-      continent === "All" ? undefined : continent,
-    );
+    const others = pickDistractors(current, 3, continent === "All" ? undefined : continent);
     return shuffle([current, ...others]);
   }, [current, sub, difficulty, continent]);
-
-  const handleNameSubmit = useCallback(
-    (isCorrect: boolean, _country: Country) => {
-      s.submit(isCorrect);
-    },
-    [s],
-  );
 
   const toolbar = (
     <div className="absolute top-24 inset-x-0 z-20 px-4 md:px-6 flex items-center justify-between pointer-events-auto max-w-5xl mx-auto">
@@ -217,7 +210,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                       if (!isCorrect) {
                         setLastWrongIso3(iso3);
                       }
-                      s.submit(isCorrect);
+                      s.submit(isCorrect, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name });
                     }
                   }
                 : undefined
@@ -255,23 +248,34 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 
           {/* Answer Controls & Surface */}
           <div className="absolute bottom-8 inset-x-0 z-30 px-4">
-            {sub === "name" ? (
+            {/* The feedback bar takes the controls' place once answered. */}
+            {s.answerState === "idle" && sub === "name" ? (
               difficulty === "easy" ? (
                 <EasyOptions
                   options={nameOptions}
                   targetIso3={current.iso3}
                   disabled={s.answerState !== "idle"}
-                  onPick={(iso3) => handleNameSubmit(iso3 === current.iso3, current)}
+                  onPick={(iso3) => s.submit(iso3 === current.iso3, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name })}
                 />
               ) : (
                 <HardInput
                   target={current}
+                  kind="country"
                   answerState={s.answerState}
                   correctAnswer={current.name}
-                  onSubmit={(ok) => handleNameSubmit(ok, current)}
+                  onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                 />
               )
             ) : null}
+            <FeedbackBar
+              show={s.answerState !== "idle"}
+              state={s.answerState === "idle" ? "correct" : s.answerState}
+              title={current.name}
+              subtitle={feedbackContext(current)}
+              chosen={s.chosen}
+              onNext={() => s.next()}
+              hideNext={s.answerState === "correct"}
+            />
           </div>
         </>
       )}
@@ -292,15 +296,18 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
       <SessionEnd
         show={finished}
         score={s.score}
-        masteredCount={s.masteredCount}
+        firstTryCorrect={s.firstTryCorrect}
+        masteredNow={s.masteredNow}
+        trickyItems={s.trickyItems}
+        practiceOnly={s.practiceOnlyIds.size}
         correct={s.correct}
-        total={s.queue.length}
+        total={s.cardCount}
         wrong={s.wrong}
         bestCombo={s.bestCombo}
         durationMs={(s.endedAt ?? 0) - s.startedAt}
         missedItems={s.missedItems}
         hasNextBlock={sessionMode !== "complete"}
-        onReplay={() => startSession(continent, sub, sessionMode)}
+        onReplay={() => startSession(continent, sub, sessionMode, difficulty)}
       />
     </div>
   );

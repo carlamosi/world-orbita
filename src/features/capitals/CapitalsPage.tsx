@@ -9,6 +9,8 @@ import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { HardInput } from "@/features/engine/HardInput";
+import { FeedbackBar } from "@/features/engine/FeedbackBar";
+import { feedbackContext } from "@/features/engine/feedbackContext";
 import { Button } from "@/components/ui/orbita-button";
 import { Badge } from "@/components/ui/orbita-badge";
 import {
@@ -96,6 +98,22 @@ export default function CapitalsPage() {
     </div>
   );
 
+  const feedback = !finished && current && (
+    <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
+      <div className="pointer-events-auto">
+        <FeedbackBar
+          show={s.answerState !== "idle"}
+          state={s.answerState === "idle" ? "correct" : s.answerState}
+          title={(activeSub === "countryToCap" ? current.capital : current.name) ?? ""}
+          subtitle={feedbackContext(current)}
+          chosen={s.chosen}
+          onNext={() => s.next()}
+          hideNext={s.answerState === "correct"}
+        />
+      </div>
+    </div>
+  );
+
   if (activeSub === "locator") {
     return (
       <div className="relative min-h-dvh pt-20">
@@ -116,7 +134,7 @@ export default function CapitalsPage() {
                   if (!isCorrect) {
                     setLastWrongIso3(iso3);
                   }
-                  s.submit(isCorrect);
+                  s.submit(isCorrect, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name });
                 }
               }}
               disableHoverLabel
@@ -141,6 +159,7 @@ export default function CapitalsPage() {
             />
           </div>
         )}
+        {feedback}
         {empty && (
           <div className="absolute top-20 inset-x-0 z-20 flex flex-col items-center px-4">
             {Toolbar}
@@ -154,9 +173,11 @@ export default function CapitalsPage() {
         <SessionEnd
           show={finished}
           score={s.score}
-          masteredCount={s.masteredCount}
+          firstTryCorrect={s.firstTryCorrect}
+          masteredNow={s.masteredNow}
+          trickyItems={s.trickyItems}
           correct={s.correct}
-          total={s.queue.length}
+          total={s.cardCount}
           wrong={s.wrong}
           bestCombo={s.bestCombo}
           durationMs={(s.endedAt ?? 0) - s.startedAt}
@@ -192,14 +213,16 @@ export default function CapitalsPage() {
                 <HardInput
                   target={current}
                   matchTarget={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
+                  kind={activeSub === "countryToCap" ? "capital" : "country"}
                   correctAnswer={activeSub === "countryToCap" ? (current.capital ?? undefined) : current.name}
                   answerState={s.answerState}
-                  onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
+                  onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                   placeholder={activeSub === "countryToCap" ? "Type the capital…" : "Type the country…"}
                 />
               </div>
             </div>
           </div>
+          {feedback}
         </>
       )}
 
@@ -220,7 +243,7 @@ export default function CapitalsPage() {
         <div className="mt-20 flex flex-col items-center">
           <Badge tone="muted">No capital on file — skipping</Badge>
           <div className="mt-4">
-            <Button size="sm" onClick={() => s.next()}>
+            <Button size="sm" onClick={() => s.next({ allowIdle: true })}>
               Skip
             </Button>
           </div>
@@ -230,9 +253,11 @@ export default function CapitalsPage() {
       <SessionEnd
         show={finished}
         score={s.score}
-        masteredCount={s.masteredCount}
+        firstTryCorrect={s.firstTryCorrect}
+        masteredNow={s.masteredNow}
+        trickyItems={s.trickyItems}
         correct={s.correct}
-        total={s.queue.length}
+        total={s.cardCount}
         wrong={s.wrong}
         bestCombo={s.bestCombo}
         durationMs={(s.endedAt ?? 0) - s.startedAt}

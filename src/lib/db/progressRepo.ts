@@ -2,6 +2,7 @@ import { db } from "./orbita-db";
 import type { ConceptProgressRow, OutboxRow, QuestionHistoryRow } from "./orbita-db";
 import { currentDbName } from "./dbProvider";
 import { conceptProgressPayload, questionHistoryPayload } from "@/lib/sync/payloads";
+import { buildEnqueueRow } from "@/lib/sync/queue";
 
 /** Extract Supabase user id from the active Dexie DB name (`orbita-${id}`). */
 function activeUserId(): string | null {
@@ -66,27 +67,19 @@ export async function recordConceptAttempt(
     //            concept_progress gets its own fresh UUID (never suffix an existing UUID).
     const outboxRows: OutboxRow[] = [];
     if (conceptPayload) {
-      outboxRows.push({
-        op_id: crypto.randomUUID(),
-        entity: "concept_progress",
-        op: "upsert",
-        payload: conceptPayload,
-        created_at: now,
-        attempts: 0,
-        next_attempt_at: 0,
-        status: "pending",
-      });
+      outboxRows.push(
+        buildEnqueueRow({ entity: "concept_progress", op: "upsert", payload: conceptPayload }),
+      );
     }
-    outboxRows.push({
-      op_id: historyRow.op_id, // reuse the same op_id as the history row for idempotency
-      entity: "question_history",
-      op: "insert",
-      payload: historyPayload,
-      created_at: now,
-      attempts: 0,
-      next_attempt_at: 0,
-      status: "pending",
-    });
+    // Same op_id as the history row, for idempotency.
+    outboxRows.push(
+      buildEnqueueRow({
+        op_id: historyRow.op_id,
+        entity: "question_history",
+        op: "insert",
+        payload: historyPayload,
+      }),
+    );
     await db().outbox.bulkPut(outboxRows);
   });
 }

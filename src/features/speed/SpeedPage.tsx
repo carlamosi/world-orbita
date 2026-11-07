@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
-import { Zap, Timer, Skull, Flag, MapPin, Type, Globe } from "lucide-react";
+import { Zap, Timer, Skull, Flag, MapPin, Type, Globe, Check, X } from "lucide-react";
 
 const MODE_META: Record<SpeedMode, { name: string; sub: string; desc: string; icon: React.ReactNode }> = {
   sprint60: {
@@ -199,6 +199,7 @@ function Active() {
   const answer = useSpeedRuntime((s) => s.answer);
   const skip = useSpeedRuntime((s) => s.skip);
   const reset = useSpeedRuntime((s) => s.reset);
+  const reveal = useSpeedRuntime((s) => s.reveal);
 
   // Numeric 1–4 hotkeys — capture phase so transitions / overlays / focus
   // changes can't intercept. Ignores typing in inputs and open dialogs.
@@ -242,7 +243,7 @@ function Active() {
       <TopBar onExit={reset} />
       <div className="mt-8 w-full max-w-2xl flex flex-col items-center">
         <PromptForItem item={item} />
-        <OptionsGrid item={item} onPick={(iso3) => answer(iso3)} />
+        <OptionsGrid item={item} reveal={reveal} onPick={(iso3) => answer(iso3)} />
       </div>
     </div>
   );
@@ -396,25 +397,53 @@ function PromptForItem({ item }: { item: { country: Country; skill: string } }) 
 
 function OptionsGrid({
   item,
+  reveal,
   onPick,
 }: {
   item: { country: Country; skill: string; options: Country[] };
+  reveal: { correctIso3: string; pickedIso3: string } | null;
   onPick: (iso3: string) => void;
 }) {
   const flash = useFlash(item.country.iso3);
   const isFlagSkill = item.skill === "flag";
+  const correctLabel = item.skill === "capital" ? (item.country.capital ?? item.country.name) : item.country.name;
+  // Colour is never the only cue: the right option gets a check icon, the wrong pick an X.
+  const mark = (iso3: string) =>
+    !reveal ? null : iso3 === reveal.correctIso3 ? (
+      <Check aria-hidden className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-500 p-0.5 text-black" />
+    ) : iso3 === reveal.pickedIso3 ? (
+      <X aria-hidden className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-red-500 p-0.5 text-black" />
+    ) : null;
+  const tone = (iso3: string) =>
+    !reveal
+      ? ""
+      : iso3 === reveal.correctIso3
+        ? "ring-2 ring-emerald-400"
+        : iso3 === reveal.pickedIso3
+          ? "ring-2 ring-red-400 opacity-70"
+          : "opacity-50";
+  const pick = (o: Country) => {
+    if (reveal) return;
+    flash(o.iso3 === item.country.iso3);
+    onPick(o.iso3);
+  };
+  const status = (
+    <div role="status" className="sr-only">
+      {reveal ? `Wrong. Correct answer: ${correctLabel}` : ""}
+    </div>
+  );
   if (isFlagSkill) {
     // Flag-pick mode: render flags only, no country names alongside.
     return (
+      <>
+      {status}
       <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 w-full">
         {item.options.map((o, i) => (
           <button
             key={o.iso3}
-            onClick={() => {
-              flash(o.iso3 === item.country.iso3);
-              onPick(o.iso3);
-            }}
+            onClick={() => pick(o)}
             className={cn(
+              tone(o.iso3),
               "group relative aspect-[3/2] rounded-2xl overflow-hidden transition-transform duration-150",
               "hover:scale-[1.03] shadow-[0_16px_40px_-18px_rgba(0,0,0,0.7)]",
               "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
@@ -425,12 +454,16 @@ function OptionsGrid({
             <span className="absolute top-1.5 left-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-white bg-black/60 rounded-full px-1.5 py-0.5">
               {i + 1}
             </span>
+            {mark(o.iso3)}
           </button>
         ))}
       </div>
+      </>
     );
   }
   return (
+    <>
+    {status}
     <div className="mt-6 grid grid-cols-2 gap-3 w-full">
       {item.options.map((o, i) => {
         const showCapital = item.skill === "capital";
@@ -438,12 +471,10 @@ function OptionsGrid({
         return (
           <button
             key={o.iso3}
-            onClick={() => {
-              flash(o.iso3 === item.country.iso3);
-              onPick(o.iso3);
-            }}
+            onClick={() => pick(o)}
             className={cn(
-              "glass rounded-2xl p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-white/25",
+              tone(o.iso3),
+              "relative glass rounded-2xl p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-white/25",
               "outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cyan)]/60",
             )}
           >
@@ -453,10 +484,12 @@ function OptionsGrid({
             <div className="mt-1 font-display text-base text-white tracking-tight truncate">
               {label}
             </div>
+            {mark(o.iso3)}
           </button>
         );
       })}
     </div>
+    </>
   );
 }
 

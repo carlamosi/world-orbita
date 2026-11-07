@@ -8,17 +8,22 @@ interface Opts {
   finished: boolean;
   /** Called to advance to the next question. */
   next: () => void;
-  /** Optional override; defaults: correct 900ms, wrong/revealed 1500ms. */
+  /** Optional override; default 1200ms. */
   correctDelayMs?: number;
-  /** Wrong/revealed dwell — slightly longer so users can absorb the answer. */
+  /** Used only when `waitAfterMiss` is false. */
   wrongDelayMs?: number;
+  /**
+   * After a wrong/revealed answer, wait for Next (button, Enter or Space) instead
+   * of a timer: the learner needs time to read the correction (and WCAG 2.2.1).
+   */
+  waitAfterMiss?: boolean;
   /** Allow callers to opt out (e.g. paused, modal open). */
   enabled?: boolean;
 }
 
 /**
- * Auto-advances a session shortly after feedback resolves. Keeps the flow
- * continuous — no manual "Next" clicks except on the final results screen.
+ * Auto-advances a session shortly after a correct answer. After a miss it waits
+ * for the learner: Enter or Space advances (the Next button has focus).
  */
 export function useAutoAdvance({
   answerState,
@@ -26,13 +31,29 @@ export function useAutoAdvance({
   next,
   correctDelayMs = 1200,
   wrongDelayMs = 2800,
+  waitAfterMiss = true,
   enabled = true,
 }: Opts) {
   useEffect(() => {
     if (!enabled || finished) return;
     if (answerState === "idle") return;
-    const delay = answerState === "correct" ? correctDelayMs : wrongDelayMs;
-    const id = window.setTimeout(() => next(), delay);
-    return () => window.clearTimeout(id);
-  }, [answerState, finished, next, correctDelayMs, wrongDelayMs, enabled]);
+    if (answerState === "correct" || !waitAfterMiss) {
+      const delay = answerState === "correct" ? correctDelayMs : wrongDelayMs;
+      const id = window.setTimeout(() => next(), delay);
+      return () => window.clearTimeout(id);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      // Any other focused control (Skip, links, menus) keeps its own Enter/Space.
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== document.body && !active.hasAttribute("data-feedback-next")) return;
+      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
+      // Also cancels the focused Next button's native click, so one key = one next().
+      e.preventDefault();
+      next();
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [answerState, finished, next, correctDelayMs, wrongDelayMs, waitAfterMiss, enabled]);
 }

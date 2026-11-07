@@ -12,6 +12,13 @@ interface Props {
   onSkip?: () => void;
   /** Hide the manual Next button — auto-advance is handling it. */
   hideNext?: boolean;
+  /**
+   * What the learner picked or typed (null: nothing identifiable). When passed,
+   * a miss reads "You chose X · Answer: <title>" so the two can be contrasted.
+   */
+  chosen?: string | null;
+  /** Small flag of the correct answer, on pages that show flags. */
+  flag?: ReactNode;
 }
 
 export function FeedbackBar({
@@ -22,50 +29,74 @@ export function FeedbackBar({
   onNext,
   onSkip,
   hideNext,
+  chosen,
+  flag,
 }: Props) {
+  const miss = state !== "correct";
+  const label = state === "correct" ? "Nailed it" : state === "wrong" ? "Not quite" : "Revealed";
+  const answer = (
+    <>
+      {miss && chosen !== undefined && (chosen ? `You chose ${chosen} · Answer: ` : "Answer: ")}
+      {title}
+    </>
+  );
   return (
-    <AnimatePresence mode="wait">
-      {show && (
-        <motion.div
-          key={state}
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 20 }}
-          transition={spring.crisp}
-          className="px-4 w-full max-w-md mx-auto"
-        >
-          <div
-            className={`glass-strong rounded-2xl px-6 py-4 flex items-center justify-between gap-4 border transition-all duration-300 ${
-              state === "correct"
-                ? "border-emerald-500/30 shadow-[0_8px_32px_-4px_rgba(16,185,129,0.18)]"
-                : state === "wrong"
-                ? "border-rose-500/30 shadow-[0_8px_32px_-4px_rgba(244,63,94,0.18)]"
-                : "border-white/10 shadow-[0_8px_32px_-4px_rgba(0,0,0,0.36)]"
-            }`}
+    <div>
+      {/* Always mounted and text only, so screen readers announce the result and the answer, not the buttons. */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {show && (
+          <>
+            {label}. {answer}. {subtitle}
+          </>
+        )}
+      </div>
+      <AnimatePresence mode="wait">
+        {show && (
+          <motion.div
+            key={state}
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={spring.crisp}
+            className="px-4 w-full max-w-md mx-auto"
           >
-            <div className="text-left min-w-0 flex-1">
-              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/45">
-                {state === "correct" ? "Nailed it" : state === "wrong" ? "Not quite" : "Revealed"}
-              </div>
-              <div className="font-display text-lg text-white truncate">{title}</div>
-              {subtitle && <div className="text-[12px] text-white/55 truncate">{subtitle}</div>}
-            </div>
-            {!hideNext && (
-              <Button size="sm" onClick={onNext}>
-                Next →
-              </Button>
-            )}
-          </div>
-          {state === "wrong" && onSkip && (
-            <button
-              onClick={onSkip}
-              className="mx-auto block mt-2 text-[11px] font-mono uppercase tracking-wider text-white/40 hover:text-white/70"
+            <div
+              className={`glass-strong rounded-2xl px-6 py-4 flex items-center justify-between gap-4 border transition-all duration-300 ${
+                state === "correct"
+                  ? "border-emerald-500/30 shadow-[0_8px_32px_-4px_rgba(16,185,129,0.18)]"
+                  : state === "wrong"
+                  ? "border-rose-500/30 shadow-[0_8px_32px_-4px_rgba(244,63,94,0.18)]"
+                  : "border-white/10 shadow-[0_8px_32px_-4px_rgba(0,0,0,0.36)]"
+              }`}
             >
-              Skip
-            </button>
-          )}
-        </motion.div>
-      )}
-    </AnimatePresence>
+              <div className="text-left min-w-0 flex-1" aria-hidden="true">
+                <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/45">
+                  {label}
+                </div>
+                <div className="font-display text-lg text-white flex items-center gap-2">
+                  {flag}
+                  <span className="min-w-0">{answer}</span>
+                </div>
+                {subtitle && <div className="text-[12px] text-white/55">{subtitle}</div>}
+              </div>
+              {!hideNext && (
+                // Focus after a miss so Enter/Space continue without the mouse.
+                <Button size="sm" onClick={onNext} autoFocus={miss} data-feedback-next="">
+                  Next →
+                </Button>
+              )}
+            </div>
+            {state === "wrong" && onSkip && (
+              <button
+                onClick={onSkip}
+                className="mx-auto block mt-2 text-[11px] font-mono uppercase tracking-wider text-white/40 hover:text-white/70"
+              >
+                Skip
+              </button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }

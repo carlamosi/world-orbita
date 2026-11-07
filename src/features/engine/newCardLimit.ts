@@ -4,6 +4,12 @@ import { parseConceptId } from "@/lib/fsrs/concept";
 /** New concepts a user may start per local day, per bucket (domain:skill:subMode). */
 export const MAX_NEW_PER_DAY = 10;
 
+/** New concepts a user may start per local day across every bucket. */
+export const MAX_NEW_GLOBAL_PER_DAY = 20;
+
+/** Bucket name of the global counter; never a real `domain:skill:subMode`. */
+export const GLOBAL_NEW_BUCKET = "all";
+
 function deviceTimeZone(): string | undefined {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;

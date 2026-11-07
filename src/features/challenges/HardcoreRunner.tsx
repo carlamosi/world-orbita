@@ -98,6 +98,8 @@ export function HardcoreRunner({
     answerState,
     finished,
     next: nextQuestion,
+    // Hardcore keeps its timed flow (out of scope for Task 21).
+    waitAfterMiss: false,
   });
 
   const onSkip = useCallback(() => {
@@ -139,7 +141,7 @@ export function HardcoreRunner({
         <SessionEnd
           show
           score={state.score}
-          masteredCount={state.correct}
+          firstTryCorrect={state.correct}
           correct={state.correct}
           total={state.queue.length}
           wrong={state.wrong}
@@ -235,6 +237,7 @@ export function HardcoreRunner({
                 matchTarget={
                   current.type === "countryToCap" ? current.capital : current.countryName
                 }
+                kind={current.type === "countryToCap" ? "capital" : "country"}
                 onSubmit={(ok) => submitAnswer(ok)}
                 placeholder={
                   current.type === "countryToCap" ? "Type the capital…" : "Type the country…"

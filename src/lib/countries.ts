@@ -9,25 +9,28 @@ export const COUNTRY_BY_ISO3: ReadonlyMap<string, Country> = new Map(
   COUNTRIES.map((c) => [c.iso3, c]),
 );
 
-export function pickRandomCountries(
-  n: number,
-  exclude: Set<string> = new Set(),
-  continent?: string,
-): Country[] {
-  let pool = COUNTRIES.filter((c) => !exclude.has(c.iso3));
+/**
+ * `n` wrong options for `target`: land neighbours first, then the same
+ * subregion, then the same continent, then anywhere (random within each tier),
+ * so a right answer means telling look-alikes apart.
+ */
+export function pickDistractors(target: Country, n: number, continent?: string): Country[] {
+  let pool = COUNTRIES.filter((c) => c.iso3 !== target.iso3);
   if (continent && continent !== "All") {
     const continentPool = pool.filter((c) => c.continent === continent);
-    if (continentPool.length >= n) {
-      pool = continentPool;
-    }
+    if (continentPool.length >= n) pool = continentPool;
   }
-  const out: Country[] = [];
-  const used = new Set<number>();
-  while (out.length < n && used.size < pool.length) {
-    const i = Math.floor(Math.random() * pool.length);
-    if (used.has(i)) continue;
-    used.add(i);
-    out.push(pool[i]!);
-  }
-  return out;
+  const tier = (c: Country) =>
+    target.borders.includes(c.iso3)
+      ? 0
+      : target.subregion && c.subregion === target.subregion
+        ? 1
+        : c.continent === target.continent
+          ? 2
+          : 3;
+  return pool
+    .map((c) => ({ c, key: tier(c) + Math.random() }))
+    .sort((a, b) => a.key - b.key)
+    .slice(0, n)
+    .map((x) => x.c);
 }

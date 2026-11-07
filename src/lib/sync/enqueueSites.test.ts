@@ -16,7 +16,8 @@ vi.mock("@/lib/db/orbita-db", () => ({
   ALL_SKILLS: ["location", "name", "flag", "capital"],
   createOrbitaDb: (name: string) => (created[name] ??= createMemDb()),
 }));
-vi.mock("@/lib/sync/queue", () => ({
+vi.mock("@/lib/sync/queue", async (orig) => ({
+  ...(await orig<typeof import("@/lib/sync/queue")>()),
   enqueue: (a: { entity: string; payload: Record<string, unknown> }) => enqueued.push(a),
 }));
 
@@ -115,6 +116,15 @@ describe("progressRepo.recordConceptAttempt", () => {
     expect(cp.payload.fsrs_learning_steps).toBe(1);
     expect(isMs(cp.payload.fsrs_last_review)).toBe(true);
     expect(isMs(cp.payload.fsrs_due)).toBe(true);
+  });
+
+  it("stamps client_id on both rows and keeps the history op_id", async () => {
+    const h = history();
+    await recordConceptAttempt(concept(), h);
+    const out = (await mem.outbox.toArray()) as unknown as OutboxRow[];
+    expect(out).toHaveLength(2);
+    for (const o of out) expect(typeof o.payload.client_id).toBe("string");
+    expect(out.find((o) => o.entity === "question_history")!.op_id).toBe(h.op_id);
   });
 
   it("never queues a concept row with fsrs_last_review <= 0 and warns once", async () => {

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { COUNTRIES, pickRandomCountries } from "@/lib/countries";
+import { COUNTRIES, pickDistractors } from "@/lib/countries";
 import type { Country } from "@/types/country";
 import {
   SPAIN_ALL,
@@ -9,6 +9,7 @@ import {
   getSpainFlagUrl,
   type SpainEntity,
   loadSpainCCAAFeatures,
+  loadSpainProvinceFeatures,
   type SpainFeatureCollection,
 } from "@/lib/spain";
 import { parseConceptId } from "@/lib/fsrs/concept";
@@ -21,6 +22,7 @@ import { SessionEnd } from "@/features/engine/SessionEnd";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
+import { feedbackContext } from "@/features/engine/feedbackContext";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { db, type ConceptProgressRow, ALL_SKILLS } from "@/lib/db/orbita-db";
 import { generateDueTodayQueue } from "@/lib/fsrs/planner";
@@ -57,6 +59,9 @@ function isSpainEntity(item: ReviewEntity): item is SpainEntity {
 }
 
 const ALL_REVIEW_ITEMS: ReviewEntity[] = [...COUNTRIES, ...SPAIN_ALL];
+/** Name of a picked option or clicked region, for "You chose X". */
+const nameOf = (id: string) =>
+  ALL_REVIEW_ITEMS.find((i) => (isSpainEntity(i) ? i.id : i.iso3) === id)?.name;
 
 /* The session store: mixed-skill Due Today session across all countries and Spain entities. */
 const useReviewSession = createSessionStore<ReviewEntity>({
@@ -95,11 +100,14 @@ function LocationQuestion({
   answerState,
   onSubmit,
   spainFeatures,
+  naming = false,
 }: {
   current: ReviewEntity;
   answerState: "idle" | "correct" | "wrong" | "revealed";
   onSubmit: (id: string) => void;
   spainFeatures: SpainFeatureCollection | null;
+  /** Name card: the target is highlighted, as in Locate's and Spain's Name mode, and the map is not clickable. */
+  naming?: boolean;
 }) {
   const isSpain = isSpainEntity(current);
   const SPAIN_POV = useMemo(() => ({ lat: 39.2, lng: -3.7, altitude: 0.28 }), []);
@@ -115,7 +123,7 @@ function LocationQuestion({
             disableMicrostates
             autoRotate={false}
             quality="high"
-            highlightId={answerState === "correct" ? currentId : null}
+            highlightId={answerState === "correct" || (naming && answerState === "idle") ? currentId : null}
             revealId={answerState === "wrong" || answerState === "revealed" ? currentId : null}
             disableHoverLabel={answerState === "idle"}
             questionKey={currentId}
@@ -124,6 +132,7 @@ function LocationQuestion({
             overlayCapColor={(d: any) => {
               const fid = d?.properties?.id ?? "";
               if (fid === currentId) {
+                if (naming && answerState === "idle") return "rgba(0, 212, 255, 0.45)";
                 if (answerState === "correct" || answerState === "wrong" || answerState === "revealed") {
                   return "rgba(16, 185, 129, 0.65)";
                 }
@@ -134,7 +143,7 @@ function LocationQuestion({
             overlayStrokeColor={() => "rgba(255,255,255,0.75)"}
             overlayAltitude={0.012}
             onOverlayClick={(d: any) => {
-              if (answerState === "idle") {
+              if (answerState === "idle" && !naming) {
                 const clickedId = d?.properties?.id ?? "";
                 onSubmit(clickedId);
               }
@@ -150,17 +159,18 @@ function LocationQuestion({
       <Suspense fallback={<GlobeFallback />}>
         <Globe3D
           countries={COUNTRIES}
-          highlightIso3={answerState === "correct" ? current.iso3 : null}
+          highlightIso3={answerState === "correct" || (naming && answerState === "idle") ? current.iso3 : null}
           revealIso3={
             answerState === "wrong" || answerState === "revealed" ? current.iso3 : null
           }
           onCountryClick={
-            answerState === "idle" ? onSubmit : undefined
+            answerState === "idle" && !naming ? onSubmit : undefined
           }
           disableHoverLabel={answerState === "idle"}
           questionKey={current.iso3}
           pointOfView={undefined}
           activeContinent={null}
+          autoRotateSpeed={naming ? 0.05 : undefined}
         />
       </Suspense>
     </div>
@@ -240,9 +250,11 @@ export default function ReviewPage() {
   const [continent, setContinent] = useContinentPref();
   const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
   const [spainFeatures, setSpainFeatures] = useState<SpainFeatureCollection | null>(null);
+  const [provinceFeatures, setProvinceFeatures] = useState<SpainFeatureCollection | null>(null);
 
   useEffect(() => {
     void loadSpainCCAAFeatures().then(setSpainFeatures);
+    void loadSpainProvinceFeatures().then(setProvinceFeatures);
   }, []);
 
   // Persist session mode preference
@@ -356,6 +368,10 @@ export default function ReviewPage() {
   const skillLabel = SKILL_LABELS[skill] ?? skill;
   const skillColor = SKILL_COLORS[skill] ?? SKILL_COLORS.flag!;
   const isLocationSkill = skill === "location" || subMode === "find" || subMode === "locator";
+  // The Name card is learned from the highlighted map, never from a flag.
+  const isMapName = skill === "name";
+  // Cards learned by typing are reviewed by typing; Capitals is typing only.
+  const isTyped = skill === "capital" || subMode === "flagToType" || subMode === "nameType";
 
   // Generate 4 MC options
   const mcOptions: ReviewEntity[] = useMemo(() => {
@@ -366,7 +382,7 @@ export default function ReviewPage() {
       const distractors = shuffleArray(pool.filter((e) => e.id !== current.id)).slice(0, 3);
       return shuffleArray([current, ...distractors]);
     }
-    const distractors = pickRandomCountries(3, new Set([current.iso3]), current.continent);
+    const distractors = pickDistractors(current, 3, current.continent);
     return shuffleArray([current, ...distractors]);
   }, [current, isLocationSkill]);
 
@@ -374,14 +390,14 @@ export default function ReviewPage() {
 
   // Keyboard shortcuts for MC skills
   const hotkeyItems = useMemo(
-    () => (s.answerState === "idle" && !isLocationSkill ? mcOptions.map((o) => ({ id: isSpainEntity(o) ? o.id : o.iso3 })) : []),
-    [mcOptions, s.answerState, isLocationSkill],
+    () => (s.answerState === "idle" && !isLocationSkill && !isTyped ? mcOptions.map((o) => ({ id: isSpainEntity(o) ? o.id : o.iso3 })) : []),
+    [mcOptions, s.answerState, isLocationSkill, isTyped],
   );
   const onHotkey = useCallback(
     (id: string) => {
       if (!current || s.answerState !== "idle") return;
       setSelectedId(id);
-      s.submit(id === currentId);
+      s.submit(id === currentId, { chosen: nameOf(id) });
     },
     [current, currentId, s],
   );
@@ -450,28 +466,9 @@ export default function ReviewPage() {
           visual: null,
           subtitle: isSpain ? "Spain" : current.continent,
         };
-      case "name":
+      // Name cards render on the globe (see the map branch below), never here.
       default:
-        return {
-          prompt: isSpain ? "Name this region" : "Which country does this flag belong to?",
-          visual: isSpain ? (
-            <div className="w-full max-w-[420px] aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto border border-white/20">
-              <img
-                src={getSpainFlagUrl(current.flagCode)}
-                alt="Mystery flag"
-                className="w-full h-full object-cover"
-              />
-            </div>
-          ) : (
-            <FlagImage
-              iso2={current.iso2}
-              alt="Mystery flag"
-              size={640}
-              className="w-full max-w-[420px] h-auto aspect-[3/2] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] rounded-2xl overflow-hidden mx-auto"
-            />
-          ),
-          subtitle: subTitle,
-        };
+        return null;
     }
   }, [current, skill, subMode]);
 
@@ -480,7 +477,7 @@ export default function ReviewPage() {
     (id: string) => {
       if (!current || s.answerState !== "idle") return;
       setSelectedId(id);
-      s.submit(id === currentId);
+      s.submit(id === currentId, { chosen: nameOf(id) });
     },
     [current, currentId, s],
   );
@@ -560,9 +557,11 @@ export default function ReviewPage() {
           show
           score={s.score}
           correct={s.correct}
-          total={s.queue.length}
+          total={s.cardCount}
           wrong={s.wrong}
-          masteredCount={s.masteredCount}
+          firstTryCorrect={s.firstTryCorrect}
+          masteredNow={s.masteredNow}
+          trickyItems={s.trickyItems}
           missedItems={s.missedItems}
           hasNextBlock={hasNextBlock}
           onNextBlock={loadNextBatch}
@@ -571,8 +570,38 @@ export default function ReviewPage() {
     );
   }
 
-  /* ─── Active session — LOCATION skill: full-screen globe ─── */
-  if (isLocationSkill && current) {
+  const answersCapital = skill === "capital" && subMode !== "capToCountry";
+  const answer = current ? (answersCapital ? (current.capital ?? current.name) : current.name) : "";
+  const answerInput = !current ? null : isTyped ? (
+    <div className="w-full max-w-md mx-auto">
+      <HardInput
+        target={current}
+        matchTarget={answersCapital ? (current.capital ?? current.name) : current.name}
+        kind={isSpainEntity(current) ? (answersCapital ? "spainCapital" : "spain") : answersCapital ? "capital" : "country"}
+        answerState={s.answerState}
+        correctAnswer={answer}
+        onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
+        placeholder={answersCapital ? "Type the capital…" : "Type the name…"}
+      />
+    </div>
+  ) : (
+    <McQuestion
+      options={mcOptions}
+      current={current}
+      skill={skill}
+      subMode={subMode}
+      answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
+      selectedId={selectedId}
+      onSelect={(id) => {
+        if (!current || s.answerState !== "idle") return;
+        setSelectedId(id);
+        s.submit(id === currentId, { chosen: nameOf(id) });
+      }}
+    />
+  );
+
+  /* ─── Active session — LOCATION and map NAME cards: full-screen globe ─── */
+  if ((isLocationSkill || isMapName) && current) {
     const displayName = current.name;
     return (
       <div className="relative min-h-dvh pt-20">
@@ -580,7 +609,8 @@ export default function ReviewPage() {
           current={current}
           answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
           onSubmit={handleGlobeClick}
-          spainFeatures={spainFeatures}
+          spainFeatures={isSpainEntity(current) && current.category === "province" ? provinceFeatures : spainFeatures}
+          naming={isMapName}
         />
 
         {/* Skill badge */}
@@ -618,10 +648,20 @@ export default function ReviewPage() {
             index={s.index}
             total={s.queue.length}
             title={
-              <>Find <span className="text-glow-cyan">{displayName}</span> on the map</>
+              isMapName ? (
+                isSpainEntity(current) ? "Name this region" : "Name this country"
+              ) : (
+                <>Find <span className="text-glow-cyan">{displayName}</span> on the map</>
+              )
             }
           />
         </div>
+
+        {isMapName && s.answerState === "idle" && (
+          <div className="absolute bottom-8 inset-x-0 z-30 px-4 flex justify-center pointer-events-auto">
+            {answerInput}
+          </div>
+        )}
 
         {/* Feedback bar */}
         <div className="fixed bottom-0 inset-x-0 pb-6 px-4 md:px-6 z-30 pointer-events-none">
@@ -630,10 +670,10 @@ export default function ReviewPage() {
               show={s.answerState !== "idle"}
               state={s.answerState as "correct" | "wrong" | "revealed"}
               title={displayName}
-              subtitle={isSpainEntity(current) ? "Spain" : current.continent}
+              subtitle={feedbackContext(current) ?? (isSpainEntity(current) ? "Spain" : current.continent)}
+              chosen={s.chosen}
               onNext={() => s.next()}
-              onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-              hideNext
+              hideNext={s.answerState === "correct"}
             />
           </div>
         </div>
@@ -706,31 +746,7 @@ export default function ReviewPage() {
               </motion.div>
             )}
 
-            {/* Question input: Hard typing for flagToType / typing modes, MC for choices */}
-            {subMode === "flagToType" ? (
-              <div className="w-full max-w-md mx-auto">
-                <HardInput
-                  target={current}
-                  matchTarget={current.name}
-                  onSubmit={(ok) => s.submit(ok, { retrievalMode: "hard" })}
-                  placeholder="Type the name…"
-                />
-              </div>
-            ) : (
-              <McQuestion
-                options={mcOptions}
-                current={current}
-                skill={skill}
-                subMode={subMode}
-                answerState={s.answerState as "idle" | "correct" | "wrong" | "revealed"}
-                selectedId={selectedId}
-                onSelect={(id) => {
-                  if (!current || s.answerState !== "idle") return;
-                  setSelectedId(id);
-                  s.submit(id === currentId);
-                }}
-              />
-            )}
+            {answerInput}
           </motion.div>
         )}
       </AnimatePresence>
@@ -741,11 +757,20 @@ export default function ReviewPage() {
           <FeedbackBar
             show={s.answerState !== "idle"}
             state={s.answerState as "correct" | "wrong" | "revealed"}
-            title={current?.name ?? ""}
-            subtitle={questionMeta?.subtitle ?? ""}
+            title={answer}
+            subtitle={(current && feedbackContext(current)) ?? questionMeta?.subtitle ?? ""}
+            chosen={s.chosen}
+            flag={
+              current && skill === "flag" ? (
+                isSpainEntity(current) ? (
+                  <FlagImage src={getSpainFlagUrl(current.flagCode)} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />
+                ) : (
+                  <FlagImage iso2={current.iso2} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />
+                )
+              ) : undefined
+            }
             onNext={() => s.next()}
-            onSkip={s.answerState === "wrong" ? () => s.reveal() : undefined}
-            hideNext
+            hideNext={s.answerState === "correct"}
           />
         </div>
       </div>

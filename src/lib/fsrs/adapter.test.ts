@@ -25,6 +25,7 @@ import {
   outcomeToGrade,
   normalizeState,
   isDue,
+  isMastered,
   selectRecommendedMode,
   type NormalizedReview,
   type ReviewOutcome,
@@ -321,7 +322,7 @@ describe("assess — behavioral signal separation", () => {
     expect(result.outcome).toBe("good");
   });
 
-  it("correct (instant speed) → outcome 'easy'", () => {
+  it("correct (instant speed) → outcome 'good', never 'easy'", () => {
     const result = assess({
       validationResult: { correct: true, softCorrect: false },
       responseMs: 2000, // 2000 is veryFast for capital
@@ -329,7 +330,33 @@ describe("assess — behavioral signal separation", () => {
       hintsUsed: 0,
       questionType: "capital",
     });
-    expect(result.outcome).toBe("easy");
+    expect(result.outcome).toBe("good");
+  });
+
+  it("fuzzy-accepted typo (softCorrect) at instant speed → 'hard'", () => {
+    const result = assess({
+      validationResult: { correct: true, softCorrect: true },
+      responseMs: 1000,
+      attemptNumber: 1,
+      hintsUsed: 0,
+      questionType: "capital",
+      retrievalMode: "hard",
+    });
+    expect(result.outcome).toBe("hard");
+  });
+
+  it("a Review row with difficulty null is graded without throwing", () => {
+    const row = makeReviewRow({ fsrs_difficulty: null, fsrs_stability: null });
+    const card = rowToCard(row);
+    expect(card.difficulty).toBeGreaterThanOrEqual(1);
+    expect(card.stability).toBeGreaterThan(0);
+    expect(() => processReview(card, "good", Date.now())).not.toThrow();
+  });
+
+  it("keeps valid difficulty and stability untouched", () => {
+    const card = rowToCard(makeReviewRow({ fsrs_difficulty: 7.5, fsrs_stability: 12 }));
+    expect(card.difficulty).toBe(7.5);
+    expect(card.stability).toBe(12);
   });
 
   it("soft-correct → outcome 'hard' (near-miss)", () => {
@@ -496,3 +523,30 @@ describe("Sub-mode format preservation & feedback", () => {
   });
 });
 
+
+describe("isMastered (Task 22)", () => {
+  const base = {
+    conceptId: "world:FRA:flag:flagToCountry",
+    iso3: "FRA",
+    skill: "flag",
+    fsrs_difficulty: 5,
+    fsrs_due: Date.now(),
+    fsrs_reps: 3,
+    fsrs_lapses: 0,
+    fsrs_last_review: Date.now(),
+    updated_at: Date.now(),
+    version: 1,
+    dirty: 0,
+  } as unknown as ConceptProgressRow;
+  const at = (state: State, stability: number | null) =>
+    ({ ...base, fsrs_state: state, fsrs_stability: stability }) as unknown as ConceptProgressRow;
+
+  it("is true only in Review with stability of 21 days or more", () => {
+    expect(isMastered(at(State.Review, 21))).toBe(true);
+    expect(isMastered(at(State.Review, 60))).toBe(true);
+    expect(isMastered(at(State.Review, 20.9))).toBe(false);
+    expect(isMastered(at(State.Learning, 30))).toBe(false);
+    expect(isMastered(at(State.Relearning, 30))).toBe(false);
+    expect(isMastered(at(State.New, null))).toBe(false);
+  });
+});

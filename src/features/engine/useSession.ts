@@ -9,6 +9,7 @@ import {
   processReview,
   getFsrsParameters,
   getRetrievability,
+  isMastered,
   normalizeState,
 } from "@/lib/fsrs/adapter";
 import { recordConceptAttempt } from "@/lib/db/progressRepo";
@@ -19,13 +20,15 @@ import { State, ConvertStepUnitToMinutes } from "ts-fsrs";
 import { formatConceptId, parseConceptId } from "@/lib/fsrs/concept";
 import type { GeoDomain } from "@/types/geo";
 import {
+  GLOBAL_NEW_BUCKET,
+  MAX_NEW_GLOBAL_PER_DAY,
   MAX_NEW_PER_DAY,
   incrementNewCardsToday,
   newCardBucket,
   readNewCardsToday,
 } from "./newCardLimit";
 
-export { MAX_NEW_PER_DAY };
+export { MAX_NEW_GLOBAL_PER_DAY, MAX_NEW_PER_DAY };
 
 /**
  * Spacing by item-count: re-insert failed card after N other answered cards
@@ -48,9 +51,10 @@ export type SessionStatus = "idle" | "loading" | "active" | "empty";
 /**
  * Why a planner queue is empty:
  * - `limit`: nothing is due and today's new-card limit for this bucket is used up
+ * - `globalLimit`: nothing is due and today's new-card limit across all buckets is used up
  * - `seenAll`: nothing is due and every entity here already has a row (budget left)
  */
-export type EmptyReason = "limit" | "seenAll";
+export type EmptyReason = "limit" | "globalLimit" | "seenAll";
 export const QUESTIONS_PER_SESSION = 10;
 
 export interface MissedItem {
@@ -122,9 +126,23 @@ export interface SessionState<TItem = Country> {
   bestCombo: number;
   correct: number;
   wrong: number;
-  masteredCount: number;
+  /** Correct answers on a card's first slot (retry slots never count). */
+  firstTryCorrect: number;
+  /** Distinct cards in the session, the denominator of first-try accuracy. */
+  cardCount: number;
+  /**
+   * Complete mode: conceptIds of New cards beyond today's global budget. They
+   * are shown and answered as practice but never graded into FSRS.
+   */
+  practiceOnlyIds: Set<string>;
+  /** Set when the session ends: cards forgotten 4+ times (fsrs_lapses). */
+  trickyItems: MissedItem[];
+  /** Set when the session ends: session cards now mastered (Review, stability 21+ days). */
+  masteredNow: number;
   missedItems: MissedItem[];
   answerState: AnswerState;
+  /** What the learner picked or typed for the current answer (null: nothing identifiable). */
+  chosen: string | null;
   startedAt: number;
   endedAt: number | null;
   loading: boolean;
@@ -135,7 +153,8 @@ export interface SessionState<TItem = Country> {
   hasSeen: boolean;
   /**
    * True only for planner-built sessions: their first grades of New cards use up
-   * the daily new-card cap. Complete, Review and Practice sessions never do.
+   * the per-bucket daily new-card cap. Complete, Review and Practice sessions never
+   * do. Every first grade of a New card, in any session, uses up the global cap.
    */
   countsTowardNewCap: boolean;
   /** Epoch ms when the current question became visible. */
@@ -177,9 +196,15 @@ export interface SessionState<TItem = Country> {
    * last planner start's filters, lowest retrievability first.
    */
   startPractice(): Promise<void>;
-  submit(isCorrect: boolean, opts?: { retrievalMode?: "easy" | "hard" }): void;
+  /** `softCorrect`: accepted only through the fuzzy matcher (typo), graded Hard. */
+  /** `chosen`: the picked/typed label, shown as "You chose X" after a miss. Not graded. */
+  submit(
+    isCorrect: boolean,
+    opts?: { retrievalMode?: "easy" | "hard"; softCorrect?: boolean; chosen?: string },
+  ): void;
   reveal(): void;
-  next(): void;
+  /** `allowIdle`: advance past an unanswered question (the "no capital, Skip" path). */
+  next(opts?: { allowIdle?: boolean }): void;
 }
 
 export interface CreateOpts<TItem = Country> {
@@ -277,9 +302,17 @@ export function createSessionStore<TItem = Country>({
     return pool.filter((c) => lookupItem(c) !== undefined);
   };
 
+  // Easy entities are introduced first; Array.sort is stable, so ties keep dataset order.
+  const difficultyRank: Record<string, number> = { easy: 0, medium: 1, hard: 2 };
+  const seedOrder = [...activeDataset].sort(
+    (a, b) =>
+      (difficultyRank[(a as { difficulty?: string }).difficulty ?? ""] ?? 3) -
+      (difficultyRank[(b as { difficulty?: string }).difficulty ?? ""] ?? 3),
+  );
+
   /**
-   * In-memory New concepts for dataset entities with no row in `pool`, in
-   * dataset order, respecting the continent filter. Nothing is persisted
+   * In-memory New concepts for dataset entities with no row in `pool`, easy
+   * before hard (`seedOrder`), respecting the continent filter. Nothing is persisted
    * until the concept is graded.
    */
   const newSeeds = (
@@ -291,7 +324,7 @@ export function createSessionStore<TItem = Country>({
     if (limit <= 0) return seeds;
     const used = new Set(pool.map((c) => parseConceptId(c.conceptId).entityId));
     const sm = seedSubMode(opts);
-    for (const c of activeDataset) {
+    for (const c of seedOrder) {
       if (seeds.length >= limit) break;
       if (!inContinent(c, opts.continent)) continue;
       const entityId = resolveId(c);
@@ -361,7 +394,11 @@ export function createSessionStore<TItem = Country>({
     bestCombo: 0,
     correct: 0,
     wrong: 0,
-    masteredCount: 0,
+    firstTryCorrect: 0,
+    cardCount: 0,
+    practiceOnlyIds: new Set(),
+    trickyItems: [],
+    masteredNow: 0,
     missedItems: [],
     answerState: "idle",
     startedAt: 0,
@@ -379,6 +416,7 @@ export function createSessionStore<TItem = Country>({
     const now = Date.now();
     return {
       ...fromPairs(pairs),
+      cardCount: new Set(pairs.map((p) => p.conceptId)).size,
       index: 0,
       score: 0,
       combo: 0,
@@ -412,9 +450,14 @@ export function createSessionStore<TItem = Country>({
     bestCombo: 0,
     correct: 0,
     wrong: 0,
-    masteredCount: 0,
+    firstTryCorrect: 0,
+    cardCount: 0,
+    practiceOnlyIds: new Set(),
+    trickyItems: [],
+    masteredNow: 0,
     missedItems: [],
     answerState: "idle",
+    chosen: null,
     startedAt: 0,
     endedAt: null,
     loading: false,
@@ -437,8 +480,9 @@ export function createSessionStore<TItem = Country>({
 
       let pairs: SessionPair<TItem>[] = [];
       let info: { hasSeen?: boolean; emptyReason?: EmptyReason } = {};
-      // Only the planner branch spends the daily new-card cap.
+      // Only the planner branch spends the per-bucket new-card cap.
       let countsTowardNewCap = false;
+      const practiceOnlyIds = new Set<string>();
 
       if (opts?.conceptRows && opts.conceptRows.length > 0) {
         // Due Today / pre-built mode: skip the planner, use the caller's queue directly.
@@ -488,6 +532,17 @@ export function createSessionStore<TItem = Country>({
           };
           return { item, conceptId, concept };
         });
+
+        // New cards beyond today's global budget are practice only (the smallest
+        // honest option: the learner still sees every item, FSRS only what fits).
+        const globalToday = await readNewCardsToday(GLOBAL_NEW_BUCKET);
+        if (gen !== startGen) return;
+        let globalBudget = Math.max(0, MAX_NEW_GLOBAL_PER_DAY - globalToday);
+        for (const p of pairs) {
+          if (normalizeState(p.concept.fsrs_state) !== State.New) continue;
+          if (globalBudget > 0) globalBudget--;
+          else practiceOnlyIds.add(p.conceptId);
+        }
       } else {
         // FSRS session planner: due and learning rows first, then new concepts
         // up to the session size, within today's new-card limit.
@@ -498,10 +553,15 @@ export function createSessionStore<TItem = Country>({
         if (gen !== startGen) return;
         const pool = filterPool(allConcepts, plannerOpts);
 
-        // The budget is per bucket (domain:skill:subMode), the same one the seeds land in.
-        const newToday = await readNewCardsToday(seedBucket(plannerOpts));
+        // Two budgets: per bucket (domain:skill:subMode, the one the seeds land in) and global.
+        const [newToday, globalToday] = await Promise.all([
+          readNewCardsToday(seedBucket(plannerOpts)),
+          readNewCardsToday(GLOBAL_NEW_BUCKET),
+        ]);
         if (gen !== startGen) return;
-        const newBudget = Math.max(0, MAX_NEW_PER_DAY - newToday);
+        const bucketLeft = Math.max(0, MAX_NEW_PER_DAY - newToday);
+        const globalLeft = Math.max(0, MAX_NEW_GLOBAL_PER_DAY - globalToday);
+        const newBudget = Math.min(bucketLeft, globalLeft);
 
         const planned = generateSessionQueue(pool, undefined, {
           sessionSize: questions,
@@ -512,11 +572,16 @@ export function createSessionStore<TItem = Country>({
         pairs = buildPairs([...planned, ...newSeeds(pool, plannerOpts, room)], lookupItem);
         info = {
           hasSeen: pool.some(isSeen),
-          emptyReason: newBudget - plannedNew <= 0 ? "limit" : "seenAll",
+          emptyReason:
+            globalLeft - plannedNew <= 0
+              ? "globalLimit"
+              : bucketLeft - plannedNew <= 0
+                ? "limit"
+                : "seenAll",
         };
       }
 
-      set({ ...readyState(pairs, info), countsTowardNewCap });
+      set({ ...readyState(pairs, info), countsTowardNewCap, practiceOnlyIds });
     },
 
     async startPractice() {
@@ -527,6 +592,11 @@ export function createSessionStore<TItem = Country>({
       const now = Date.now();
       const seen = filterPool(allConcepts, lastPlannerOpts)
         .filter(isSeen)
+        // Early review would graduate a Learning/Relearning card without its 1m/10m step.
+        .filter((c) => {
+          const st = normalizeState(c.fsrs_state);
+          return !((st === State.Learning || st === State.Relearning) && c.fsrs_due > now);
+        })
         .map((c) => ({ c, r: safeRetrievability(c, now) }))
         .sort((a, b) => a.r - b.r || a.c.fsrs_due - b.c.fsrs_due)
         .slice(0, questions)
@@ -545,8 +615,9 @@ export function createSessionStore<TItem = Country>({
       const targetConcept = pair.concept;
 
       // Never write a grade to a concept other than the one shown.
-      const gradeable = conceptMatchesItem(targetConcept, target);
-      if (!gradeable) {
+      const matches = conceptMatchesItem(targetConcept, target);
+      const gradeable = matches && !s.practiceOnlyIds.has(targetConcept.conceptId);
+      if (!matches) {
         const msg = `Session pair mismatch: item ${resolveId(target)} vs concept ${targetConcept.conceptId}`;
         if (import.meta.env.DEV) throw new Error(msg);
         if (!mismatchLogged) {
@@ -561,6 +632,7 @@ export function createSessionStore<TItem = Country>({
       const updates: Partial<SessionState<TItem>> = {};
 
       // 1. Score & UI state
+      updates.chosen = submitOpts?.chosen ?? null;
       if (isCorrect) {
         const combo = s.combo + 1;
         updates.score = s.score + 100 + Math.min(s.combo, 9) * 20;
@@ -568,9 +640,9 @@ export function createSessionStore<TItem = Country>({
         updates.bestCombo = Math.max(s.bestCombo, combo);
         updates.correct = s.correct + 1;
         updates.answerState = "correct";
-        // If it's the first time seeing this item or FSRS not yet updated, count towards mastered/progressed
-        if (!targetConcept || !s.fsrsUpdatedIds.has(targetConcept.conceptId)) {
-          updates.masteredCount = (s.masteredCount ?? 0) + 1;
+        // A concept only gets retry slots after a miss, so no retry entry means its first slot.
+        if (!s.inSessionRetries.has(targetConcept.conceptId)) {
+          updates.firstTryCorrect = s.firstTryCorrect + 1;
         }
       } else {
         updates.combo = 0;
@@ -675,7 +747,7 @@ export function createSessionStore<TItem = Country>({
         const actualDirection = parts.length >= 3 ? parts[parts.length - 1]! : `${conceptSkill}->answer`;
 
         const assessment = assess({
-          validationResult: { correct: isCorrect, softCorrect: false },
+          validationResult: { correct: isCorrect, softCorrect: submitOpts?.softCorrect === true },
           responseMs,
           attemptNumber: 1,
           hintsUsed: 0,
@@ -685,49 +757,55 @@ export function createSessionStore<TItem = Country>({
         });
 
         const wasNew = normalizeState(effectiveConcept.fsrs_state) === State.New;
-        const currentCard = rowToCard(effectiveConcept);
-        const { card: nextCard, log: fsrsLog } = processReview(
-          currentCard,
-          assessment.outcome,
-          now,
-        );
+        try {
+          const currentCard = rowToCard(effectiveConcept);
+          const { card: nextCard, log: fsrsLog } = processReview(
+            currentCard,
+            assessment.outcome,
+            now,
+          );
 
-        const updatedProgressRow: ConceptProgressRow = {
-          ...effectiveConcept,
-          ...cardToRowUpdates(nextCard, 1, true, effectiveConcept.version),
-        };
+          const updatedProgressRow: ConceptProgressRow = {
+            ...effectiveConcept,
+            ...cardToRowUpdates(nextCard, 1, true, effectiveConcept.version),
+          };
 
-        // Persist async — idempotent via op_id
-        recordConceptAttempt(updatedProgressRow, {
-          op_id: crypto.randomUUID(),
-          conceptId: effectiveConcept.conceptId,
-          sessionId: "session-" + s.startedAt,
-          grade: assessment.outcome === "again" ? 0 : assessment.outcome === "hard" ? 1 : assessment.outcome === "good" ? 2 : 3,
-          mode: assessment.retrievalMode,
-          direction: assessment.direction,
-          fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
-          responseMs,
-          correct: isCorrect,
-          answeredAt: now,
-        }).catch(console.error);
+          // Persist async — idempotent via op_id
+          recordConceptAttempt(updatedProgressRow, {
+            op_id: crypto.randomUUID(),
+            conceptId: effectiveConcept.conceptId,
+            sessionId: "session-" + s.startedAt,
+            grade: assessment.outcome === "again" ? 0 : assessment.outcome === "hard" ? 1 : assessment.outcome === "good" ? 2 : 3,
+            mode: assessment.retrievalMode,
+            direction: assessment.direction,
+            fsrs_log: JSON.stringify({ grade: fsrsLog.log.rating, due: fsrsLog.card.due }),
+            responseMs,
+            correct: isCorrect,
+            answeredAt: now,
+          }).catch(console.error);
 
-        // First grade of a new concept in a planner session uses up one of today's new cards.
-        // The bucket comes from the graded concept's own id, so mixed-subMode seeds
-        // and Due Today rows count against their real domain:skill:subMode.
-        if (wasNew && s.countsTowardNewCap) {
-          const bucket = newCardBucket(effectiveConcept.conceptId);
-          incrementNewCardsToday(bucket, now).catch(console.error);
+          // Optimistic row update at the current index position
+          const basePairs = [...s.pairs];
+          basePairs[s.index] = { ...pair, concept: updatedProgressRow };
+          Object.assign(updates, fromPairs(basePairs));
+
+          // First grade of a new concept in a planner session uses up one of today's new cards.
+          // The bucket comes from the graded concept's own id, so mixed-subMode seeds
+          // and Due Today rows count against their real domain:skill:subMode.
+          if (wasNew && s.countsTowardNewCap) {
+            const bucket = newCardBucket(effectiveConcept.conceptId);
+            incrementNewCardsToday(bucket, now).catch(console.error);
+          }
+          if (wasNew) incrementNewCardsToday(GLOBAL_NEW_BUCKET, now).catch(console.error);
+        } catch (err) {
+          // A bad row must not freeze the session: log it and let the UI advance.
+          console.error("FSRS processing failed; answer not graded", err);
         }
 
         // Mark this concept as FSRS-updated for this session
         const nextFsrsUpdatedIds = new Set(s.fsrsUpdatedIds);
         nextFsrsUpdatedIds.add(effectiveConcept.conceptId);
         updates.fsrsUpdatedIds = nextFsrsUpdatedIds;
-
-        // Optimistic row update at the current index position
-        const basePairs = [...s.pairs];
-        basePairs[s.index] = { ...pair, concept: updatedProgressRow };
-        Object.assign(updates, fromPairs(basePairs));
       }
 
       // 3. Desirable-difficulty re-queue for incorrect answers.
@@ -744,8 +822,8 @@ export function createSessionStore<TItem = Country>({
       //    - The re-queued slot contains the UPDATED concept row (post-FSRS),
       //      but FSRS will NOT be called again when that slot is answered
       //      (protected by fsrsUpdatedIds).
-      //    - If there are fewer than 3 cards left in the queue, don't re-queue
-      //      (not enough room for meaningful interleaving).
+      //    - If there are fewer than 3 cards left, append the retry at the end
+      //      so a miss near the end of a session still gets its second try.
       if (!isCorrect && targetConcept) {
         const conceptId = targetConcept.conceptId;
         const retries = s.inSessionRetries.get(conceptId) ?? 0;
@@ -754,13 +832,14 @@ export function createSessionStore<TItem = Country>({
 
         const remainingAfterCurrent = s.queue.length - s.index - 1;
 
-        if (retries < maxRetries && remainingAfterCurrent >= 3) {
+        if (retries < maxRetries) {
           // Use the step corresponding to this retry attempt
           const stepUnit = relearningSteps[retries] ?? relearningSteps[relearningSteps.length - 1]!;
           const offset = stepToQueueOffset(String(stepUnit), remainingAfterCurrent);
 
           // Clamp to the end of the queue (splice inserts before that index)
-          const insertAt = Math.min(s.index + 1 + offset, s.queue.length);
+          const insertAt =
+            remainingAfterCurrent >= 3 ? Math.min(s.index + 1 + offset, s.queue.length) : s.queue.length;
 
           // Re-insert the failed slot (item and its possibly updated concept together)
           const newPairs = [...(updates.pairs ?? s.pairs)];
@@ -786,12 +865,23 @@ export function createSessionStore<TItem = Country>({
       set({ answerState: "revealed" });
     },
 
-    next() {
+    next(nextOpts) {
       const s = get();
+      // A late auto-advance timer or double click must not skip an unanswered question.
+      if (s.endedAt !== null || (s.answerState === "idle" && !nextOpts?.allowIdle)) return;
       const nextIndex = s.index + 1;
       if (nextIndex >= s.queue.length) {
         const endedAt = Date.now();
-        set({ endedAt, answerState: "idle", combo: 0 });
+        // Latest row per card: retry slots carry the graded copy.
+        const cards = new Map(s.pairs.map((p) => [p.conceptId, p]));
+        const trickyItems: MissedItem[] = [...cards.values()]
+          .filter((p) => (p.concept.fsrs_lapses ?? 0) >= 4)
+          .map((p) => {
+            const raw = p.item as unknown as SessionItemLike;
+            return { id: p.conceptId, prompt: raw.name, answer: "", flagIso2: raw.flagCode ?? raw.iso2 };
+          });
+        const masteredNow = [...cards.values()].filter((p) => isMastered(p.concept)).length;
+        set({ endedAt, answerState: "idle", combo: 0, trickyItems, masteredNow });
         // totalQuestions = unique cards graded (not raw queue length, which grows
         // when re-queue slots are inserted for desirable-difficulty retries)
         const uniqueGraded = s.fsrsUpdatedIds.size || s.queue.length;
@@ -815,6 +905,7 @@ export function createSessionStore<TItem = Country>({
       set({
         index: nextIndex,
         answerState: "idle",
+        chosen: null,
         questionStartedAt: Date.now(),
       });
     },

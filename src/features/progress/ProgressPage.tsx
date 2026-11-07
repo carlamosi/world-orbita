@@ -9,7 +9,7 @@ import { spring } from "@/lib/motion";
 import { dateKey, currentStreak, longestStreak } from "@/lib/streak";
 import { DEFINITIONS } from "@/lib/unlocks";
 import { cn } from "@/lib/utils";
-import { normalizeState, getRetrievability } from "@/lib/fsrs/adapter";
+import { normalizeState, getRetrievability, isMastered } from "@/lib/fsrs/adapter";
 import { isConceptDue } from "@/lib/fsrs/planner";
 import { State } from "ts-fsrs";
 
@@ -29,40 +29,25 @@ export default function ProgressPage() {
   const minutes = Math.round(sessions.reduce((a, s) => a + s.durationMs, 0) / 60_000);
 
   const mastered = useMemo(() => {
-    // Group by iso3 -> skill -> retrievability scores
-    const byIsoSkill = new Map<string, Map<string, number[]>>();
+    // iso3 -> skill -> every card of that skill is mastered
+    const byIsoSkill = new Map<string, Map<string, boolean>>();
     
     for (const p of conceptProgress) {
       if (normalizeState(p.fsrs_state) === State.New) continue;
       
       let skillMap = byIsoSkill.get(p.iso3);
       if (!skillMap) {
-        skillMap = new Map<string, number[]>();
+        skillMap = new Map<string, boolean>();
         byIsoSkill.set(p.iso3, skillMap);
       }
       
-      const r = getRetrievability(p, Date.now());
-      const arr = skillMap.get(p.skill) || [];
-      arr.push(r);
-      skillMap.set(p.skill, arr);
+      skillMap.set(p.skill, (skillMap.get(p.skill) ?? true) && isMastered(p));
     }
     
     let count = 0;
     for (const skillMap of byIsoSkill.values()) {
       if (skillMap.size < 3) continue; // Must have learned at least 3 distinct skills
-      
-      let allSkillsMastered = true;
-      for (const rs of skillMap.values()) {
-        const avg = rs.reduce((a, b) => a + b, 0) / rs.length;
-        if (avg < 0.8) {
-          allSkillsMastered = false;
-          break;
-        }
-      }
-      
-      if (allSkillsMastered) {
-        count++;
-      }
+      if ([...skillMap.values()].every(Boolean)) count++;
     }
     return count;
   }, [conceptProgress]);
@@ -201,18 +186,15 @@ export default function ProgressPage() {
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             {(() => {
               // Build the grouping map once for all continents
-              const byIsoSkill = new Map<string, Map<string, number[]>>();
+              const byIsoSkill = new Map<string, Map<string, boolean>>();
               for (const p of conceptProgress) {
                 if (normalizeState(p.fsrs_state) === State.New) continue;
                 let skillMap = byIsoSkill.get(p.iso3);
                 if (!skillMap) {
-                  skillMap = new Map<string, number[]>();
+                  skillMap = new Map<string, boolean>();
                   byIsoSkill.set(p.iso3, skillMap);
                 }
-                const r = getRetrievability(p, Date.now());
-                const arr = skillMap.get(p.skill) || [];
-                arr.push(r);
-                skillMap.set(p.skill, arr);
+                skillMap.set(p.skill, (skillMap.get(p.skill) ?? true) && isMastered(p));
               }
 
               return CONTINENTS.map((cont) => {
@@ -222,16 +204,7 @@ export default function ProgressPage() {
                 for (const c of list) {
                   const skillMap = byIsoSkill.get(c.iso3);
                   if (!skillMap || skillMap.size < 3) continue;
-                  
-                  let allSkillsMastered = true;
-                  for (const rs of skillMap.values()) {
-                    const avg = rs.reduce((acc, val) => acc + val, 0) / rs.length;
-                    if (avg < 0.8) {
-                      allSkillsMastered = false;
-                      break;
-                    }
-                  }
-                  if (allSkillsMastered) masteredCount++;
+                  if ([...skillMap.values()].every(Boolean)) masteredCount++;
                 }
 
                 const pct = list.length > 0 ? masteredCount / list.length : 0;
@@ -535,7 +508,7 @@ function ConfidenceMap({ progress }: { progress: ConceptProgressRow[] }) {
           <span className="size-2 rounded-sm bg-[color:var(--cyan)]/60" />
           <span className="size-2 rounded-sm bg-[color:var(--neon)]/70" />
         </div>
-        <span>Mastered</span>
+        <span>Strong</span>
       </div>
     </div>
   );

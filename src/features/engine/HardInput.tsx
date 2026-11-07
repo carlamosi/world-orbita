@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { spring } from "@/lib/motion";
-import { exactMatch, fuzzyMatch } from "@/lib/fuzzy";
+import { exactMatch, fuzzyMatch, isPrefixOfOther } from "@/lib/fuzzy";
+import { answerNames, type NameKind } from "@/lib/answerNames";
 import { cn } from "@/lib/utils";
 
 export interface HardInputTarget {
@@ -9,14 +10,20 @@ export interface HardInputTarget {
   id?: string;
   iso3?: string;
   capital?: string | null;
+  /** Spain entities carry an alternative official name. */
+  nameAlt?: string;
+  capitalId?: string;
 }
 
 interface Props {
   target: HardInputTarget;
   matchTarget?: string;
+  /** What kind of name is typed; drives alternative names and the other-entity checks. */
+  kind: NameKind;
   correctAnswer?: string;
   answerState?: "idle" | "correct" | "wrong" | "revealed";
-  onSubmit: (ok: boolean) => void;
+  /** `exact` is false when Enter accepted a typo through the fuzzy matcher; `typed` is the text sent with Enter. */
+  onSubmit: (ok: boolean, exact?: boolean, typed?: string) => void;
   placeholder?: string;
 }
 
@@ -31,6 +38,7 @@ interface Props {
 export function HardInput({
   target,
   matchTarget,
+  kind,
   correctAnswer,
   answerState = "idle",
   onSubmit,
@@ -45,6 +53,7 @@ export function HardInput({
   const isWrong = answerState === "wrong" || answerState === "revealed";
 
   const expectedText = matchTarget ?? target.name;
+  const { alts, others } = answerNames(kind, target);
   const revealAnswer = correctAnswer ?? expectedText;
 
   // Re-focus and clear when target changes
@@ -82,13 +91,14 @@ export function HardInput({
             if (isAnswered) return;
             const v = e.target.value;
             setVal(v);
-            if (exactMatch(v, expectedText)) onSubmit(true);
+            // Hold auto-submit while a longer real name is still possible (Niger vs Nigeria).
+            if (exactMatch(v, expectedText, alts) && !isPrefixOfOther(v, others)) onSubmit(true, true);
           }}
           onKeyDown={(e) => {
             if (isAnswered) return;
             if (e.key === "Enter") {
               e.preventDefault();
-              if (val.trim()) onSubmit(fuzzyMatch(val, expectedText));
+              if (val.trim()) onSubmit(fuzzyMatch(val, expectedText, alts, others), exactMatch(val, expectedText, alts), val.trim());
             }
           }}
           placeholder={placeholder}
