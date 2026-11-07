@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/orbita-button";
 import { spring } from "@/lib/motion";
-import type { ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 
 interface Props {
   show: boolean;
@@ -33,6 +33,15 @@ export function FeedbackBar({
   flag,
 }: Props) {
   const miss = state !== "correct";
+  // Focus Next after a miss so Enter/Space continue without the mouse. autoFocus is lost in real
+  // browsers (the clicked option is disabled in the same commit), so focus a tick after mount.
+  // Stable so a re-render never pulls focus back from another control.
+  const focusNext = useCallback(
+    (el: HTMLButtonElement | null) => {
+      if (el && miss) setTimeout(() => el.isConnected && el.focus(), 0);
+    },
+    [miss],
+  );
   const label = state === "correct" ? "Nailed it" : state === "wrong" ? "Not quite" : "Revealed";
   const answer = (
     <>
@@ -80,8 +89,7 @@ export function FeedbackBar({
                 {subtitle && <div className="text-[12px] text-white/55">{subtitle}</div>}
               </div>
               {!hideNext && (
-                // Focus after a miss so Enter/Space continue without the mouse.
-                <Button size="sm" onClick={onNext} autoFocus={miss} data-feedback-next="">
+                <Button size="sm" onClick={onNext} ref={focusNext} data-feedback-next="">
                   Next →
                 </Button>
               )}
