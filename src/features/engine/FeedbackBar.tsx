@@ -8,7 +8,6 @@ interface Props {
   show: boolean;
   state: "correct" | "wrong" | "revealed";
   title: ReactNode;
-  subtitle?: ReactNode;
   onNext: () => void;
   onSkip?: () => void;
   /** Hide the manual Next button — auto-advance is handling it. */
@@ -28,7 +27,6 @@ export function FeedbackBar({
   show,
   state,
   title,
-  subtitle,
   onNext,
   onSkip,
   hideNext,
@@ -62,7 +60,7 @@ export function FeedbackBar({
       <div role="status" aria-live="polite" className="sr-only">
         {show && (
           <>
-            {label}. {answer}. {subtitle}
+            {label}. {answer}.
           </>
         )}
       </div>
@@ -91,7 +89,6 @@ export function FeedbackBar({
                   {flag}
                   <span className="font-display text-lg leading-tight text-white truncate">{title}</span>
                 </div>
-                {subtitle && <div className="pl-[30px] text-[12px] leading-snug text-white/45">{subtitle}</div>}
               </div>
               {!hideNext && (
                 <Button size="sm" variant="secondary" onClick={onNext} ref={focusNext} data-feedback-next="" className="shrink-0">

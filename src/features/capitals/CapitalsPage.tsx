@@ -12,7 +12,6 @@ import { PromptPill } from "@/features/engine/PromptPill";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { HardInput } from "@/features/engine/HardInput";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
-import { feedbackContext } from "@/features/engine/feedbackContext";
 import { Button } from "@/components/ui/orbita-button";
 import { Badge } from "@/components/ui/orbita-badge";
 import {
@@ -112,7 +111,6 @@ export default function CapitalsPage() {
           show={s.answerState !== "idle"}
           state={s.answerState === "idle" ? "correct" : s.answerState}
           title={(askCapital ? current.capital : current.name) ?? ""}
-          subtitle={feedbackContext(current)}
           chosen={s.chosen}
           onNext={() => s.next()}
           srOnly={sub === "locator"}
@@ -145,7 +143,7 @@ export default function CapitalsPage() {
                 }
               }}
               disableHoverLabel
-              labelHighlight={s.answerState === "correct"}
+              highlightIsHit={s.answerState === "correct"}
               questionKey={current?.iso3 ?? null}
               activeContinent={continent === "All" ? null : continent}
             />

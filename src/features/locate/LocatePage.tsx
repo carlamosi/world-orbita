@@ -11,7 +11,6 @@ import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { HardInput } from "@/features/engine/HardInput";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
-import { feedbackContext } from "@/features/engine/feedbackContext";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
@@ -218,7 +217,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                 : undefined
             }
             disableHoverLabel
-            labelHighlight={s.answerState === "correct"}
+            highlightIsHit={s.answerState === "correct"}
             questionKey={current?.iso3 ?? null}
             activeContinent={continent === "All" ? null : continent}
             autoRotateSpeed={sub === "name" ? 0.05 : undefined}
@@ -273,7 +272,6 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
               show={s.answerState !== "idle"}
               state={s.answerState === "idle" ? "correct" : s.answerState}
               title={current.name}
-              subtitle={feedbackContext(current)}
               chosen={s.chosen}
               onNext={() => s.next()}
               srOnly

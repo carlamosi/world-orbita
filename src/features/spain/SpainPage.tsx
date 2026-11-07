@@ -22,6 +22,8 @@ import { motion } from "framer-motion";
 import { GlobeFallback } from "@/features/globe/GlobeFallback";
 import { COUNTRIES } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
+import { CanaryInset } from "@/features/spain/CanaryInset";
+import type { SpainFeature } from "@/lib/spain/geo";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { useAnswerHotkeys } from "@/hooks/useAnswerHotkeys";
@@ -30,7 +32,6 @@ import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
-import { feedbackContext } from "@/features/engine/feedbackContext";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { RegionSelect } from "@/features/engine/ContinentSelect";
@@ -280,8 +281,9 @@ export default function SpainPage() {
   }, [finished, current, s]);
   useSkipHotkey(onSkip);
 
-  // Rock-solid Spain POV — slightly lower center and slightly closer zoom (alt: 0.28, lat: 39.2)
-  const SPAIN_POV = useMemo(() => ({ lat: 39.2, lng: -3.7, altitude: 0.28 }), []);
+  // Fixed Spain view, centred north of the peninsula so the map sits below the navbar and toolbar.
+  // The Canaries are off this view: they live in the inset.
+  const SPAIN_POV = useMemo(() => ({ lat: 42.0, lng: -3.7, altitude: 0.3 }), []);
 
   const capColor = useMemo(
     () => makeCapColor(current?.id, lastWrongId, hoveredRegionId, s.answerState, skill),
@@ -348,10 +350,8 @@ export default function SpainPage() {
   const toolbar = (
     <div
       className={cn(
-        "z-40 px-4 md:px-6 flex items-center justify-between flex-wrap gap-2 pointer-events-auto",
-        !showGlobe
-          ? "w-full max-w-5xl mx-auto mb-4"
-          : "absolute top-24 inset-x-0 max-w-5xl mx-auto",
+        "z-40 px-4 md:px-6 flex items-center justify-between flex-wrap gap-2 pointer-events-auto w-full max-w-5xl mx-auto",
+        !showGlobe && "mb-4",
       )}
     >
       <div className="flex items-center gap-2 flex-wrap">
@@ -418,6 +418,20 @@ export default function SpainPage() {
               onOverlayHover={handleOverlayHover}
             />
           </Suspense>
+          {/* Bottom-left corner, clear of the answer options in Name mode. */}
+          <div
+            className={cn(
+              "absolute left-3 md:left-8 md:bottom-10 z-20",
+              skill === "locate" ? "bottom-4" : "bottom-48",
+            )}
+          >
+            <CanaryInset
+              features={overlayPolygons as SpainFeature[]}
+              fill={capColor}
+              onClick={skill === "locate" ? handleOverlayClick : undefined}
+              onHover={handleOverlayHover}
+            />
+          </div>
         </div>
       )}
 
@@ -428,8 +442,8 @@ export default function SpainPage() {
 
       {!finished && current && (
         <>
-          {/* Top HUD with high z-index (z-40) so dropdowns are never overlapped */}
-          {toolbar}
+          {/* Map modes stack the toolbar with the prompt below, so a wrapped toolbar never covers it. */}
+          {!showGlobe && toolbar}
 
           {/* ================================================================
               FLAGS MODE: 2-column layout matching world Flags FlagToCountry
@@ -558,6 +572,7 @@ export default function SpainPage() {
                       matchTarget={current.name}
                       kind="spain"
                       placeholder="Type the autonomous community name…"
+                      answerState={s.answerState}
                       onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                     />
                   )}
@@ -569,7 +584,6 @@ export default function SpainPage() {
                     show={s.answerState !== "idle"}
                     state={s.answerState === "idle" ? "correct" : s.answerState}
                     title={current.name}
-                    subtitle={current.capital ? `Capital: ${current.capital}` : undefined}
                     chosen={s.chosen}
                     flag={currentFlagSrc && <FlagImage src={currentFlagSrc} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />}
                     onNext={() => s.next()}
@@ -600,6 +614,7 @@ export default function SpainPage() {
                       matchTarget={current.capital ?? ""}
                       kind="spainCapital"
                       placeholder="Type the capital city…"
+                      answerState={s.answerState}
                       onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                     />
                   </div>
@@ -609,7 +624,6 @@ export default function SpainPage() {
                     show={s.answerState !== "idle"}
                     state={s.answerState === "idle" ? "correct" : s.answerState}
                     title={current.capital ?? current.name}
-                    subtitle={[`Capital of ${current.name}`, feedbackContext(current)].filter(Boolean).join(" · ")}
                     chosen={s.chosen}
                     onNext={() => s.next()}
                     hideNext={s.answerState === "correct"}
@@ -624,7 +638,8 @@ export default function SpainPage() {
           ================================================================ */}
           {showGlobe && (
             <>
-              <div className="absolute top-40 md:top-36 inset-x-0 z-20 flex flex-col items-center pointer-events-none">
+              <div className="absolute top-24 inset-x-0 z-40 flex flex-col items-center gap-3 pointer-events-none">
+                {toolbar}
                 <PromptPill
                   keyId={`spain-${skill}-${level}-${current.id}`}
                   index={s.index}
@@ -650,6 +665,7 @@ export default function SpainPage() {
                       matchTarget={current.name}
                       kind="spain"
                       placeholder="Type the region name…"
+                      answerState={s.answerState}
                       onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
                     />
                   )
@@ -658,10 +674,11 @@ export default function SpainPage() {
                   show={s.answerState !== "idle"}
                   state={s.answerState === "idle" ? "correct" : s.answerState}
                   title={current.name}
-                  subtitle={[feedbackContext(current), current.capital && `Capital: ${current.capital}`].filter(Boolean).join(" · ")}
                   chosen={s.chosen}
                   onNext={() => s.next()}
                   hideNext={s.answerState === "correct"}
+                  // Find: the map and inset show both regions, as in world Locate.
+                  srOnly={skill === "locate"}
                 />
               </div>
             </>

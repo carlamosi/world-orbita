@@ -10,7 +10,6 @@ import { SessionEmpty } from "@/features/engine/SessionEmpty";
 import { SessionLoading } from "@/features/engine/SessionLoading";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { FeedbackBar } from "@/features/engine/FeedbackBar";
-import { feedbackContext } from "@/features/engine/feedbackContext";
 import { HardInput } from "@/features/engine/HardInput";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { FlagImage } from "@/components/ui/FlagImage";
@@ -154,7 +153,6 @@ export default function FlagsPage() {
                     show={s.answerState !== "idle" && !!current}
                     state={s.answerState === "idle" ? "correct" : s.answerState}
                     title={current?.name ?? ""}
-                    subtitle={current && feedbackContext(current)}
                     chosen={s.chosen}
                     flag={current && <FlagImage iso2={current.iso2} alt="" className="w-8 aspect-[3/2] rounded shrink-0" />}
                     onNext={() => s.next()}
