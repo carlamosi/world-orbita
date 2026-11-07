@@ -60,6 +60,25 @@ describe("feedback after an answer (Task 21)", () => {
     expect(document.activeElement?.textContent).toContain("Next");
   });
 
+  it("focuses Next when the bar appears after a miss (idle → wrong, as in the pages)", () => {
+    render("idle");
+    render("wrong");
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(document.activeElement?.hasAttribute("data-feedback-next")).toBe(true);
+  });
+
+  it("a re-render does not pull focus back to Next from another control", () => {
+    render("wrong");
+    act(() => vi.advanceTimersByTime(1_000));
+    const other = document.createElement("button");
+    document.body.appendChild(other);
+    other.focus();
+    render("wrong");
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(document.activeElement).toBe(other);
+    other.remove();
+  });
+
   it("Enter advances once after a wrong answer", () => {
     render("wrong");
     key("Enter");
