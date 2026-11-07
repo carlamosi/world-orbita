@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
+import { GlobeFallback } from "@/features/globe/GlobeFallback";
 import { COUNTRIES, COUNTRY_BY_ISO3 } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
 import { SessionEmpty } from "@/features/engine/SessionEmpty";
+import { SessionLoading } from "@/features/engine/SessionLoading";
 import { PromptPill } from "@/features/engine/PromptPill";
 import { ModeDropdown } from "@/features/engine/ModeDropdown";
 import { HardInput } from "@/features/engine/HardInput";
@@ -233,6 +235,13 @@ export default function CapitalsPage() {
         </>
       )}
 
+      {!finished && s.status === "loading" && (
+        <>
+          {Toolbar}
+          <SessionLoading />
+        </>
+      )}
+
       {empty && (
         <>
           {Toolbar}
@@ -271,14 +280,6 @@ export default function CapitalsPage() {
         missedItems={s.missedItems}
         onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
       />
-    </div>
-  );
-}
-
-function GlobeFallback() {
-  return (
-    <div className="size-full grid place-items-center">
-      <div className="size-40 rounded-full bg-gradient-to-br from-violet/30 to-cyan/20 animate-breathe blur-2xl" />
     </div>
   );
 }

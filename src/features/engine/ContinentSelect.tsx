@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FlagImage } from "@/components/ui/FlagImage";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 
@@ -99,7 +100,7 @@ export function RegionSelect({
           className="glass rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-wider bg-white/20 text-white border-white/25 shadow-[0_0_12px_rgba(255,255,255,0.12)] flex items-center gap-1.5 shrink-0 select-none font-medium"
           title="Currently exploring Spain"
         >
-          <span>🇪🇸</span> {spainLabel}
+          <FlagImage iso2="es" alt="" className="w-4 h-3 rounded-[2px] shrink-0" /> {spainLabel}
         </span>
       ) : (
         <Link
@@ -108,7 +109,7 @@ export function RegionSelect({
           className="glass rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-white/70 hover:text-white hover:bg-white/15 hover:border-white/25 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm active:scale-95"
           title={`Master Spain's ${spainSkill === "flags" ? "autonomous community flags" : spainSkill === "capitals" ? "capitals" : "geography"}`}
         >
-          <span>🇪🇸</span> {spainLabel}
+          <FlagImage iso2="es" alt="" className="w-4 h-3 rounded-[2px] shrink-0" /> {spainLabel}
         </Link>
       )}
     </div>

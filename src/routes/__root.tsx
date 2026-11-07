@@ -183,7 +183,7 @@ function RootComponent() {
         if (result.migrated > 0) {
           authDebug("root:migration_done", result);
           toast.success(
-            `✨ Saved ${result.migrated} items from your guest session`,
+            `Saved ${result.migrated} items from your guest session`,
             { description: "Your progress has been merged into your account.", duration: 5000 },
           );
         }

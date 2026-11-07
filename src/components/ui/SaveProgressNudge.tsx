@@ -39,8 +39,8 @@ export function SaveProgressNudge() {
 
   const headline =
     learnedCount > 1
-      ? `You just learned ${learnedCount} countries!`
-      : "You just completed your first session!";
+      ? `${learnedCount} countries learned`
+      : "First session complete";
 
   return (
     <AnimatePresence>
@@ -85,10 +85,10 @@ export function SaveProgressNudge() {
 
             <div className="flex-1 min-w-0">
               <p className="text-[13px] font-semibold text-white leading-tight">
-                🌍 {headline}
+                {headline}
               </p>
               <p className="text-[11px] text-white/55 mt-0.5 leading-tight">
-                Create a free account to keep your ORBITA memory map.
+                Create a free account to keep your Orbita memory map.
               </p>
             </div>
 

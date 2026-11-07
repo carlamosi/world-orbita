@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { GlobeFallback } from "@/features/globe/GlobeFallback";
 import { COUNTRIES, pickDistractors } from "@/lib/countries";
 import type { Country } from "@/types/country";
 import {
@@ -35,13 +36,6 @@ import { ContinentSelect, useContinentPref } from "@/features/engine/ContinentSe
 // Lazy-load the globe — only needed when a 'location' card appears
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
-function GlobeFallback() {
-  return (
-    <div className="absolute inset-0 flex items-center justify-center">
-      <div className="size-12 rounded-full border-2 border-white/10 border-t-[color:var(--cyan)] animate-spin" />
-    </div>
-  );
-}
 
 function shuffleArray<T>(array: T[]): T[] {
   const arr = [...array];

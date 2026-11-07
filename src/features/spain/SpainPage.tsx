@@ -17,7 +17,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { Check, X } from "lucide-react";
 import { motion } from "framer-motion";
+import { GlobeFallback } from "@/features/globe/GlobeFallback";
 import { COUNTRIES } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
@@ -533,7 +535,7 @@ export default function SpainPage() {
                                 transition={{ duration: 0.18 }}
                                 className="shrink-0 size-6 rounded-full bg-emerald-500/20 border border-emerald-500/60 text-emerald-400 flex items-center justify-center"
                               >
-                                <span className="text-sm font-bold leading-none">✓</span>
+                                <Check className="size-3.5" strokeWidth={2.75} aria-hidden />
                               </motion.div>
                             )}
                             {isWrongChoice && (
@@ -543,7 +545,7 @@ export default function SpainPage() {
                                 transition={{ duration: 0.18 }}
                                 className="shrink-0 size-6 rounded-full bg-rose-500/20 border border-rose-500/60 text-rose-400 flex items-center justify-center"
                               >
-                                <span className="text-xs font-bold leading-none">✕</span>
+                                <X className="size-3.5" strokeWidth={2.75} aria-hidden />
                               </motion.div>
                             )}
                           </motion.button>
@@ -816,7 +818,7 @@ function EasyOptions({
                     transition={{ duration: 0.18 }}
                     className="size-6 rounded-full bg-emerald-500/20 border border-emerald-500/60 text-emerald-400 flex items-center justify-center"
                   >
-                    <span className="text-sm font-bold leading-none">✓</span>
+                    <Check className="size-3.5" strokeWidth={2.75} aria-hidden />
                   </motion.div>
                 )}
                 {isWrongChoice && (
@@ -826,7 +828,7 @@ function EasyOptions({
                     transition={{ duration: 0.18 }}
                     className="size-6 rounded-full bg-rose-500/20 border border-rose-500/60 text-rose-400 flex items-center justify-center"
                   >
-                    <span className="text-xs font-bold leading-none">✕</span>
+                    <X className="size-3.5" strokeWidth={2.75} aria-hidden />
                   </motion.div>
                 )}
                 {flagSrc && (
@@ -845,13 +847,5 @@ function EasyOptions({
       })}
       <input type="hidden" data-target={targetId} />
     </motion.div>
-  );
-}
-
-function GlobeFallback() {
-  return (
-    <div className="size-full grid place-items-center">
-      <div className="size-40 rounded-full bg-gradient-to-br from-violet/30 to-cyan/20 animate-breathe blur-2xl" />
-    </div>
   );
 }

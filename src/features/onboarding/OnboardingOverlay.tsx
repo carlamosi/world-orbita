@@ -200,7 +200,7 @@ export function OnboardingOverlay({ open, onComplete, onSkip }: Props) {
                   className="inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.2em] transition-colors hover:opacity-100"
                   style={{ color: accent, opacity: 0.85 }}
                 >
-                  <span style={{ fontSize: 14 }}>💾</span> Create an account to save your progress →
+                  Create an account to save your progress →
                 </Link>
               )}
             </div>

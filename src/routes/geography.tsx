@@ -1,4 +1,5 @@
 ﻿import { createFileRoute } from "@tanstack/react-router";
+import { Mountain } from "lucide-react";
 import { motion } from "framer-motion";
 import { spring } from "@/lib/motion";
 
@@ -28,7 +29,7 @@ function GeographyPlaceholderPage() {
         className="glass-strong rounded-3xl p-8 md:p-12 max-w-xl w-full flex flex-col items-center gap-4 z-10 border border-white/15 shadow-2xl"
       >
         <div className="size-16 rounded-2xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-3xl shadow-inner mb-2">
-          🏔️
+          <Mountain className="size-7 text-white/80" strokeWidth={1.5} aria-hidden />
         </div>
 
         <span className="glass px-3 py-1 rounded-full font-mono text-[11px] uppercase tracking-widest text-[color:var(--cyan)]">

@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
-import { Zap, Timer, Skull, Flag, MapPin, Type, Globe, Check, X } from "lucide-react";
+import { Zap, Timer, Skull, Flag, MapPin, Type, Globe, Check, X, Flame } from "lucide-react";
 
 const MODE_META: Record<SpeedMode, { name: string; sub: string; desc: string; icon: React.ReactNode }> = {
   sprint60: {
@@ -263,7 +263,8 @@ function TopBar({ onExit }: { onExit: () => void }) {
           aria-label="Exit Speed mode"
           className="shrink-0"
         >
-          ✕ Exit
+          <X className="size-3.5" aria-hidden />
+          Exit
         </Button>
       </div>
     </div>
@@ -546,7 +547,8 @@ function PostGame() {
           <div className="flex items-center justify-center gap-2">
             <Badge tone="cyan">Run complete</Badge>
             <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-mono tracking-wider bg-amber-500/15 border border-amber-500/30 text-amber-300">
-              🔥 {streak} {streak === 1 ? "day streak" : "day streak"}
+              <Flame className="size-3" aria-hidden />
+              {streak}-day streak
             </span>
           </div>
           <div className="mt-4 font-display text-6xl text-white tracking-tight text-glow-violet">

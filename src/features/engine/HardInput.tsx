@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Check, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { spring } from "@/lib/motion";
 import { exactMatch, fuzzyMatch, isPrefixOfOther } from "@/lib/fuzzy";
@@ -118,7 +119,7 @@ export function HardInput({
               transition={{ duration: 0.18 }}
               className="size-7 rounded-full bg-emerald-500/20 border border-emerald-500/60 text-emerald-400 flex items-center justify-center shrink-0"
             >
-              <span className="text-sm font-bold leading-none">✓</span>
+              <Check className="size-3.5" strokeWidth={2.75} aria-hidden />
             </motion.div>
           )}
           {isWrong && (
@@ -129,7 +130,7 @@ export function HardInput({
               transition={{ duration: 0.18 }}
               className="size-7 rounded-full bg-rose-500/20 border border-rose-500/60 text-rose-400 flex items-center justify-center shrink-0"
             >
-              <span className="text-xs font-bold leading-none">✕</span>
+              <X className="size-3.5" strokeWidth={2.75} aria-hidden />
             </motion.div>
           )}
         </AnimatePresence>

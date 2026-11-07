@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useCallback, useState, useRef } from "react";
+import { Check, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { GlobeFallback } from "@/features/globe/GlobeFallback";
 import { COUNTRIES, COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
 import { createSessionStore } from "@/features/engine/useSession";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
@@ -415,7 +417,7 @@ function EasyOptions({
                     transition={{ duration: 0.18 }}
                     className="size-6 rounded-full bg-emerald-500/20 border border-emerald-500/60 text-emerald-400 flex items-center justify-center"
                   >
-                    <span className="text-sm font-bold leading-none">✓</span>
+                    <Check className="size-3.5" strokeWidth={2.75} aria-hidden />
                   </motion.div>
                 )}
                 {isWrongChoice && (
@@ -425,7 +427,7 @@ function EasyOptions({
                     transition={{ duration: 0.18 }}
                     className="size-6 rounded-full bg-rose-500/20 border border-rose-500/60 text-rose-400 flex items-center justify-center"
                   >
-                    <span className="text-xs font-bold leading-none">✕</span>
+                    <X className="size-3.5" strokeWidth={2.75} aria-hidden />
                   </motion.div>
                 )}
                 <FlagImage iso2={o.iso2} alt={o.name} className="w-12 h-8 shrink-0" />
@@ -446,12 +448,4 @@ function shuffle<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j]!, a[i]!];
   }
   return a;
-}
-
-function GlobeFallback() {
-  return (
-    <div className="size-full grid place-items-center">
-      <div className="size-40 rounded-full bg-gradient-to-br from-violet/30 to-cyan/20 animate-breathe blur-2xl" />
-    </div>
-  );
 }
