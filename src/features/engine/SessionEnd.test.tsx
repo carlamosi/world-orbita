@@ -24,7 +24,7 @@ describe("SessionEnd summary (Task 22)", () => {
     host.remove();
   });
 
-  it("says 'correct first try' over distinct cards and lists tricky cards", () => {
+  it("shows first-try recall over distinct cards and lists tricky cards", () => {
     act(() =>
       root.render(
         <SessionEnd
@@ -39,9 +39,10 @@ describe("SessionEnd summary (Task 22)", () => {
       ),
     );
     const text = document.body.textContent ?? "";
-    expect(text).toContain("correct first try");
+    expect(text).toContain("First try");
+    expect(text).not.toContain("right first try");
     expect(text).not.toMatch(/\bmastered\b(?! \()/);
-    expect(text).toContain("9 of 10");
+    expect(text).toContain("9/10");
     expect(text).toContain("90%");
     expect(text).toContain("2 now mastered");
     expect(text).toContain("Tricky");
