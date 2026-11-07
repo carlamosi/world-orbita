@@ -79,12 +79,15 @@ describe("ChallengeRunner", () => {
     const spy = vi.spyOn(console, "error").mockImplementation((...a) => {
       errors.push(a);
     });
+    vi.useFakeTimers();
     act(() => root.render(<Harness />));
 
+    // Option 1 may be right or wrong (random); both auto-advance, and a hit shows no Next button.
     for (let i = 0; i < 2; i++) {
       click(button(/^\s*1/));
-      click(button(/Next/));
+      act(() => vi.advanceTimersByTime(3_000));
     }
+    vi.useRealTimers();
 
     expect(container.querySelector('[data-testid="session-end"]')).not.toBeNull();
     expect(recordSessionEnd).toHaveBeenCalledTimes(1);

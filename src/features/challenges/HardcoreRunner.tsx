@@ -98,8 +98,6 @@ export function HardcoreRunner({
     answerState,
     finished,
     next: nextQuestion,
-    // Hardcore keeps its timed flow (out of scope for Task 21).
-    waitAfterMiss: false,
   });
 
   const onSkip = useCallback(() => {
