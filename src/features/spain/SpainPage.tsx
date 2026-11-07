@@ -694,7 +694,6 @@ export default function SpainPage() {
         firstTryCorrect={s.firstTryCorrect}
         masteredNow={s.masteredNow}
         trickyItems={s.trickyItems}
-        practiceOnly={s.practiceOnlyIds.size}
         missedItems={s.missedItems}
         hasNextBlock={level === "provinces" && sessionMode === "quick"}
         onNextBlock={() => startSession(skill, level, sessionMode, difficulty)}

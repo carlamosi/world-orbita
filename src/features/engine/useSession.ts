@@ -19,16 +19,6 @@ import { playAnswerSound } from "@/lib/audio";
 import { State, ConvertStepUnitToMinutes } from "ts-fsrs";
 import { formatConceptId, parseConceptId } from "@/lib/fsrs/concept";
 import type { GeoDomain } from "@/types/geo";
-import {
-  GLOBAL_NEW_BUCKET,
-  MAX_NEW_GLOBAL_PER_DAY,
-  MAX_NEW_PER_DAY,
-  incrementNewCardsToday,
-  newCardBucket,
-  readNewCardsToday,
-} from "./newCardLimit";
-
-export { MAX_NEW_GLOBAL_PER_DAY, MAX_NEW_PER_DAY };
 
 /**
  * Spacing by item-count: re-insert failed card after N other answered cards
@@ -48,13 +38,8 @@ export type AnswerState = "idle" | "correct" | "wrong" | "revealed";
  * - `empty`: the queue came back empty (show SessionEmpty; see `emptyReason`)
  */
 export type SessionStatus = "idle" | "loading" | "active" | "empty";
-/**
- * Why a planner queue is empty:
- * - `limit`: nothing is due and today's new-card limit for this bucket is used up
- * - `globalLimit`: nothing is due and today's new-card limit across all buckets is used up
- * - `seenAll`: nothing is due and every entity here already has a row (budget left)
- */
-export type EmptyReason = "limit" | "globalLimit" | "seenAll";
+/** Why a planner queue is empty. `seenAll`: nothing is due and every entity here already has a row. */
+export type EmptyReason = "seenAll";
 export const QUESTIONS_PER_SESSION = 10;
 
 export interface MissedItem {
@@ -130,11 +115,6 @@ export interface SessionState<TItem = Country> {
   firstTryCorrect: number;
   /** Distinct cards in the session, the denominator of first-try accuracy. */
   cardCount: number;
-  /**
-   * Complete mode: conceptIds of New cards beyond today's global budget. They
-   * are shown and answered as practice but never graded into FSRS.
-   */
-  practiceOnlyIds: Set<string>;
   /** Set when the session ends: cards forgotten 4+ times (fsrs_lapses). */
   trickyItems: MissedItem[];
   /** Set when the session ends: session cards now mastered (Review, stability 21+ days). */
@@ -151,12 +131,6 @@ export interface SessionState<TItem = Country> {
   emptyReason: EmptyReason | null;
   /** The filtered pool has at least one already-seen concept, so startPractice() has work. */
   hasSeen: boolean;
-  /**
-   * True only for planner-built sessions: their first grades of New cards use up
-   * the per-bucket daily new-card cap. Complete, Review and Practice sessions never
-   * do. Every first grade of a New card, in any session, uses up the global cap.
-   */
-  countsTowardNewCap: boolean;
   /** Epoch ms when the current question became visible. */
   questionStartedAt: number;
 
@@ -214,6 +188,8 @@ export interface CreateOpts<TItem = Country> {
   domain?: string;
   dataset?: readonly TItem[];
   getId?: (item: TItem) => string;
+  /** subModes a `subMode: "mixed"` session interleaves (e.g. both capital directions). */
+  mixedSubModes?: readonly string[];
 }
 
 /**
@@ -229,6 +205,7 @@ export function createSessionStore<TItem = Country>({
   domain = "world",
   dataset,
   getId,
+  mixedSubModes,
 }: CreateOpts<TItem>): UseBoundStore<StoreApi<SessionState<TItem>>> {
   const activeDataset = (dataset ?? COUNTRIES) as unknown as readonly TItem[];
   const resolveId = getId ?? ((item: TItem) => {
@@ -295,6 +272,8 @@ export function createSessionStore<TItem = Country>({
 
     if (opts.subMode && opts.subMode !== "mixed") {
       pool = pool.filter((c) => c.conceptId.endsWith(`:${opts.subMode}`));
+    } else if (opts.subMode === "mixed" && mixedSubModes) {
+      pool = pool.filter((c) => mixedSubModes.includes(parseConceptId(c.conceptId).subMode ?? ""));
     }
 
     // Keep only concepts of the active dataset. Domain and subMode alone are
@@ -322,13 +301,27 @@ export function createSessionStore<TItem = Country>({
   ): ConceptProgressRow[] => {
     const seeds: ConceptProgressRow[] = [];
     if (limit <= 0) return seeds;
-    const used = new Set(pool.map((c) => parseConceptId(c.conceptId).entityId));
-    const sm = seedSubMode(opts);
+    // Mixed: an entity is new per direction, so a learned country→capital still seeds capital→country.
+    const mixed = opts.subMode === "mixed" && mixedSubModes ? mixedSubModes : null;
+    const key = (entityId: string, sm: string) => (mixed ? `${entityId}:${sm}` : entityId);
+    const used = new Set(
+      pool.map((c) => {
+        const p = parseConceptId(c.conceptId);
+        return key(p.entityId, p.subMode ?? "");
+      }),
+    );
     for (const c of seedOrder) {
       if (seeds.length >= limit) break;
       if (!inContinent(c, opts.continent)) continue;
       const entityId = resolveId(c);
-      if (used.has(entityId)) continue;
+      let sm = seedSubMode(opts);
+      if (mixed) {
+        const free = mixed.filter((m) => !used.has(key(entityId, m)));
+        if (free.length === 0) continue;
+        sm = free[Math.floor(Math.random() * free.length)]!;
+        // One slot per entity per session: mark every direction as taken.
+        for (const m of mixed) used.add(key(entityId, m));
+      } else if (used.has(entityId)) continue;
       const raw = c as unknown as SessionItemLike;
       seeds.push({
         conceptId: formatConceptId({
@@ -359,17 +352,6 @@ export function createSessionStore<TItem = Country>({
   const seedSubMode = (opts: PlannerOpts) =>
     opts.subMode && opts.subMode !== "mixed" ? opts.subMode : defaultSubMode;
 
-  /** Budget bucket of the concepts `newSeeds` builds for `opts`. */
-  const seedBucket = (opts: PlannerOpts) =>
-    newCardBucket(
-      formatConceptId({
-        domain: domain as GeoDomain,
-        entityId: "_",
-        skill,
-        subMode: seedSubMode(opts) || "default",
-      }),
-    );
-
   const isSeen = (c: ConceptProgressRow) => normalizeState(c.fsrs_state) !== State.New;
 
   const safeRetrievability = (c: ConceptProgressRow, nowMs: number): number => {
@@ -386,7 +368,6 @@ export function createSessionStore<TItem = Country>({
     status: "loading",
     emptyReason: null,
     hasSeen: false,
-    countsTowardNewCap: false,
     ...fromPairs<TItem>([]),
     index: 0,
     score: 0,
@@ -396,7 +377,6 @@ export function createSessionStore<TItem = Country>({
     wrong: 0,
     firstTryCorrect: 0,
     cardCount: 0,
-    practiceOnlyIds: new Set(),
     trickyItems: [],
     masteredNow: 0,
     missedItems: [],
@@ -411,7 +391,7 @@ export function createSessionStore<TItem = Country>({
   /** Fields set when a start has built its pairs. */
   const readyState = (
     pairs: SessionPair<TItem>[],
-    info: { hasSeen?: boolean; emptyReason?: EmptyReason } = {},
+    info: { hasSeen?: boolean } = {},
   ): Partial<SessionState<TItem>> => {
     const now = Date.now();
     return {
@@ -428,7 +408,7 @@ export function createSessionStore<TItem = Country>({
       endedAt: null,
       loading: false,
       status: pairs.length === 0 ? "empty" : "active",
-      emptyReason: pairs.length === 0 ? (info.emptyReason ?? "limit") : null,
+      emptyReason: pairs.length === 0 ? "seenAll" : null,
       hasSeen: info.hasSeen ?? false,
       questionStartedAt: now,
       fsrsUpdatedIds: new Set(),
@@ -452,7 +432,6 @@ export function createSessionStore<TItem = Country>({
     wrong: 0,
     firstTryCorrect: 0,
     cardCount: 0,
-    practiceOnlyIds: new Set(),
     trickyItems: [],
     masteredNow: 0,
     missedItems: [],
@@ -464,7 +443,6 @@ export function createSessionStore<TItem = Country>({
     status: "idle",
     emptyReason: null,
     hasSeen: false,
-    countsTowardNewCap: false,
     questionStartedAt: 0,
     fsrsUpdatedIds: new Set(),
     inSessionRetries: new Map(),
@@ -479,10 +457,7 @@ export function createSessionStore<TItem = Country>({
       set(loadingState());
 
       let pairs: SessionPair<TItem>[] = [];
-      let info: { hasSeen?: boolean; emptyReason?: EmptyReason } = {};
-      // Only the planner branch spends the per-bucket new-card cap.
-      let countsTowardNewCap = false;
-      const practiceOnlyIds = new Set<string>();
+      let info: { hasSeen?: boolean } = {};
 
       if (opts?.conceptRows && opts.conceptRows.length > 0) {
         // Due Today / pre-built mode: skip the planner, use the caller's queue directly.
@@ -533,55 +508,24 @@ export function createSessionStore<TItem = Country>({
           return { item, conceptId, concept };
         });
 
-        // New cards beyond today's global budget are practice only (the smallest
-        // honest option: the learner still sees every item, FSRS only what fits).
-        const globalToday = await readNewCardsToday(GLOBAL_NEW_BUCKET);
-        if (gen !== startGen) return;
-        let globalBudget = Math.max(0, MAX_NEW_GLOBAL_PER_DAY - globalToday);
-        for (const p of pairs) {
-          if (normalizeState(p.concept.fsrs_state) !== State.New) continue;
-          if (globalBudget > 0) globalBudget--;
-          else practiceOnlyIds.add(p.conceptId);
-        }
       } else {
         // FSRS session planner: due and learning rows first, then new concepts
-        // up to the session size, within today's new-card limit.
+        // up to the session size (no daily new-card cap).
         const plannerOpts: PlannerOpts = { continent: opts?.continent, subMode: opts?.subMode };
         lastPlannerOpts = plannerOpts;
-        countsTowardNewCap = true;
         const allConcepts = await db().concept_progress.where("skill").equals(skill).toArray();
         if (gen !== startGen) return;
         const pool = filterPool(allConcepts, plannerOpts);
 
-        // Two budgets: per bucket (domain:skill:subMode, the one the seeds land in) and global.
-        const [newToday, globalToday] = await Promise.all([
-          readNewCardsToday(seedBucket(plannerOpts)),
-          readNewCardsToday(GLOBAL_NEW_BUCKET),
-        ]);
-        if (gen !== startGen) return;
-        const bucketLeft = Math.max(0, MAX_NEW_PER_DAY - newToday);
-        const globalLeft = Math.max(0, MAX_NEW_GLOBAL_PER_DAY - globalToday);
-        const newBudget = Math.min(bucketLeft, globalLeft);
-
         const planned = generateSessionQueue(pool, undefined, {
           sessionSize: questions,
-          maxNewPerSession: newBudget,
+          maxNewPerSession: questions,
         });
-        const plannedNew = planned.filter((c) => normalizeState(c.fsrs_state) === State.New).length;
-        const room = Math.min(questions - planned.length, newBudget - plannedNew);
-        pairs = buildPairs([...planned, ...newSeeds(pool, plannerOpts, room)], lookupItem);
-        info = {
-          hasSeen: pool.some(isSeen),
-          emptyReason:
-            globalLeft - plannedNew <= 0
-              ? "globalLimit"
-              : bucketLeft - plannedNew <= 0
-                ? "limit"
-                : "seenAll",
-        };
+        pairs = buildPairs([...planned, ...newSeeds(pool, plannerOpts, questions - planned.length)], lookupItem);
+        info = { hasSeen: pool.some(isSeen) };
       }
 
-      set({ ...readyState(pairs, info), countsTowardNewCap, practiceOnlyIds });
+      set(readyState(pairs, info));
     },
 
     async startPractice() {
@@ -616,7 +560,7 @@ export function createSessionStore<TItem = Country>({
 
       // Never write a grade to a concept other than the one shown.
       const matches = conceptMatchesItem(targetConcept, target);
-      const gradeable = matches && !s.practiceOnlyIds.has(targetConcept.conceptId);
+      const gradeable = matches;
       if (!matches) {
         const msg = `Session pair mismatch: item ${resolveId(target)} vs concept ${targetConcept.conceptId}`;
         if (import.meta.env.DEV) throw new Error(msg);
@@ -756,7 +700,6 @@ export function createSessionStore<TItem = Country>({
           direction: actualDirection,
         });
 
-        const wasNew = normalizeState(effectiveConcept.fsrs_state) === State.New;
         try {
           const currentCard = rowToCard(effectiveConcept);
           const { card: nextCard, log: fsrsLog } = processReview(
@@ -789,14 +732,6 @@ export function createSessionStore<TItem = Country>({
           basePairs[s.index] = { ...pair, concept: updatedProgressRow };
           Object.assign(updates, fromPairs(basePairs));
 
-          // First grade of a new concept in a planner session uses up one of today's new cards.
-          // The bucket comes from the graded concept's own id, so mixed-subMode seeds
-          // and Due Today rows count against their real domain:skill:subMode.
-          if (wasNew && s.countsTowardNewCap) {
-            const bucket = newCardBucket(effectiveConcept.conceptId);
-            incrementNewCardsToday(bucket, now).catch(console.error);
-          }
-          if (wasNew) incrementNewCardsToday(GLOBAL_NEW_BUCKET, now).catch(console.error);
         } catch (err) {
           // A bad row must not freeze the session: log it and let the UI advance.
           console.error("FSRS processing failed; answer not graded", err);

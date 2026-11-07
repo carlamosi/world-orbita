@@ -60,12 +60,6 @@ import { COUNTRIES } from "@/lib/countries";
 import type { SpainEntity } from "@/lib/spain/types";
 import { parseConceptId } from "@/lib/fsrs/concept";
 import { getRetrievability } from "@/lib/fsrs/adapter";
-import {
-  GLOBAL_NEW_BUCKET,
-  MAX_NEW_GLOBAL_PER_DAY,
-  MAX_NEW_PER_DAY,
-  newCardsKey,
-} from "@/features/engine/newCardLimit";
 
 const DAY = 86_400_000;
 function row(conceptId: string, entityId: string, dueOffsetDays: number): ConceptProgressRow {
@@ -279,9 +273,8 @@ function learningRow(conceptId: string, entityId: string, dueInMs: number): Conc
 }
 
 /** Today's counter key; the default bucket is Spain provinces location:find. */
-const todayKey = (bucket = "spain:location:find") => newCardsKey(bucket, Date.now());
 
-describe("new cards under a daily cap and empty state (FSRS-2)", () => {
+describe("new cards and empty state (FSRS-2)", () => {
   beforeEach(() => {
     rows.length = 0;
     recorded.length = 0;
@@ -308,32 +301,49 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
     expect(s.status).not.toBe("empty");
   });
 
-  it("new concepts only fill what today's cap leaves", async () => {
-    meta.set(todayKey(), String(MAX_NEW_PER_DAY - 3));
+  it("there is no daily new-card cap: after a full session of new cards, the next one is new cards again", async () => {
     const store = provinceStore();
-    await store.getState().start({ subMode: "find" });
-    expect(store.getState().queue).toHaveLength(3);
-  });
-
-  it("daily cap exhausted and nothing due: status is 'empty' and the queue is []", async () => {
-    meta.set(todayKey(), String(MAX_NEW_PER_DAY));
-    for (const p of SPAIN_PROVINCES.slice(0, 10)) {
-      rows.push(learningRow(findId(p.id), p.id, 10 * 60_000));
+    for (let round = 0; round < 3; round++) {
+      await store.getState().start({ subMode: "find" });
+      const n = store.getState().queue.length;
+      expect(n).toBe(10);
+      for (let i = 0; i < n; i++) {
+        store.getState().submit(true);
+        store.getState().next();
+      }
+      await flush();
+      // Persist this round as seen (Learning, not yet due) so the next start must seed new entities.
+      rows.push(...recorded.splice(0).map((r) => learningRow(r.conceptId, parseConceptId(r.conceptId).entityId, 10 * 60_000)));
     }
-
-    const store = provinceStore();
-    await store.getState().start({ subMode: "find" });
-    const s = store.getState();
-
-    expect(s.status).toBe("empty");
-    expect(s.emptyReason).toBe("limit");
-    expect(s.hasSeen).toBe(true);
-    expect(s.queue).toEqual([]);
-    expect(s.pairs).toEqual([]);
-    expect(s.loading).toBe(false);
   });
 
-  it("every entity seen, none due, budget left: empty with reason 'seenAll'", async () => {
+  it("a mixed capitals session seeds both directions, one slot per country, and skips other subModes", async () => {
+    const [a, b] = COUNTRIES;
+    // a: country→capital learned, so only capital→country is new. b: a locator row must not count.
+    rows.push({ ...row(`${a!.iso3}:capital:countryToCap`, a!.iso3, 5), skill: "capital" } as ConceptProgressRow);
+    rows.push({ ...row(`${b!.iso3}:capital:locator`, b!.iso3, 5), skill: "capital" } as ConceptProgressRow);
+    const store = createSessionStore({
+      mode: "capital",
+      skill: "capital",
+      mixedSubModes: ["countryToCap", "capToCountry"],
+    });
+    const dirs = new Set<string>();
+    for (let i = 0; i < 5; i++) {
+      await store.getState().start({ subMode: "mixed" });
+      const ids = store.getState().conceptQueue.map((c) => c!.conceptId);
+      expect(ids).toHaveLength(10);
+      expect(new Set(ids.map((id) => parseConceptId(id).entityId)).size).toBe(10);
+      for (const id of ids) {
+        const sm = parseConceptId(id).subMode!;
+        expect(["countryToCap", "capToCountry"]).toContain(sm);
+        dirs.add(sm);
+      }
+      expect(ids).not.toContain(`${a!.iso3}:capital:countryToCap`);
+    }
+    expect(dirs).toEqual(new Set(["countryToCap", "capToCountry"]));
+  });
+
+  it("every entity seen, none due: empty with reason 'seenAll'", async () => {
     for (const p of SPAIN_PROVINCES) rows.push(learningRow(findId(p.id), p.id, 10 * 60_000));
     const store = provinceStore();
     await store.getState().start({ subMode: "find" });
@@ -358,168 +368,7 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
     expect(entityIds(s.conceptQueue)).toEqual(s.queue.map((e) => e.id));
   });
 
-  it("grading a world location:find and a Spain find new card increments two different keys", async () => {
-    const world = createSessionStore({ mode: "find", skill: "location" });
-    await world.getState().start({ subMode: "find" });
-    expect(world.getState().conceptQueue[0]!.fsrs_state).toBe(State.New);
-    world.getState().submit(true);
-    await flush();
-
-    const spain = provinceStore();
-    await spain.getState().start({ subMode: "find" });
-    spain.getState().submit(true);
-    await flush();
-
-    expect(meta.get(todayKey("world:location:find"))).toBe("1");
-    expect(meta.get(todayKey("spain:location:find"))).toBe("1");
-  });
-
-  it("the cap used up for flag:flagToCountry does not block capital:countryToCap", async () => {
-    meta.set(todayKey("world:flag:flagToCountry"), String(MAX_NEW_PER_DAY));
-
-    const flags = createSessionStore({ mode: "flag", skill: "flag" });
-    await flags.getState().start({ subMode: "flagToCountry" });
-    expect(flags.getState().status).toBe("empty");
-    expect(flags.getState().emptyReason).toBe("limit");
-    expect(flags.getState().hasSeen).toBe(false);
-
-    const capitals = createSessionStore({ mode: "capital", skill: "capital" });
-    await capitals.getState().start({ subMode: "countryToCap" });
-    expect(capitals.getState().queue).toHaveLength(10);
-    expect(capitals.getState().status).toBe("active");
-    const ids = new Set(COUNTRIES.map((c) => c.iso3));
-    for (const e of capitals.getState().queue) expect(ids.has(e.iso3)).toBe(true);
-  });
-
-  it("grading a new concept increments today's counter once; grading a seen one does not", async () => {
-    const [p1] = SPAIN_PROVINCES;
-    rows.push(row(findId(p1!.id), p1!.id, -1)); // seen and due: planner puts it first
-
-    const store = provinceStore();
-    await store.getState().start({ subMode: "find" });
-    let s = store.getState();
-    expect(s.queue[0]!.id).toBe(p1!.id);
-
-    // Seen concept: no increment.
-    s.submit(true);
-    await flush();
-    expect(meta.get(todayKey())).toBeUndefined();
-
-    // New concept: one increment, even though the wrong answer re-queues it.
-    store.getState().next();
-    s = store.getState();
-    expect(s.conceptQueue[s.index]!.fsrs_state).toBe(State.New);
-    const newId = s.conceptQueue[s.index]!.conceptId;
-    s.submit(false);
-    await flush();
-    expect(meta.get(todayKey())).toBe("1");
-
-    // Answering the re-queued retry of the same concept does not count again.
-    const after = store.getState();
-    const retryIdx = after.conceptQueue.findIndex(
-      (c, i) => i > after.index && c!.conceptId === newId,
-    );
-    expect(retryIdx).toBeGreaterThan(0);
-    store.setState({ index: retryIdx, answerState: "idle" });
-    store.getState().submit(true);
-    await flush();
-    expect(meta.get(todayKey())).toBe("1");
-  });
-
-  it("a grading failure does not spend a new-card slot", async () => {
-    const [p1] = SPAIN_PROVINCES;
-    rows.push(row(findId(p1!.id), p1!.id, -1));
-    const store = provinceStore();
-    await store.getState().start({ subMode: "find" });
-    store.getState().submit(true);
-    store.getState().next();
-    expect(store.getState().conceptQueue[store.getState().index]!.fsrs_state).toBe(State.New);
-    failReview = true;
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      store.getState().submit(true);
-      await flush();
-    } finally {
-      failReview = false;
-    }
-    expect(meta.get(todayKey())).toBeUndefined();
-    expect(meta.get(newCardsKey(GLOBAL_NEW_BUCKET, Date.now()))).toBeUndefined();
-  });
-
-  describe("only planner sessions spend the new-card cap", () => {
-    const ccaaStore = () =>
-      createSessionStore<SpainEntity>({
-        mode: "find",
-        skill: "location",
-        domain: "spain",
-        dataset: SPAIN_CCAA,
-        getId: (e) => e.id,
-      });
-
-    it("grading New cards in a Complete session does not increment the counter", async () => {
-      const store = ccaaStore();
-      await store.getState().start({ items: [...SPAIN_CCAA], subMode: "find" });
-      expect(store.getState().countsTowardNewCap).toBe(false);
-      expect(store.getState().conceptQueue[0]!.fsrs_state).toBe(State.New);
-      store.getState().submit(true);
-      await flush();
-      expect(recorded).toHaveLength(1);
-      expect(meta.get(todayKey())).toBeUndefined();
-    });
-
-    it("grading a New card in a planner session increments the counter", async () => {
-      const store = provinceStore();
-      await store.getState().start({ subMode: "find" });
-      expect(store.getState().countsTowardNewCap).toBe(true);
-      store.getState().submit(true);
-      await flush();
-      expect(meta.get(todayKey())).toBe("1");
-    });
-
-    it("grading in a Review (conceptRows) session does not increment the counter", async () => {
-      const store = provinceStore();
-      const [p1] = SPAIN_PROVINCES;
-      const newRow = { ...row(findId(p1!.id), p1!.id, -1), fsrs_state: State.New } as unknown as ConceptProgressRow;
-      await store.getState().start({ conceptRows: [newRow] });
-      expect(store.getState().countsTowardNewCap).toBe(false);
-      store.getState().submit(true);
-      await flush();
-      expect(meta.get(todayKey())).toBeUndefined();
-    });
-
-    it("grading in startPractice() does not increment the counter, and the flag resets after a planner start", async () => {
-      const [p1] = SPAIN_PROVINCES;
-      rows.push(row(findId(p1!.id), p1!.id, 3));
-      const store = provinceStore();
-      await store.getState().start({ subMode: "find" });
-      expect(store.getState().countsTowardNewCap).toBe(true);
-      await store.getState().startPractice();
-      expect(store.getState().countsTowardNewCap).toBe(false);
-      store.getState().submit(true);
-      await flush();
-      expect(meta.get(todayKey())).toBeUndefined();
-    });
-
-    it("a graded Complete CCAA session still leaves new province cards on offer", async () => {
-      const ccaa = ccaaStore();
-      await ccaa.getState().start({ items: [...SPAIN_CCAA], subMode: "find" });
-      for (let i = 0; i < SPAIN_CCAA.length; i++) {
-        ccaa.getState().submit(true);
-        await flush();
-        ccaa.getState().next();
-      }
-      expect(meta.get(todayKey())).toBeUndefined();
-
-      const provinces = provinceStore();
-      await provinces.getState().start({ subMode: "find" });
-      expect(provinces.getState().status).toBe("active");
-      expect(provinces.getState().queue.length).toBeGreaterThan(0);
-      expect(provinces.getState().conceptQueue[0]!.fsrs_state).toBe(State.New);
-    });
-  });
-
   it("startPractice() returns only seen concepts, lowest retrievability first", async () => {
-    meta.set(todayKey(), String(MAX_NEW_PER_DAY));
     const now = Date.now();
     // Review rows not yet due, with different stability: lower stability = lower R.
     const stab = [20, 2, 50, 8];
@@ -539,7 +388,6 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
 
     const store = provinceStore();
     await store.getState().start({ subMode: "find" });
-    expect(store.getState().status).toBe("empty");
 
     await store.getState().startPractice();
     const s = store.getState();
@@ -557,17 +405,6 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
     s.submit(true);
     await flush();
     expect(recorded[0]?.conceptId).toBe(findId(expected[0]!));
-  });
-
-  it("the counter key uses the device's local day", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-11-05T23:30:00Z"));
-    expect(newCardsKey("world:location:find", Date.now(), "Europe/Madrid")).toBe(
-      "new_cards_2026-11-06_world:location:find",
-    );
-    expect(newCardsKey("world:location:find", Date.now(), "UTC")).toBe(
-      "new_cards_2026-11-05_world:location:find",
-    );
   });
 
   describe("honest grades and guards (Task 17)", () => {
@@ -594,7 +431,6 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
     });
 
     it("Practice anyway skips Learning cards that are not due yet", async () => {
-      meta.set(todayKey(), String(MAX_NEW_PER_DAY));
       const now = Date.now();
       const [p1, p2] = SPAIN_PROVINCES;
       rows.push({
@@ -672,7 +508,6 @@ describe("new cards under a daily cap and empty state (FSRS-2)", () => {
 });
 
 describe("honest learning load and progress (Task 22)", () => {
-  const globalKey = () => newCardsKey(GLOBAL_NEW_BUCKET, Date.now());
   const ccaaStore = () =>
     createSessionStore<SpainEntity>({
       mode: "find",
@@ -687,58 +522,6 @@ describe("honest learning load and progress (Task 22)", () => {
     recorded.length = 0;
     gates.length = 0;
     meta.clear();
-  });
-
-  it("the global cap of 20 a day limits new cards across buckets", async () => {
-    expect(MAX_NEW_GLOBAL_PER_DAY).toBe(20);
-    meta.set(globalKey(), String(MAX_NEW_GLOBAL_PER_DAY - 2));
-    const store = provinceStore();
-    await store.getState().start({ subMode: "find" });
-    expect(store.getState().queue).toHaveLength(2);
-  });
-
-  it("global cap used up: empty with reason 'globalLimit'", async () => {
-    meta.set(globalKey(), String(MAX_NEW_GLOBAL_PER_DAY));
-    const store = provinceStore();
-    await store.getState().start({ subMode: "find" });
-    expect(store.getState().status).toBe("empty");
-    expect(store.getState().emptyReason).toBe("globalLimit");
-  });
-
-  it("the per-bucket cap of 10 still applies with global budget left", async () => {
-    meta.set(todayKey(), String(MAX_NEW_PER_DAY));
-    const store = provinceStore();
-    await store.getState().start({ subMode: "find" });
-    expect(store.getState().status).toBe("empty");
-    expect(store.getState().emptyReason).toBe("limit");
-  });
-
-  it("grading a new planner card spends both the bucket and the global budget", async () => {
-    const store = provinceStore();
-    await store.getState().start({ subMode: "find" });
-    store.getState().submit(true);
-    await flush();
-    expect(meta.get(todayKey())).toBe("1");
-    expect(meta.get(globalKey())).toBe("1");
-  });
-
-  it("Complete grades new entities only within the global budget, learned ones always", async () => {
-    meta.set(globalKey(), String(MAX_NEW_GLOBAL_PER_DAY - 2));
-    const learned = SPAIN_CCAA[0]!;
-    rows.push(row(findId(learned.id), learned.id, 3));
-    const store = ccaaStore();
-    await store.getState().start({ items: [...SPAIN_CCAA], subMode: "find" });
-    const n = store.getState().queue.length;
-    for (let i = 0; i < n; i++) {
-      store.getState().submit(true);
-      store.getState().next();
-    }
-    await flush();
-    const ids = recorded.map((r) => r.conceptId);
-    expect(ids).toContain(findId(learned.id));
-    expect(ids.filter((id) => id !== findId(learned.id))).toHaveLength(2);
-    expect(meta.get(globalKey())).toBe(String(MAX_NEW_GLOBAL_PER_DAY));
-    expect(store.getState().practiceOnlyIds.size).toBe(SPAIN_CCAA.length - 3);
   });
 
   it("new seeds come easy before hard, entities without difficulty last, stable", async () => {

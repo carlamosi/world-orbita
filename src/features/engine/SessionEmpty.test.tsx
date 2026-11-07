@@ -28,14 +28,9 @@ describe("SessionEmpty", () => {
     return { text: el.textContent ?? "", button };
   }
 
-  it("limit reached with seen cards: limit copy and 'Practice anyway' calls onPractice", () => {
+  it("'Practice anyway' calls onPractice", () => {
     const onPractice = vi.fn();
-    const { text, button } = renderEmpty({ reason: "limit", hasSeen: true, onPractice });
-
-    expect(text).toContain("All caught up");
-    expect(text).toContain("Nothing is due and you've met today's new-card limit.");
-    expect(text).not.toContain("—");
-    expect(button).toBeDefined();
+    const { button } = renderEmpty({ reason: "seenAll", hasSeen: true, onPractice });
     act(() => button!.click());
     expect(onPractice).toHaveBeenCalledTimes(1);
   });
@@ -50,9 +45,10 @@ describe("SessionEmpty", () => {
   });
 
   it("hides 'Practice anyway' when there is nothing seen to practise", () => {
-    const { text, button } = renderEmpty({ reason: "limit", hasSeen: false, onPractice: vi.fn() });
+    const { text, button } = renderEmpty({ reason: "seenAll", hasSeen: false, onPractice: vi.fn() });
 
-    expect(text).toContain("Come back tomorrow for new cards.");
+    expect(text).toContain("Nothing to practise here yet.");
+    expect(text).not.toContain("limit");
     expect(text).not.toContain("—");
     expect(button).toBeUndefined();
   });
