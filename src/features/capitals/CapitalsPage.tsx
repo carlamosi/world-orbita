@@ -72,6 +72,7 @@ export default function CapitalsPage() {
     answerState: s.answerState,
     finished,
     next: () => s.next(),
+    wrongDelayMs: s.missDelayMs,
   });
 
   const onSkip = useCallback(() => {
@@ -139,7 +140,7 @@ export default function CapitalsPage() {
                   if (!isCorrect) {
                     setLastWrongIso3(iso3);
                   }
-                  s.submit(isCorrect, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name });
+                  s.submit(isCorrect, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name, chosenId: iso3 });
                 }
               }}
               disableHoverLabel

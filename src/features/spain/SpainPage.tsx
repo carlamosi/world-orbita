@@ -274,7 +274,7 @@ export default function SpainPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skill, level, sessionMode, difficulty]);
 
-  useAutoAdvance({ answerState: s.answerState, finished, next: s.next });
+  useAutoAdvance({ answerState: s.answerState, finished, next: s.next, wrongDelayMs: s.missDelayMs });
 
   const onSkip = useCallback(() => {
     if (!finished && current && s.answerState === "idle") s.reveal();
@@ -302,7 +302,7 @@ export default function SpainPage() {
       } else {
         setLastWrongId(null);
       }
-      s.submit(isCorrect, { chosen: f.properties?.name });
+      s.submit(isCorrect, { chosen: f.properties?.name, chosenId: clickedId });
     },
     [skill, current, s],
   );
@@ -498,7 +498,7 @@ export default function SpainPage() {
                             type="button"
                             onClick={() => {
                               setSelectedFlagOptionId(o.id);
-                              s.submit(o.id === current.id, { chosen: o.name });
+                              s.submit(o.id === current.id, { chosen: o.name, chosenId: o.id });
                             }}
                             disabled={s.answerState !== "idle"}
                             animate={
@@ -657,7 +657,7 @@ export default function SpainPage() {
                       labelKey="name"
                       showFlags={false}
                       disabled={s.answerState !== "idle"}
-                      onPick={(id) => s.submit(id === current.id, { chosen: easyOptions.find((o) => o.id === id)?.name })}
+                      onPick={(id) => s.submit(id === current.id, { chosen: easyOptions.find((o) => o.id === id)?.name, chosenId: id })}
                     />
                   ) : (
                     <HardInput

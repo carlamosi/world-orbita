@@ -337,7 +337,7 @@ export default function ReviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continent]);
 
-  useAutoAdvance({ answerState: s.answerState, finished, next: s.next });
+  useAutoAdvance({ answerState: s.answerState, finished, next: s.next, wrongDelayMs: s.missDelayMs });
 
   const onSkip = useCallback(() => {
     if (!finished && current && s.answerState === "idle") s.reveal();

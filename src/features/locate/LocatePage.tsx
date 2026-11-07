@@ -3,7 +3,8 @@ import { Check, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { GlobeFallback } from "@/features/globe/GlobeFallback";
 import { COUNTRIES, COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
-import { createSessionStore } from "@/features/engine/useSession";
+import { createSessionStore, recognitionThenRecall } from "@/features/engine/useSession";
+import { parseConceptId } from "@/lib/fsrs/concept";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
@@ -28,7 +29,13 @@ import { getPref, setPref } from "@/lib/db/repo";
 const Globe3D = lazy(() => import("@/features/globe/Globe3D"));
 
 const useFindSession = createSessionStore({ mode: "find", skill: "location" });
-const useNameSession = createSessionStore({ mode: "name", skill: "name" });
+// Easy grows from recognition to recall: a country chosen well for a week is then asked typed.
+const useNameSession = createSessionStore({
+  mode: "name",
+  skill: "name",
+  mixedSubModes: ["name", "nameType"],
+  mixedPick: recognitionThenRecall,
+});
 
 type SubMode = "find" | "name";
 const SUB_MODE_OPTIONS = [
@@ -70,6 +77,8 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
   const s = sub === "find" ? findSession : nameSession;
 
   const current = s.queue[s.index] ?? null;
+  // A recall card (typed) can come up inside an Easy session once recognition is stable.
+  const askTyped = parseConceptId(s.pairs[s.index]?.conceptId ?? "").subMode === "nameType";
   const finished = s.endedAt !== null;
   const empty = !finished && s.status === "empty";
 
@@ -92,7 +101,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
         void findSession.start({ continent: c === "All" ? undefined : c, subMode: sMode });
       } else {
         // Choosing among 4 is recognition, typing is recall: each is its own card.
-        const subMode = diff === "hard" ? "nameType" : "name";
+        const subMode = diff === "hard" ? "nameType" : "mixed";
         void nameSession.start({ continent: c === "All" ? undefined : c, subMode });
       }
     },
@@ -108,6 +117,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
     answerState: s.answerState,
     finished,
     next: s.next,
+    wrongDelayMs: s.missDelayMs,
   });
 
   const onSkip = useCallback(() => {
@@ -211,7 +221,7 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
                       if (!isCorrect) {
                         setLastWrongIso3(iso3);
                       }
-                      s.submit(isCorrect, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name });
+                      s.submit(isCorrect, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name, chosenId: iso3 });
                     }
                   }
                 : undefined
@@ -252,12 +262,12 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
           <div className="absolute bottom-8 inset-x-0 z-30 px-4">
             {/* The feedback bar takes the controls' place once answered. */}
             {s.answerState === "idle" && sub === "name" ? (
-              difficulty === "easy" ? (
+              difficulty === "easy" && !askTyped ? (
                 <EasyOptions
                   options={nameOptions}
                   targetIso3={current.iso3}
                   disabled={s.answerState !== "idle"}
-                  onPick={(iso3) => s.submit(iso3 === current.iso3, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name })}
+                  onPick={(iso3) => s.submit(iso3 === current.iso3, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name, chosenId: iso3 })}
                 />
               ) : (
                 <HardInput

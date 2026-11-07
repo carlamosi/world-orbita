@@ -12,14 +12,37 @@ export const graded: { conceptId: string; ok: boolean; opts?: { retrievalMode?: 
  */
 export const cardFormatMocks = {
   useSession: () => ({
-    createSessionStore: ({ skill, domain = "world", dataset }: { skill: string; domain?: string; dataset?: { id?: string; iso3?: string }[] }) => {
+    recognitionThenRecall: () => null,
+    createSessionStore: ({
+      skill,
+      domain = "world",
+      dataset,
+      mixedSubModes,
+    }: {
+      skill: string;
+      domain?: string;
+      dataset?: { id?: string; iso3?: string }[];
+      mixedSubModes?: string[];
+    }) => {
       const item = ((dataset ?? COUNTRIES) as { id?: string; iso3?: string }[])[0]!;
       let subMode: string | undefined;
+      // A new entity in a mixed session is seeded with the first subMode, as the engine's pick rules do.
+      const conceptId = () =>
+        formatConceptId({
+          domain: domain as never,
+          entityId: item.id ?? item.iso3!,
+          skill,
+          subMode: (subMode === "mixed" ? mixedSubModes?.[0] : subMode) || "default",
+        });
       const state = {
+        get pairs() {
+          return [{ item, conceptId: conceptId(), concept: {} }];
+        },
         queue: [item],
         conceptQueue: [],
         index: 0,
         answerState: "idle",
+        missDelayMs: 2500,
         endedAt: null,
         status: "ready",
         score: 0,
@@ -33,12 +56,7 @@ export const cardFormatMocks = {
         startPractice: async () => {},
         submit: (ok: boolean, opts?: { retrievalMode?: string; softCorrect?: boolean }) => {
           graded.push({
-            conceptId: formatConceptId({
-              domain: domain as never,
-              entityId: item.id ?? item.iso3!,
-              skill,
-              subMode: subMode || "default",
-            }),
+            conceptId: conceptId(),
             ok,
             opts,
           });

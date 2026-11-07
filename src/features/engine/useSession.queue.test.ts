@@ -10,6 +10,8 @@ const recorded: { conceptId: string; correct: boolean }[] = [];
 const gates: Promise<void>[] = [];
 // In-memory sync_meta (key/value), as in orbita-db.ts.
 const meta = new Map<string, string>();
+// Recent first tries, newest first, as question_history returns them.
+const history: { correct: boolean }[] = [];
 
 vi.mock("@/lib/db/orbita-db", () => ({
   db: () => ({
@@ -19,6 +21,9 @@ vi.mock("@/lib/db/orbita-db", () => ({
         meta.set(r.key, r.value);
         return r.key;
       },
+    },
+    question_history: {
+      orderBy: () => ({ reverse: () => ({ limit: (n: number) => ({ toArray: async () => history.slice(0, n) }) }) }),
     },
     concept_progress: {
       where: (field: string) => ({
@@ -54,7 +59,7 @@ vi.mock("@/lib/fsrs/adapter", async (orig) => {
   };
 });
 
-import { buildPairs, createSessionStore } from "@/features/engine/useSession";
+import { buildPairs, createSessionStore, recognitionThenRecall } from "@/features/engine/useSession";
 import { SPAIN_CCAA, SPAIN_PROVINCES } from "@/lib/spain";
 import { COUNTRIES } from "@/lib/countries";
 import type { SpainEntity } from "@/lib/spain/types";
@@ -341,6 +346,109 @@ describe("new cards and empty state (FSRS-2)", () => {
       expect(ids).not.toContain(`${a!.iso3}:capital:countryToCap`);
     }
     expect(dirs).toEqual(new Set(["countryToCap", "capToCountry"]));
+  });
+
+  it("a low recent success rate brings fewer new cards; a high one a full session", async () => {
+    history.length = 0;
+    history.push(...Array.from({ length: 30 }, (_, i) => ({ correct: i % 2 === 0 })));
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    expect(store.getState().queue).toHaveLength(3);
+
+    history.length = 0;
+    history.push(...Array.from({ length: 30 }, () => ({ correct: true })));
+    await store.getState().start({ subMode: "find" });
+    expect(store.getState().queue).toHaveLength(10);
+    history.length = 0;
+  });
+
+  it("a fast wrong pick stays on screen longer than a skip", async () => {
+    const store = provinceStore();
+    await store.getState().start({ subMode: "find" });
+    store.getState().submit(false, { chosen: "Somewhere else" });
+    expect(store.getState().missDelayMs).toBe(3500);
+    store.getState().next();
+    store.getState().reveal();
+    expect(store.getState().missDelayMs).toBe(2500);
+  });
+
+  describe("contrast question after a confusion", () => {
+    it("picking another real entity queues it two cards later, keeping its saved progress", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      const s0 = store.getState();
+      const target = s0.queue[0]!;
+      // An entity not in this session, with saved progress that must not be reset.
+      const inSession = new Set(s0.queue.map((e) => e.id));
+      const picked = SPAIN_PROVINCES.find((p) => !inSession.has(p.id))!;
+      const saved = row(findId(picked.id), picked.id, 5);
+      rows.push(saved);
+      await store.getState().start({ subMode: "find" });
+      const s1 = store.getState();
+      expect(s1.queue[0]!.id).toBe(target.id);
+      const cards = s1.cardCount;
+
+      s1.submit(false, { chosen: picked.name, chosenId: picked.id });
+      const s2 = store.getState();
+      expect(s2.queue[3]!.id).toBe(picked.id);
+      expect(s2.conceptQueue[3]!.conceptId).toBe(findId(picked.id));
+      expect(s2.conceptQueue[3]!.fsrs_stability).toBe(saved.fsrs_stability);
+      expect(s2.cardCount).toBe(cards + 1);
+    });
+
+    it("a right answer or a skip adds no contrast", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      const n = store.getState().queue.length;
+      const other = SPAIN_PROVINCES.find((p) => p.id !== store.getState().queue[0]!.id)!;
+      store.getState().submit(true, { chosenId: other.id });
+      expect(store.getState().queue).toHaveLength(n);
+      store.getState().next();
+      store.getState().reveal();
+      expect(store.getState().queue).toHaveLength(n + 1); // only the retry of the miss
+    });
+
+    it("never in a Due Today session (its rows are not all loaded)", async () => {
+      const [p1, p2] = SPAIN_PROVINCES;
+      const store = provinceStore();
+      await store.getState().start({ conceptRows: [row(findId(p1!.id), p1!.id, -1)] });
+      store.getState().submit(false, { chosenId: p2!.id });
+      expect(store.getState().queue.map((e) => e.id)).not.toContain(p2!.id);
+    });
+
+    it("at most three per session", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      const inSession = new Set(store.getState().queue.map((e) => e.id));
+      const outsiders = SPAIN_PROVINCES.filter((p) => !inSession.has(p.id)).slice(0, 5);
+      for (const o of outsiders) {
+        store.getState().submit(false, { chosenId: o.id });
+        store.getState().next();
+      }
+      // Distinct countries: a missed contrast question gets its own retry slot.
+      const added = new Set(
+        store.getState().queue.filter((e) => outsiders.some((o) => o.id === e.id)).map((e) => e.id),
+      );
+      expect(added.size).toBe(3);
+    });
+  });
+
+  it("a mixed session with a pick rule asks recall once recognition is stable", async () => {
+    const [a, b, c] = COUNTRIES;
+    // a: recognition stable for 30 days, not due. b: recognition still young. c: never seen.
+    rows.push({ ...row(`${a!.iso3}:name:name`, a!.iso3, 5), skill: "name", fsrs_stability: 30 } as ConceptProgressRow);
+    rows.push({ ...row(`${b!.iso3}:name:name`, b!.iso3, 5), skill: "name", fsrs_stability: 2 } as ConceptProgressRow);
+    const store = createSessionStore({
+      mode: "name",
+      skill: "name",
+      dataset: [a!, b!, c!],
+      mixedSubModes: ["name", "nameType"],
+      mixedPick: recognitionThenRecall,
+    });
+    await store.getState().start({ subMode: "mixed" });
+    const ids = store.getState().conceptQueue.map((x) => x!.conceptId).sort();
+    // a moves on to recall; b waits until its recognition is due; c starts as recognition.
+    expect(ids).toEqual([`${a!.iso3}:name:nameType`, `${c!.iso3}:name:name`].sort());
   });
 
   it("every entity seen, none due: empty with reason 'seenAll'", async () => {
