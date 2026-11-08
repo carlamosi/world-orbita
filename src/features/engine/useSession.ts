@@ -210,24 +210,24 @@ export interface CreateOpts<TItem = Country> {
   mixedPick?: (rows: ReadonlyMap<string, ConceptProgressRow>) => string | null;
 }
 
-/** Days of recognition stability before an entity is also asked as recall. */
-export const RECALL_AFTER_DAYS = 7;
-
 /**
- * Recognition first, then recall (generation effect): a new entity starts as
- * choosing among options ("name"); once that card is stable for a week, it is
- * also asked typed ("nameType"). In between, nothing is seeded: the planner
- * brings the recognition card back when it is due.
+ * Recognition first, then recall (generation effect). A new entity starts as
+ * choosing among options; once its recognition card has graduated its learning
+ * steps (two right answers in a row, minutes apart, never days), it is also asked
+ * typed. In between nothing is seeded: the planner brings the recognition card
+ * back when its next step is due.
  */
-export function recognitionThenRecall(rows: ReadonlyMap<string, ConceptProgressRow>): string | null {
-  const recognition = rows.get("name");
-  if (!recognition) return "name";
-  if (rows.has("nameType")) return null;
-  const stable =
-    normalizeState(recognition.fsrs_state) === State.Review &&
-    (recognition.fsrs_stability ?? 0) >= RECALL_AFTER_DAYS;
-  return stable ? "nameType" : null;
+export function promoteToRecall(recognition: string, recall: string) {
+  return (rows: ReadonlyMap<string, ConceptProgressRow>): string | null => {
+    const rec = rows.get(recognition);
+    if (!rec) return recognition;
+    if (rows.has(recall)) return null;
+    return normalizeState(rec.fsrs_state) === State.Review ? recall : null;
+  };
 }
+
+/** Locate Name: choose among 4, then type. */
+export const recognitionThenRecall = promoteToRecall("name", "nameType");
 
 /**
  * Shared turn-based session engine for Find / Name / Flags / Capitals and
@@ -901,11 +901,11 @@ export function createSessionStore<TItem = Country>({
             subMode: parsed.subMode,
           });
           const base = updates.pairs ?? s.pairs;
-          const comingUp = base.slice(s.index + 1).some((p) => p.conceptId === contrastId);
-          if (!comingUp) {
-            // Latest copy first: this session may already have graded it.
-            const seenHere = [...base].reverse().find((p) => p.conceptId === contrastId)?.concept;
-            const concept = seenHere ?? knownRows.get(contrastId) ?? newConceptRow(contrastId, chosenItem);
+          // Only an entity this session has not asked: one already asked (or coming up)
+          // was graded or will be, and a second slot would count it twice.
+          const inSession = base.some((p) => p.conceptId === contrastId);
+          if (!inSession) {
+            const concept = knownRows.get(contrastId) ?? newConceptRow(contrastId, chosenItem);
             const newPairs = [...base];
             newPairs.splice(Math.min(s.index + 1 + CONTRAST_OFFSET, newPairs.length), 0, {
               item: chosenItem,
@@ -913,7 +913,7 @@ export function createSessionStore<TItem = Country>({
               concept,
             });
             Object.assign(updates, fromPairs(newPairs));
-            if (!seenHere) updates.cardCount = (updates.cardCount ?? s.cardCount) + 1;
+            updates.cardCount = (updates.cardCount ?? s.cardCount) + 1;
             contrastsThisSession++;
           }
         }
