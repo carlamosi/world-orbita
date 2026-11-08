@@ -25,6 +25,11 @@ describe("flagQuestionLevel", () => {
     expect(r.lookalikes).toBe(false);
   });
 
+  it("an options card whose typed sibling was answered: typing, never a step back", () => {
+    const r = flagQuestionLevel("ALB:flag:flagToCountry", row(State.Learning, { fsrs_learning_steps: 1 }), false, true);
+    expect(r).toEqual({ showOptions: false, lookalikes: false, scaffold: false });
+  });
+
   it("a typed card: typing", () => {
     expect(flagQuestionLevel("TCD:flag:flagToType", row(State.Review), false)).toEqual({
       showOptions: false,

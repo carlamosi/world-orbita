@@ -16,6 +16,7 @@ import { recordConceptAttempt } from "@/lib/db/progressRepo";
 import { db, type ConceptProgressRow, type GameMode, type Skill } from "@/lib/db/orbita-db";
 import { recordSessionEnd } from "@/lib/db/repo";
 import { adaptiveNewLimit, missFeedbackMs, readRecentFirstTries } from "./learningLoad";
+import { learnedRecallSiblings } from "@/lib/fsrs/recallSibling";
 import { playAnswerSound } from "@/lib/audio";
 import { State, ConvertStepUnitToMinutes } from "ts-fsrs";
 import { formatConceptId, parseConceptId } from "@/lib/fsrs/concept";
@@ -130,6 +131,8 @@ export interface SessionState<TItem = Country> {
   chosen: string | null;
   /** How long the current miss stays on screen (longer after a fast, confident miss). */
   missDelayMs: number;
+  /** Options cards whose typed sibling was already answered: pages ask them typed. */
+  typedRecognition: Set<string>;
   startedAt: number;
   endedAt: number | null;
   loading: boolean;
@@ -519,6 +522,7 @@ export function createSessionStore<TItem = Country>({
     answerState: "idle",
     chosen: null,
     missDelayMs: 2500,
+    typedRecognition: new Set(),
     startedAt: 0,
     endedAt: null,
     loading: false,
@@ -617,7 +621,7 @@ export function createSessionStore<TItem = Country>({
         info = { hasSeen: pool.some(isSeen) };
       }
 
-      set(readyState(pairs, info));
+      set({ ...readyState(pairs, info), typedRecognition: knownRows ? learnedRecallSiblings([...knownRows.values()]) : new Set() });
     },
 
     async startPractice() {
@@ -640,7 +644,7 @@ export function createSessionStore<TItem = Country>({
         .slice(0, questions)
         .map((x) => x.c);
       const pairs = buildPairs(seen, lookupItem);
-      set(readyState(pairs, { hasSeen: pairs.length > 0 }));
+      set({ ...readyState(pairs, { hasSeen: pairs.length > 0 }), typedRecognition: learnedRecallSiblings(allConcepts) });
     },
 
     submit(isCorrect, submitOpts) {

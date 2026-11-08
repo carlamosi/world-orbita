@@ -78,7 +78,10 @@ export default function LocatePage({ initialSub }: { initialSub?: SubMode }) {
 
   const current = s.queue[s.index] ?? null;
   // A recall card (typed) can come up inside an Easy session once recognition is stable.
-  const askTyped = parseConceptId(s.pairs[s.index]?.conceptId ?? "").subMode === "nameType";
+  // An options card whose typed sibling was answered is typed too: never a step back.
+  const askTyped =
+    parseConceptId(s.pairs[s.index]?.conceptId ?? "").subMode === "nameType" ||
+    s.typedRecognition.has(s.pairs[s.index]?.conceptId ?? "");
   const finished = s.endedAt !== null;
   const empty = !finished && s.status === "empty";
 
