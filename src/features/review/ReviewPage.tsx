@@ -25,6 +25,7 @@ import { FeedbackBar } from "@/features/engine/FeedbackBar";
 import { HardInput } from "@/features/engine/HardInput";
 import { FlagImage } from "@/components/ui/FlagImage";
 import { db, type ConceptProgressRow, ALL_SKILLS } from "@/lib/db/orbita-db";
+import { learnedRecallSiblings } from "@/lib/fsrs/recallSibling";
 import { generateDueTodayQueue } from "@/lib/fsrs/planner";
 import { spring, fadeUp } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -244,6 +245,8 @@ export default function ReviewPage() {
   const [sessionMode, setSessionMode] = useState<SessionLengthMode>("quick");
   const [spainFeatures, setSpainFeatures] = useState<SpainFeatureCollection | null>(null);
   const [provinceFeatures, setProvinceFeatures] = useState<SpainFeatureCollection | null>(null);
+  // Options cards whose typed sibling was already answered: asked typed, never a step back.
+  const [typedRecognition, setTypedRecognition] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     void loadSpainCCAAFeatures().then(setSpainFeatures);
@@ -289,6 +292,7 @@ export default function ReviewPage() {
       const rows = await db().concept_progress.where("skill").equals(skill).toArray();
       allRows.push(...rows);
     }
+    setTypedRecognition(learnedRecallSiblings(allRows));
 
     const filteredRows = continent === "All" 
       ? allRows 
@@ -364,7 +368,11 @@ export default function ReviewPage() {
   // The Name card is learned from the highlighted map, never from a flag.
   const isMapName = skill === "name";
   // Cards learned by typing are reviewed by typing; Capitals is typing only.
-  const isTyped = skill === "capital" || subMode === "flagToType" || subMode === "nameType";
+  const isTyped =
+    skill === "capital" ||
+    subMode === "flagToType" ||
+    subMode === "nameType" ||
+    (!!currentConcept && typedRecognition.has(currentConcept.conceptId));
 
   // Generate 4 MC options
   const mcOptions: ReviewEntity[] = useMemo(() => {
@@ -522,7 +530,7 @@ export default function ReviewPage() {
 
           <div>
             <h1 className="font-display text-3xl font-semibold text-white tracking-tight">
-              All clear!
+              All clear
             </h1>
             <p className="mt-2 text-white/50 text-sm leading-relaxed">
               No cards are due right now. Your memory is in great shape — come back later when cards need refreshing.

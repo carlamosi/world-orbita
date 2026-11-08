@@ -545,6 +545,22 @@ describe("new cards and empty state (FSRS-2)", () => {
     });
   });
 
+  it("marks options cards whose typed sibling was answered, so pages ask them typed", async () => {
+    const [a, b] = COUNTRIES;
+    rows.push({ ...row(`${a!.iso3}:flag:flagToCountry`, a!.iso3, -1), skill: "flag" } as ConceptProgressRow);
+    rows.push({ ...row(`${a!.iso3}:flag:flagToType`, a!.iso3, 3), skill: "flag" } as ConceptProgressRow);
+    rows.push({ ...row(`${b!.iso3}:flag:flagToCountry`, b!.iso3, -1), skill: "flag" } as ConceptProgressRow);
+    const store = createSessionStore({
+      mode: "flag",
+      skill: "flag",
+      dataset: [a!, b!],
+      mixedSubModes: ["flagToCountry", "flagToType"],
+      mixedPick: () => null,
+    });
+    await store.getState().start({ subMode: "mixed" });
+    expect([...store.getState().typedRecognition]).toEqual([`${a!.iso3}:flag:flagToCountry`]);
+  });
+
   it("every entity seen, none due: empty with reason 'seenAll'", async () => {
     for (const p of SPAIN_PROVINCES) rows.push(learningRow(findId(p.id), p.id, 10 * 60_000));
     const store = provinceStore();

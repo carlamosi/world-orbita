@@ -72,7 +72,12 @@ export default function FlagsPage() {
   const pair = s.pairs[s.index];
   const { showOptions, lookalikes: lookalikeLevel, scaffold } = useMemo(
     () =>
-      flagQuestionLevel(pair?.conceptId, pair?.concept, !!pair && s.inSessionRetries.has(pair.conceptId)),
+      flagQuestionLevel(
+        pair?.conceptId,
+        pair?.concept,
+        !!pair && s.inSessionRetries.has(pair.conceptId),
+        !!pair && s.typedRecognition.has(pair.conceptId),
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [s.startedAt, s.index, pair?.conceptId],
   );

@@ -121,7 +121,7 @@ describe("Review page when every row of the batch fails lookup", () => {
         await new Promise((r) => setTimeout(r, 10));
       });
     }
-    expect(host.textContent).toContain("All clear!");
+    expect(host.textContent).toContain("All clear");
     act(() => root.unmount());
     host.remove();
   });
@@ -212,6 +212,49 @@ describe("Review asks each card in its own format", () => {
       | { mode: string; grade: number; conceptId: string }
       | undefined;
     expect(attempt).toMatchObject({ conceptId: "FRA:capital:countryToCap", mode: "hard", grade: 1 });
+    r.cleanup();
+  });
+});
+
+describe("Review never steps back to options once a card was answered typed", () => {
+  it("a due options card whose typed sibling was answered is asked typed, and graded hard", async () => {
+    const r = await renderDue("FRA:flag:flagToCountry", "flag");
+    r.cleanup();
+    // Same country, also answered typed (not due): the due options card must be typed too.
+    due.rows = [
+      { ...orphanRow, conceptId: "FRA:flag:flagToCountry", iso3: "FRA", skill: "flag" },
+      { ...orphanRow, conceptId: "FRA:flag:flagToType", iso3: "FRA", skill: "flag", fsrs_due: Date.now() + 86_400_000 },
+    ];
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(<ReviewPage />);
+    });
+    for (let i = 0; i < 20 && !host.querySelector("input, button span.truncate"); i++) {
+      await act(async () => {
+        await new Promise((res) => setTimeout(res, 10));
+      });
+    }
+    expect(host.querySelector("input:not([type=hidden])")).not.toBeNull();
+    expect(host.querySelectorAll("button span.truncate").length).toBe(0);
+    act(() => root.unmount());
+    host.remove();
+  });
+});
+
+describe("Review keeps Spain cards learned by typing as typing", () => {
+  const ccaa = SPAIN_CCAA[0]!;
+  const province = SPAIN_PROVINCES[0]!;
+  it.each([
+    [`spain:${ccaa.id}:flag:flagToType`, "flag", ccaa.id],
+    [`spain:${ccaa.id}:name:nameType`, "name", ccaa.id],
+    [`spain:${province.id}:name:nameType`, "name", province.id],
+    [`spain:${ccaa.id}:capital:capital`, "capital", ccaa.id],
+  ])("%s gets a text box, not options", async (conceptId, skill, entityId) => {
+    const r = await renderDue(conceptId, skill, entityId);
+    expect(r.input()).not.toBeNull();
+    expect(r.options()).toBe(0);
     r.cleanup();
   });
 });

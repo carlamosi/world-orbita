@@ -45,6 +45,7 @@ export const cardFormatMocks = {
         answerState: "idle",
         missDelayMs: 2500,
         inSessionRetries: new Map(),
+        typedRecognition: new Set(),
         endedAt: null,
         status: "ready",
         score: 0,
