@@ -13,6 +13,7 @@ export const graded: { conceptId: string; ok: boolean; opts?: { retrievalMode?: 
 export const cardFormatMocks = {
   useSession: () => ({
     recognitionThenRecall: () => null,
+    promoteToRecall: () => () => null,
     createSessionStore: ({
       skill,
       domain = "world",
@@ -43,6 +44,7 @@ export const cardFormatMocks = {
         index: 0,
         answerState: "idle",
         missDelayMs: 2500,
+        inSessionRetries: new Map(),
         endedAt: null,
         status: "ready",
         score: 0,

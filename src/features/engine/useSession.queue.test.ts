@@ -4,7 +4,7 @@ import type { ConceptProgressRow } from "@/lib/db/orbita-db";
 
 // In-memory stand-in for Dexie (fake-indexeddb is not installed).
 const rows: ConceptProgressRow[] = [];
-const recorded: { conceptId: string; correct: boolean }[] = [];
+const recorded: { conceptId: string; correct: boolean; reps?: number; stateBefore?: number }[] = [];
 // Each Dexie read takes the next gate (if any) and waits on it, so tests can
 // control the order in which concurrent reads resolve.
 const gates: Promise<void>[] = [];
@@ -40,8 +40,8 @@ vi.mock("@/lib/db/orbita-db", () => ({
 }));
 vi.mock("@/lib/db/progressRepo", () => ({
   recordConceptAttempt: vi.fn(
-    async (_row: ConceptProgressRow, a: { conceptId: string; correct: boolean }) => {
-      recorded.push({ conceptId: a.conceptId, correct: a.correct });
+    async (row: ConceptProgressRow, a: { conceptId: string; correct: boolean }) => {
+      recorded.push({ conceptId: a.conceptId, correct: a.correct, reps: row.fsrs_reps });
     },
   ),
 }));
@@ -433,11 +433,15 @@ describe("new cards and empty state (FSRS-2)", () => {
     });
   });
 
-  it("a mixed session with a pick rule asks recall once recognition is stable", async () => {
+  it("a mixed session with a pick rule asks recall once recognition graduated, without waiting days", async () => {
     const [a, b, c] = COUNTRIES;
-    // a: recognition stable for 30 days, not due. b: recognition still young. c: never seen.
-    rows.push({ ...row(`${a!.iso3}:name:name`, a!.iso3, 5), skill: "name", fsrs_stability: 30 } as ConceptProgressRow);
-    rows.push({ ...row(`${b!.iso3}:name:name`, b!.iso3, 5), skill: "name", fsrs_stability: 2 } as ConceptProgressRow);
+    // a: recognition graduated today (two right in a row), not due: no waiting days.
+    // b: recognition still in its learning steps. c: never seen.
+    rows.push({ ...row(`${a!.iso3}:name:name`, a!.iso3, 0.5), skill: "name", fsrs_stability: 2 } as ConceptProgressRow);
+    rows.push({
+      ...learningRow(`${b!.iso3}:name:name`, b!.iso3, 10 * 60_000),
+      skill: "name",
+    } as ConceptProgressRow);
     const store = createSessionStore({
       mode: "name",
       skill: "name",
@@ -449,6 +453,96 @@ describe("new cards and empty state (FSRS-2)", () => {
     const ids = store.getState().conceptQueue.map((x) => x!.conceptId).sort();
     // a moves on to recall; b waits until its recognition is due; c starts as recognition.
     expect(ids).toEqual([`${a!.iso3}:name:nameType`, `${c!.iso3}:name:name`].sort());
+  });
+
+  describe("spaced-repetition invariants over whole sessions", () => {
+    /**
+     * Plays a session to the end: misses with a pick of another entity (some in the
+     * session, some not), skips and right answers. Returns what was shown when each
+     * grade was written.
+     */
+    async function playSession(store: ReturnType<typeof provinceStore>) {
+      const shownAtGrade: string[] = [];
+      const outsiders = SPAIN_PROVINCES.filter(
+        (p) => !store.getState().queue.some((e) => e.id === p.id),
+      );
+      let step = 0;
+      for (let guard = 0; guard < 200 && store.getState().endedAt === null; guard++) {
+        const st = store.getState();
+        const shown = st.queue[st.index]!;
+        const before = recorded.length;
+        const kind = step++ % 4;
+        if (kind === 0) {
+          // Confusion with an entity outside the session.
+          st.submit(false, { chosen: "x", chosenId: outsiders[step % outsiders.length]!.id });
+        } else if (kind === 1) {
+          // Confusion with an entity already in this session.
+          const other = st.queue.find((e) => e.id !== shown.id)!;
+          st.submit(false, { chosen: other.name, chosenId: other.id });
+        } else if (kind === 2) {
+          st.reveal();
+        } else {
+          st.submit(true);
+        }
+        if (recorded.length > before) shownAtGrade.push(shown.id);
+        store.getState().next();
+      }
+      expect(store.getState().endedAt).not.toBeNull();
+      return shownAtGrade;
+    }
+
+    it("each card is graded once per session, on the entity shown", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      const shownAtGrade = await playSession(store);
+
+      const ids = recorded.map((r) => r.conceptId);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(ids.map((id) => parseConceptId(id).entityId)).toEqual(shownAtGrade);
+    });
+
+    it("first-try correct never exceeds the distinct cards of the session", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      await playSession(store);
+      const st = store.getState();
+      expect(st.firstTryCorrect).toBeLessThanOrEqual(st.cardCount);
+      expect(st.cardCount).toBe(new Set(st.pairs.map((p) => p.conceptId)).size);
+    });
+
+    it("no contrast for an entity already asked this session (it would count twice)", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      const first = store.getState().queue[0]!;
+      store.getState().submit(true);
+      store.getState().next();
+      const n = store.getState().queue.length;
+      store.getState().submit(false, { chosenId: first.id });
+      // Only the retry of the miss is added.
+      expect(store.getState().queue).toHaveLength(n + 1);
+      expect(store.getState().queue.filter((e) => e.id === first.id)).toHaveLength(1);
+    });
+
+    it("a contrast question about a learned entity continues its progress, never resets it", async () => {
+      const store = provinceStore();
+      await store.getState().start({ subMode: "find" });
+      const inSession = new Set(store.getState().queue.map((e) => e.id));
+      const learned = SPAIN_PROVINCES.find((p) => !inSession.has(p.id))!;
+      rows.push({ ...row(findId(learned.id), learned.id, 5), fsrs_reps: 7 } as ConceptProgressRow);
+      await store.getState().start({ subMode: "find" });
+      store.getState().submit(false, { chosenId: learned.id });
+      // Answer up to and including the contrast slot.
+      for (let i = 0; i < 4; i++) {
+        store.getState().next();
+        if (store.getState().queue[store.getState().index]?.id === learned.id) {
+          store.getState().submit(true);
+          break;
+        }
+        store.getState().submit(true);
+      }
+      const graded = recorded.find((r) => r.conceptId === findId(learned.id));
+      expect(graded?.reps).toBe(8);
+    });
   });
 
   it("every entity seen, none due: empty with reason 'seenAll'", async () => {

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { Check, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { COUNTRY_BY_ISO3, pickDistractors } from "@/lib/countries";
-import { createSessionStore } from "@/features/engine/useSession";
+import { createSessionStore, promoteToRecall } from "@/features/engine/useSession";
+import { pickLookalikeDistractors } from "@/lib/flagLookalikes";
+import { flagQuestionLevel } from "./flagLevel";
 import { useAutoAdvance } from "@/features/engine/useAutoAdvance";
 import { useSkipHotkey } from "@/hooks/useSkipHotkey";
 import { SessionEnd } from "@/features/engine/SessionEnd";
@@ -24,18 +26,24 @@ import { spring } from "@/lib/motion";
 import type { Country } from "@/types/country";
 import { getPref, setPref } from "@/lib/db/repo";
 
-const useFlagSession = createSessionStore({ mode: "flag", skill: "flag" });
+// Adaptive: each flag climbs on its own, options -> look-alike options -> typing.
+const useFlagSession = createSessionStore({
+  mode: "flag",
+  skill: "flag",
+  mixedSubModes: ["flagToCountry", "flagToType"],
+  mixedPick: promoteToRecall("flagToCountry", "flagToType"),
+});
 
-type SubMode = "flagToCountry" | "flagToType";
+type SubMode = "adaptive" | "flagToType";
 
 const SUB_MODE_OPTIONS = [
-  { value: "flagToCountry" as const, label: "Easy (Flag → Country)" },
-  { value: "flagToType" as const, label: "Hard (Flag → Type)" },
+  { value: "adaptive" as const, label: "Adaptive" },
+  { value: "flagToType" as const, label: "Typing only" },
 ];
 
 export default function FlagsPage() {
   const s = useFlagSession();
-  const [sub, setSub] = useState<SubMode>("flagToCountry");
+  const [sub, setSub] = useState<SubMode>("adaptive");
   const [continent, setContinent] = useContinentPref();
   const current = s.queue[s.index] ?? null;
   const finished = s.endedAt !== null;
@@ -44,9 +52,8 @@ export default function FlagsPage() {
   // Persist sub-mode preference
   useEffect(() => {
     getPref("flags.sub").then((v) => {
-      if (v === "flagToCountry" || v === "flagToType") {
-        setSub(v as SubMode);
-      }
+      // The old Easy mode became Adaptive.
+      if (v) setSub(v === "flagToType" ? "flagToType" : "adaptive");
     });
   }, []);
   useEffect(() => {
@@ -55,9 +62,20 @@ export default function FlagsPage() {
 
   // Restart session whenever continent or sub-mode changes
   useEffect(() => {
-    void s.start({ continent: continent === "All" ? undefined : continent, subMode: sub });
+    void s.start({ continent: continent === "All" ? undefined : continent, subMode: sessionSubMode(sub) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continent, sub]);
+
+  // What this question asks comes from the card it grades, not from the menu.
+  // Frozen when the question appears: answering updates the card and the retry list,
+  // and the question on screen must not change under the feedback.
+  const pair = s.pairs[s.index];
+  const { showOptions, lookalikes: lookalikeLevel, scaffold } = useMemo(
+    () =>
+      flagQuestionLevel(pair?.conceptId, pair?.concept, !!pair && s.inSessionRetries.has(pair.conceptId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [s.startedAt, s.index, pair?.conceptId],
+  );
 
   useAutoAdvance({ answerState: s.answerState, finished, next: s.next, wrongDelayMs: s.missDelayMs });
 
@@ -74,23 +92,34 @@ export default function FlagsPage() {
   );
 
   const options = useMemo(() => {
-    if (!current || sub === "flagToType") return [];
-    const distractors = pickDistractors(current, 3, continent === "All" ? undefined : continent);
+    if (!current || !showOptions) return [];
+    const regular = pickDistractors(current, 3, continent === "All" ? undefined : continent);
+    const distractors = lookalikeLevel ? pickLookalikeDistractors(current, 3, regular) : regular;
     return shuffle([current, ...distractors]);
-  }, [current, sub, continent]);
+    // s.index: a new slot of the same flag (retry) gets fresh options.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, showOptions, lookalikeLevel, continent, s.index]);
 
   const hotkeyItems = useMemo(
     () =>
-      s.answerState === "idle" && sub !== "flagToType"
+      s.answerState === "idle" && showOptions
         ? options.map((o) => ({ id: o.iso3 }))
         : [],
-    [options, s.answerState, sub],
+    [options, s.answerState, showOptions],
   );
-  const onHotkey = useCallback(
-    (id: string) => current && s.submit(id === current.iso3, { chosen: COUNTRY_BY_ISO3.get(id)?.name, chosenId: id }),
-    [current, s],
+  // A right pick with support counts as a struggle (Hard) for the typed card.
+  const pick = useCallback(
+    (id: string) =>
+      current &&
+      s.submit(id === current.iso3, {
+        chosen: COUNTRY_BY_ISO3.get(id)?.name,
+        // With support the card is a typed one: a contrast would be a typed question about
+        // a flag that has not climbed its own ladder yet.
+        ...(scaffold ? { softCorrect: id === current.iso3 } : { chosenId: id }),
+      }),
+    [current, s, scaffold],
   );
-  useAnswerHotkeys(hotkeyItems, onHotkey);
+  useAnswerHotkeys(hotkeyItems, pick);
 
   const toolbar = (
     <div className="w-full max-w-5xl mx-auto px-4 md:px-6 mb-4 z-20 flex items-center justify-between gap-4">
@@ -115,35 +144,31 @@ export default function FlagsPage() {
               {/* Gameplay Content Area */}
               <div className="flex-1 w-full flex flex-col items-center px-4 md:px-6 pb-32 max-w-5xl gap-6 md:gap-8">
                 <PromptPill
-                  keyId={`${sub}-${current?.iso3 ?? ''}`}
+                  keyId={`${sub}-${s.index}-${current?.iso3 ?? ''}`}
                   index={s.index}
                   total={s.queue.length}
                   title={
-                    sub === "flagToCountry" ? (
-                      "Which country owns this flag?"
-                    ) : (
-                      "Name this flag"
-                    )
+                    showOptions ? "Which country owns this flag?" : "Type this flag's country"
                   }
                 />
 
                 <div className="w-full flex justify-center">
-                  {sub === "flagToCountry" && current ? (
+                  {current && showOptions ? (
                     <FlagToCountry
+                      key={s.index}
                       target={current}
                       options={options}
                       disabled={s.answerState !== "idle"}
-                      onPick={(iso3) => s.submit(iso3 === current.iso3, { chosen: COUNTRY_BY_ISO3.get(iso3)?.name, chosenId: iso3 })}
+                      onPick={(iso3) => pick(iso3)}
                     />
-                  ) : sub === "flagToCountry" ? null : (
-                    current ? (
-                      <FlagToType
-                        target={current}
-                        answerState={s.answerState}
-                        onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
-                      />
-                    ) : null
-                  )}
+                  ) : current ? (
+                    <FlagToType
+                      key={s.index}
+                      target={current}
+                      answerState={s.answerState}
+                      onSubmit={(ok, exact, typed) => s.submit(ok, { retrievalMode: "hard", softCorrect: ok && !exact, chosen: typed })}
+                    />
+                  ) : null}
                 </div>
               </div>
 
@@ -190,7 +215,7 @@ export default function FlagsPage() {
         bestCombo={s.bestCombo}
         durationMs={(s.endedAt ?? 0) - s.startedAt}
         missedItems={s.missedItems}
-        onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sub })}
+        onReplay={() => s.start({ continent: continent === "All" ? undefined : continent, subMode: sessionSubMode(sub) })}
       />
     </div>
   );
@@ -364,4 +389,9 @@ function shuffle<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j]!, a[i]!];
   }
   return a;
+}
+
+/** Adaptive plays the mixed session (each flag at its own level); Typing only plays recall cards. */
+function sessionSubMode(sub: SubMode): string {
+  return sub === "adaptive" ? "mixed" : "flagToType";
 }
