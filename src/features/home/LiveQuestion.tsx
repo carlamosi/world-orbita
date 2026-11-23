@@ -91,19 +91,20 @@ export function LiveQuestion() {
     () =>
       COUNTRIES.map((c) => {
         const p = project(c.coordinates[0], c.coordinates[1], lat0, viewLng);
-        return p ? { iso3: c.iso3, ...p } : null;
+        return p ? { iso3: c.iso3, a: c.area, ...p } : null;
       }).filter((d): d is NonNullable<typeof d> => d !== null),
     [lat0, viewLng],
   );
   const graticule = useMemo(() => graticulePath(lat0, viewLng), [lat0, viewLng]);
   const hit = dots.find((d) => d.iso3 === question.answer);
-  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (reduced) return;
+  const drag = useRef<{ x: number; y: number; bx: number; by: number } | null>(null);
+  const backTimer = useRef<number | undefined>(undefined);
+  const [dragging, setDragging] = useState(false);
+  const toSvg = (e: React.PointerEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width;
-    const py = (e.clientY - r.top) / r.height;
-    tx.set((px - 0.5) * 36);
-    ty.set((0.5 - py) * 20);
+    return { px: (e.clientX - r.left) / r.width, py: (e.clientY - r.top) / r.height };
+  };
+  const nearest = (px: number, py: number) => {
     const sx = -20 + px * 440;
     const sy = -20 + py * 440;
     let best: { iso3: string; x: number; y: number } | null = null;
@@ -115,9 +116,43 @@ export function LiveQuestion() {
         best = { iso3: d.iso3, x: d.x, y: d.y };
       }
     }
-    setNear(best);
+    return best;
+  };
+  const onDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    window.clearTimeout(backTimer.current);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { x: e.clientX, y: e.clientY, bx: tx.get(), by: ty.get() };
+    setDragging(true);
+    setNear(null);
+  };
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const { px, py } = toSvg(e);
+    if (drag.current) {
+      const d = drag.current;
+      tx.set(d.bx - (e.clientX - d.x) * 0.35);
+      ty.set(Math.max(-45, Math.min(45, d.by + (e.clientY - d.y) * 0.25)));
+      return;
+    }
+    if (reduced) {
+      setNear(nearest(px, py));
+      return;
+    }
+    tx.set((px - 0.5) * 30);
+    ty.set((0.5 - py) * 16);
+    setNear(nearest(px, py));
+  };
+  // Letting go sends the globe back to the question after a calm pause.
+  const release = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    setDragging(false);
+    backTimer.current = window.setTimeout(() => {
+      tx.set(0);
+      ty.set(0);
+    }, 2200);
   };
   const onLeave = () => {
+    if (drag.current) return;
     tx.set(0);
     ty.set(0);
     setNear(null);
@@ -136,9 +171,13 @@ export function LiveQuestion() {
         viewBox="-20 -20 440 440"
         role="img"
         aria-label="A globe with one country highlighted in violet"
+        onPointerDown={onDown}
         onPointerMove={onMove}
+        onPointerUp={release}
+        onPointerCancel={release}
         onPointerLeave={onLeave}
-        className="w-full max-w-[560px] mx-auto"
+        style={{ touchAction: "pan-y" }}
+        className={cn("w-full max-w-[560px] mx-auto select-none", dragging ? "cursor-grabbing" : "cursor-grab")}
       >
         <defs>
           <radialGradient id="home-sphere" cx="34%" cy="30%" r="85%">
@@ -157,14 +196,23 @@ export function LiveQuestion() {
           </linearGradient>
         </defs>
         <circle cx="200" cy="200" r={R + 24} fill="url(#home-atmo)" />
+        <g transform="rotate(-18 200 200)" aria-hidden="true">
+          <ellipse cx="200" cy="200" rx={R + 34} ry="52" fill="none" stroke="#9ea7ff" strokeOpacity="0.16" strokeWidth="0.8" />
+          {!reduced && (
+            <circle r="2.6" fill="#a5a0ff">
+              <animateMotion dur="36s" repeatCount="indefinite" path={`M ${200 - (R + 34)} 200 a ${R + 34} 52 0 1 0 ${(R + 34) * 2} 0 a ${R + 34} 52 0 1 0 ${-(R + 34) * 2} 0`} />
+            </circle>
+          )}
+        </g>
         <circle cx="200" cy="200" r={R + 6} fill="url(#home-sphere)" />
         <path d={graticule} fill="none" stroke="#9ea7ff" strokeOpacity="0.16" strokeWidth="0.6" />
         {dots.map((d) =>
           d.iso3 === question.answer ? null : (
-            <circle key={d.iso3} cx={d.x} cy={d.y} r={(1.2 + d.z * 1.4).toFixed(2)} fill="#f4f5fb" opacity={(0.1 + d.z * 0.45).toFixed(2)} />
+            <circle key={d.iso3} cx={d.x} cy={d.y} r={((0.9 + Math.min(2.2, Math.sqrt(d.a) / 1100)) * (0.6 + d.z * 0.7)).toFixed(2)} fill="#f4f5fb" opacity={(0.1 + d.z * 0.45).toFixed(2)} />
           ),
         )}
         <circle cx="200" cy="200" r={R + 6} fill="url(#home-shade)" />
+        <ellipse cx="150" cy="120" rx="95" ry="70" fill="#fff" fillOpacity="0.035" />
         <circle cx="200" cy="200" r={R + 6} fill="none" stroke="#00d4ff" strokeOpacity="0.28" strokeWidth="1" />
         {near && near.iso3 !== question.answer && (
           <g aria-hidden="true">
@@ -187,8 +235,13 @@ export function LiveQuestion() {
                 style={{ transformOrigin: `${hit.x}px ${hit.y}px` }}
               />
             )}
-            <circle cx={hit.x} cy={hit.y} r={11} fill="var(--violet)" fillOpacity="0.25" />
-            <circle cx={hit.x} cy={hit.y} r={6} fill="#a5a0ff" />
+            <circle cx={hit.x} cy={hit.y} r={11} fill={answered ? (correct ? "#00ffb2" : "#ff6b6b") : "#6c63ff"} fillOpacity="0.25" />
+            <circle cx={hit.x} cy={hit.y} r={6} fill={answered ? (correct ? "#00ffb2" : "#ff6b6b") : "#a5a0ff"} />
+            {answered && (
+              <text x={hit.x} y={hit.y - 16} textAnchor="middle" fontSize="13" fontWeight="500" fill="#f4f5fb" stroke="#050508" strokeWidth="3" paintOrder="stroke">
+                {target.name}
+              </text>
+            )}
           </g>
         )}
         {near && near.iso3 !== question.answer && (
@@ -197,6 +250,7 @@ export function LiveQuestion() {
           </text>
         )}
       </svg>
+      <p className="-mt-2 text-center text-sm text-white/60">Drag to turn the globe. Hover a marker for its name.</p>
 
       <div className="glass rounded-2xl p-5 md:p-6">
         <h2 className="font-display text-xl font-medium tracking-tight text-white">Which country is highlighted?</h2>
