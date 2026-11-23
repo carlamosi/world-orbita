@@ -65,7 +65,8 @@ function Home() {
       <MapSection mastery={mastery} learned={learned} total={total} due={due} />
       <ModesSection />
       {!user && <GuestSave />}
-      <footer className="px-6 py-10 text-center text-sm text-white/55 border-t border-white/5">Orbita</footer>
+      <FinalCta due={due} onBegin={begin} />
+      <Footer />
       <OnboardingOverlay open={onboarding} onComplete={done} onSkip={done} />
     </main>
   );
@@ -77,7 +78,7 @@ function Hero({ due, onBegin, signedIn }: { due: number; onBegin: () => void; si
   const lift = useTransform(scrollY, [0, 600], [0, reduced ? 0 : -48]);
   const copyFade = useTransform(scrollY, [0, 500], [1, reduced ? 1 : 0.35]);
   return (
-    <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 pb-24 pt-32 lg:grid-cols-[1.05fr_1fr] lg:gap-16 lg:pt-36">
+    <section className="mx-auto grid min-h-[min(900px,100dvh)] max-w-[1440px] items-center gap-10 px-6 pb-16 pt-24 md:px-12 lg:grid-cols-[1fr_1fr] lg:gap-14">
       <motion.div
         variants={stagger(0.05, 0.08)}
         initial="hidden"
@@ -87,7 +88,7 @@ function Hero({ due, onBegin, signedIn }: { due: number; onBegin: () => void; si
       >
         <motion.h1
           variants={fadeUp}
-          className="font-display font-semibold tracking-[-0.035em] text-white text-[clamp(2.75rem,6.4vw,5.5rem)] leading-[0.98] text-balance"
+          className="font-display font-semibold tracking-[-0.035em] text-white text-[clamp(2.75rem,6.8vw,6.5rem)] leading-[0.98] text-balance"
         >
           Fill in the whole map.
         </motion.h1>
@@ -98,10 +99,10 @@ function Hero({ due, onBegin, signedIn }: { due: number; onBegin: () => void; si
         <motion.div variants={fadeUp} className="flex flex-col items-start gap-3">
           {due > 0 ? (
             <Link to="/review">
-              <Button size="lg">Review {due} due today</Button>
+              <Button size="lg" className="h-16 px-10 text-lg">Review {due} due today</Button>
             </Link>
           ) : (
-            <Button size="lg" onClick={onBegin}>
+            <Button size="lg" onClick={onBegin} className="h-16 px-10 text-lg">
               Start playing
             </Button>
           )}
@@ -136,7 +137,7 @@ function MapSection({
   due: number;
 }) {
   return (
-    <section className="mx-auto max-w-6xl px-6 pb-28">
+    <section className="mx-auto max-w-[1440px] px-6 pb-28 md:px-12">
       <Reveal className="mb-10 flex flex-wrap items-end justify-between gap-6">
         <div>
           <h2 className="font-display text-4xl font-semibold tracking-tight text-white md:text-5xl">Your map</h2>
@@ -158,7 +159,7 @@ function MapSection({
 function ModesSection() {
   const reduced = useReducedMotion();
   return (
-    <section className="mx-auto grid max-w-6xl gap-10 px-6 pb-28 lg:grid-cols-[320px_1fr] lg:gap-20">
+    <section className="mx-auto grid max-w-[1440px] gap-10 px-6 pb-28 md:px-12 lg:grid-cols-[320px_1fr] lg:gap-20">
       <Reveal>
         <h2 className="font-display text-4xl font-semibold tracking-tight text-white md:text-5xl text-balance">
           Seven ways to practice
@@ -196,9 +197,58 @@ function ModesSection() {
   );
 }
 
+function FinalCta({ due, onBegin }: { due: number; onBegin: () => void }) {
+  return (
+    <section className="mx-auto max-w-[1440px] px-6 pb-28 md:px-12">
+      <Reveal className="flex flex-col items-center gap-8 text-center">
+        <h2 className="font-display text-4xl font-semibold tracking-tight text-white md:text-6xl text-balance">
+          Start with one question.
+        </h2>
+        {due > 0 ? (
+          <Link to="/review">
+            <Button size="lg" className="h-16 px-10 text-lg">Review {due} due today</Button>
+          </Link>
+        ) : (
+          <Button size="lg" onClick={onBegin} className="h-16 px-10 text-lg">
+            Start playing
+          </Button>
+        )}
+      </Reveal>
+    </section>
+  );
+}
+
+function Footer() {
+  const links = [
+    { to: "/explorer", label: "Explorer" },
+    { to: "/progress", label: "Progress" },
+    { to: "/flags", label: "Flags" },
+    { to: "/capitals", label: "Capitals" },
+    { to: "/spain", label: "Spain" },
+  ];
+  return (
+    <footer className="border-t border-white/10 px-6 py-10 md:px-12">
+      <div className="mx-auto flex max-w-[1440px] flex-col items-start justify-between gap-6 text-sm text-white/60 md:flex-row md:items-center">
+        <p>
+          <span className="font-display font-medium text-white">Orbita</span>
+          <span className="ml-3">Learn every country, capital and flag.</span>
+        </p>
+        <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2">
+          {links.map((l) => (
+            <Link key={l.to} to={l.to} className="outline-none hover:text-white focus-visible:text-white">
+              {l.label}
+            </Link>
+          ))}
+        </nav>
+        <p>{new Date().getFullYear()}</p>
+      </div>
+    </footer>
+  );
+}
+
 function GuestSave() {
   return (
-    <section className="mx-auto max-w-6xl px-6 pb-24">
+    <section className="mx-auto max-w-[1440px] px-6 pb-24 md:px-12">
       <Reveal className="glass-strong flex flex-col items-start justify-between gap-8 rounded-3xl p-8 md:flex-row md:items-center md:p-12">
         <div>
           <h2 className="font-display text-2xl font-semibold tracking-tight text-white md:text-3xl">

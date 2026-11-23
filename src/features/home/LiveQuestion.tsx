@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { animate, motion, useReducedMotion, useScroll, useMotionValueEvent } from "framer-motion";
+import { animate, motion, useReducedMotion, useScroll, useMotionValueEvent, useSpring } from "framer-motion";
 import { COUNTRIES, COUNTRY_BY_ISO3 } from "@/lib/countries";
 import { spring } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -78,17 +78,50 @@ export function LiveQuestion() {
     return () => c.stop();
   }, [target, reduced]);
 
-  const lat0 = target.coordinates[0] * 0.6;
+  // Pointer over the globe tilts it toward the cursor and names the nearest country.
+  const tx = useSpring(0, spring.soft);
+  const ty = useSpring(0, spring.soft);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const [near, setNear] = useState<{ iso3: string; x: number; y: number } | null>(null);
+  useMotionValueEvent(tx, "change", (v) => setTilt((t) => ({ ...t, x: v })));
+  useMotionValueEvent(ty, "change", (v) => setTilt((t) => ({ ...t, y: v })));
+  const lat0 = target.coordinates[0] * 0.6 + tilt.y;
+  const viewLng = lng0 + drift + tilt.x;
   const dots = useMemo(
     () =>
       COUNTRIES.map((c) => {
-        const p = project(c.coordinates[0], c.coordinates[1], lat0, lng0 + drift);
+        const p = project(c.coordinates[0], c.coordinates[1], lat0, viewLng);
         return p ? { iso3: c.iso3, ...p } : null;
       }).filter((d): d is NonNullable<typeof d> => d !== null),
-    [lat0, lng0, drift],
+    [lat0, viewLng],
   );
-  const graticule = useMemo(() => graticulePath(lat0, lng0 + drift), [lat0, lng0, drift]);
+  const graticule = useMemo(() => graticulePath(lat0, viewLng), [lat0, viewLng]);
   const hit = dots.find((d) => d.iso3 === question.answer);
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (reduced) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width;
+    const py = (e.clientY - r.top) / r.height;
+    tx.set((px - 0.5) * 36);
+    ty.set((0.5 - py) * 20);
+    const sx = -20 + px * 440;
+    const sy = -20 + py * 440;
+    let best: { iso3: string; x: number; y: number } | null = null;
+    let bd = 14 * 14;
+    for (const d of dots) {
+      const dd = (d.x - sx) ** 2 + (d.y - sy) ** 2;
+      if (dd < bd) {
+        bd = dd;
+        best = { iso3: d.iso3, x: d.x, y: d.y };
+      }
+    }
+    setNear(best);
+  };
+  const onLeave = () => {
+    tx.set(0);
+    ty.set(0);
+    setNear(null);
+  };
   const answered = picked !== null;
   const correct = picked === question.answer;
 
@@ -103,7 +136,9 @@ export function LiveQuestion() {
         viewBox="-20 -20 440 440"
         role="img"
         aria-label="A globe with one country highlighted in violet"
-        className="w-full max-w-[460px] mx-auto"
+        onPointerMove={onMove}
+        onPointerLeave={onLeave}
+        className="w-full max-w-[560px] mx-auto"
       >
         <defs>
           <radialGradient id="home-sphere" cx="34%" cy="30%" r="85%">
@@ -131,6 +166,12 @@ export function LiveQuestion() {
         )}
         <circle cx="200" cy="200" r={R + 6} fill="url(#home-shade)" />
         <circle cx="200" cy="200" r={R + 6} fill="none" stroke="#00d4ff" strokeOpacity="0.28" strokeWidth="1" />
+        {near && near.iso3 !== question.answer && (
+          <g aria-hidden="true">
+            <circle cx={near.x} cy={near.y} r="9" fill="none" stroke="#00d4ff" strokeOpacity="0.6" />
+            <circle cx={near.x} cy={near.y} r="3.2" fill="#00d4ff" />
+          </g>
+        )}
         {hit && (
           <g>
             {!reduced && (
@@ -149,6 +190,11 @@ export function LiveQuestion() {
             <circle cx={hit.x} cy={hit.y} r={11} fill="var(--violet)" fillOpacity="0.25" />
             <circle cx={hit.x} cy={hit.y} r={6} fill="#a5a0ff" />
           </g>
+        )}
+        {near && near.iso3 !== question.answer && (
+          <text x={near.x} y={near.y - 15} textAnchor="middle" fontSize="12" fill="#f4f5fb" stroke="#050508" strokeWidth="3" paintOrder="stroke">
+            {COUNTRY_BY_ISO3.get(near.iso3)?.name}
+          </text>
         )}
       </svg>
 
